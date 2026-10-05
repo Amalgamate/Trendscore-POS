@@ -1,0 +1,21 @@
+# Normalise line endings on checkout, commit LF in the repo.
+* text=auto eol=lf
+
+# Windows scripts must stay CRLF or cmd.exe misparses them.
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+
+# Flutter/Dart
+*.dart text eol=lf
+
+# Lockfiles must never be line-ending converted.
+package-lock.json -text
+pubspec.lock -text
+
+# Binary assets
+*.png binary
+*.jpg binary
+*.ico binary
+*.pdf binary
+*.woff2 binary

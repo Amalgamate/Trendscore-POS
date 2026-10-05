@@ -1,0 +1,474 @@
+// Control Plane schema — Retail OS
+//
+// SCOPE: infrastructure, accounts, billing, provisioning.
+// This database NEVER holds shop business data (sales, stock, customers).
+// Each shop instance owns its own database. See docs/adr/0001-isolation.md.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum AccountStatus {
+  PENDING_VERIFICATION
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum BusinessType {
+  GENERAL_RETAIL
+  GROCERY
+  HARDWARE
+  PHARMACY
+  BOOKSELLING
+  ELECTRONICS
+  CLOTHING
+  OTHER
+}
+
+enum SubscriptionState {
+  // Trial-first funnel: an instance is provisioned immediately and the
+  // owner is asked to pay at the end of the trial.
+  TRIALING
+  PAYMENT_DUE
+  ACTIVE
+  PAST_DUE
+  SUSPENDED
+  CANCELLED
+  EXPIRED
+}
+
+enum InvoiceStatus {
+  DRAFT
+  ISSUED
+  PAID
+  FAILED
+  VOID
+  OVERDUE
+}
+
+enum PaymentProvider {
+  MPESA
+  // Card deliberately omitted from v1. Kenya SMBs largely lack card API
+  // access, and removing it eliminates third-party settlement entirely:
+  // every sale is either cash or settled into our own merchant account.
+  // A CardProvider can be added later without touching the POS, because
+  // the POS only ever calls PaymentProvider.process().
+}
+
+enum PaymentStatus {
+  INITIATED
+  PROMPT_SENT
+  WAITING
+  SUCCESS
+  FAILED
+  CANCELLED
+  // TIMEOUT is NOT terminal. A timed-out M-Pesa prompt can still settle
+  // later, so it is reconciled rather than treated as a hard failure.
+  TIMEOUT
+  // UNKNOWN means we cannot yet tell. Never collapse this into FAILED.
+  UNKNOWN
+  REFUNDED
+}
+
+enum InstanceStatus {
+  PROVISIONING
+  READY
+  SUSPENDED
+  DEPROVISIONING
+  FAILED
+  DELETED
+}
+
+enum HealthStatus {
+  HEALTHY
+  DEGRADED
+  UNHEALTHY
+  UNKNOWN
+}
+
+enum ProvisioningStepStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+// ---------------------------------------------------------------- account
+
+model Account {
+  id           String        @id @default(uuid()) @db.Uuid
+  phone        String        @unique
+  email        String?       @unique
+  fullName     String
+  passwordHash String
+  status       AccountStatus @default(PENDING_VERIFICATION)
+  verifiedAt   DateTime?
+  lastLoginAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+
+  businesses Business[]
+  otpCodes   OtpCode[]
+
+  @@map("accounts")
+}
+
+/// Phone OTP verification. Codes are hashed; we never store a usable code.
+model OtpCode {
+  id         String    @id @default(uuid()) @db.Uuid
+  accountId  String    @db.Uuid
+  codeHash   String
+  purpose    String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  attempts   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  account Account @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, purpose])
+  @@index([expiresAt])
+  @@map("otp_codes")
+}
+
+// ---------------------------------------------------------------- business
+
+model Business {
+  id           String       @id @default(uuid()) @db.Uuid
+  accountId    String       @db.Uuid
+  name         String
+  slug         String       @unique
+  businessType BusinessType @default(GENERAL_RETAIL)
+  location     String?
+  county       String?
+  logoUrl      String?
+  phone        String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  account       Account        @relation(fields: [accountId], references: [id], onDelete: Restrict)
+  subscriptions Subscription[]
+  instances     Instance[]
+  setupSteps    SetupStep[]
+
+  @@map("businesses")
+}
+
+/// Tracks the post-provisioning wizard. Setup is never forced: the owner
+/// may skip optional steps and enter the POS at any time.
+model SetupStep {
+  id          String    @id @default(uuid()) @db.Uuid
+  businessId  String    @db.Uuid
+  key         String
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, key])
+  @@map("setup_steps")
+}
+
+// ---------------------------------------------------------------- billing
+
+model Plan {
+  id          String   @id @default(uuid()) @db.Uuid
+  code        String   @unique
+  name        String
+  description String?
+  monthlyKsh  Decimal  @db.Decimal(14, 2)
+  trialDays   Int      @default(7)
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  subscriptions Subscription[]
+
+  @@map("plans")
+}
+
+model Subscription {
+  id         String            @id @default(uuid()) @db.Uuid
+  businessId String            @db.Uuid
+  planId     String            @db.Uuid
+  state      SubscriptionState @default(TRIALING)
+
+  trialStartedAt     DateTime  @default(now())
+  trialEndsAt        DateTime
+  gracePeriodEndsAt  DateTime?
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  autoSuspendAt      DateTime?
+  cancelledAt        DateTime?
+
+  /// Saved at signup and reused for automatic monthly prompts.
+  mpesaMsisdn String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  business Business          @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  plan      Plan              @relation(fields: [planId], references: [id], onDelete: Restrict)
+  invoices  Invoice[]
+  payments  Payment[]
+
+  @@index([state])
+  @@index([trialEndsAt])
+  @@index([autoSuspendAt])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id             String        @id @default(uuid()) @db.Uuid
+  subscriptionId String        @db.Uuid
+  number         String        @unique
+  amountKsh      Decimal       @db.Decimal(14, 2)
+  status         InvoiceStatus @default(ISSUED)
+  periodStart    DateTime
+  periodEnd      DateTime
+  dueAt          DateTime
+  paidAt         DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  subscription Subscription @relation(fields: [subscriptionId], references: [id], onDelete: Cascade)
+  payments     Payment[]
+
+  @@index([subscriptionId, status])
+  @@map("invoices")
+}
+
+/// Every M-Pesa attempt. Idempotency is enforced by merchantReconciliationId
+/// so a Daraja callback retry can never create a second payment row.
+model Payment {
+  id             String    @id @default(uuid()) @db.Uuid
+  invoiceId      String?   @db.Uuid
+  subscriptionId String?   @db.Uuid
+
+  provider     PaymentProvider @default(MPESA)
+  status       PaymentStatus   @default(INITIATED)
+  amountKsh    Decimal         @db.Decimal(14, 2)
+  msisdn       String
+  accountReference String?
+
+  /// Our idempotency key, sent to Daraja as MerchantReconciliationID.
+  merchantReconciliationId String  @unique
+  /// Daraja's CheckoutRequestID from the STK push response.
+  checkoutRequestId String?
+  /// Daraja's receipt number. Unique — a duplicate insert means a replayed callback.
+  mpesaReceipt      String? @unique
+
+  initiatedAt       DateTime  @default(now())
+  settledAt         DateTime?
+  failedAt          DateTime?
+  resultCode        String?
+  resultDesc        String?
+  callbackReceivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  invoice      Invoice?      @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([msisdn])
+  @@map("payments")
+}
+
+// ------------------------------------------------------- infrastructure
+
+/// One shop = one instance = one database. See ADR-0001.
+model Instance {
+  id         String         @id @default(uuid()) @db.Uuid
+  businessId String         @db.Uuid
+  /// Short, human-quotable id used in logs and support tickets.
+  shortId    String         @unique
+  status     InstanceStatus @default(PROVISIONING)
+  region     String         @default("ke-nairobi-1")
+  hostId     String?
+
+  /// Pinned image tags. Instances never run :latest — rollback requires immutability.
+  backendImage  String
+  frontendImage String
+  version       String
+
+  /// Entitlement pushed DOWN from the control plane. A shop instance must
+  /// never call the control plane on the POS hot path, so this is cached
+  /// locally with a TTL and refreshed by webhook.
+  entitlement        String         @default("TRIALING")
+  entitlementSyncedAt DateTime?
+
+  resourceCpuCores  Int     @default(1)
+  resourceMemoryMb  Int     @default(1024)
+  diskQuotaGb       Int     @default(20)
+  storageUsedMb     Int     @default(0)
+
+  lastHealthAt     DateTime?
+  lastBackupAt     DateTime?
+  lastBackupStatus String?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  readyAt     DateTime?
+  deletedAt   DateTime?
+
+  business       Business           @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  host           Host?              @relation(fields: [hostId], references: [id], onDelete: SetNull)
+  domains        Domain[]
+  deployments    Deployment[]
+  healthChecks   HealthCheck[]
+  backups        Backup[]
+  provisioningSteps ProvisioningStep[]
+
+  @@index([status])
+  @@index([businessId])
+  @@index([entitlement])
+  @@map("instances")
+}
+
+/// Hosts are dedicated to provisioning. The provisioning worker holds the
+/// Docker socket on this host, which is root-equivalent — no other workload
+/// may ever share it.
+model Host {
+  id             String   @id @default(uuid()) @db.Uuid
+  name           String   @unique
+  region         String
+  sshHost        String
+  cpuCores       Int
+  memoryMb       Int
+  diskGb         Int
+  dockerSocketPath String
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+
+  instances Instance[]
+
+  @@map("hosts")
+}
+
+model Domain {
+  id         String   @id @default(uuid()) @db.Uuid
+  instanceId String   @db.Uuid
+  hostname   String   @unique
+  /// wildcard | custom
+  type       String   @default("wildcard")
+  primary    Boolean  @default(true)
+  tlsExpiresAt DateTime?
+  active     Boolean  @default(true)
+  createdAt  DateTime @default(now())
+
+  instance Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId])
+  @@map("domains")
+}
+
+/// Append-only history of every image the instance has run. Enables rollback
+/// and answers "what version was this shop on when the discrepancy happened?"
+model Deployment {
+  id         String   @id @default(uuid()) @db.Uuid
+  instanceId String   @db.Uuid
+  version    String
+  backendImage  String
+  frontendImage String
+  status     String   @default("PENDING")
+  reason     String?
+  initiatedBy String?
+  startedAt  DateTime @default(now())
+  finishedAt DateTime?
+
+  instance Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId, startedAt])
+  @@map("deployments")
+}
+
+model HealthCheck {
+  id         String       @id @default(uuid()) @db.Uuid
+  instanceId String       @db.Uuid
+  component  String
+  /// application | backend | postgres | redis | backup | storage | ssl
+  status     HealthStatus @default(UNKNOWN)
+  latencyMs  Int?
+  message    String?
+  checkedAt  DateTime     @default(now())
+
+  instance Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId, checkedAt])
+  @@index([component, status])
+  @@map("health_checks")
+}
+
+model Backup {
+  id          String   @id @default(uuid()) @db.Uuid
+  instanceId  String   @db.Uuid
+  /// full | daily | pre-upgrade
+  kind        String   @default("daily")
+  sizeBytes   BigInt   @default(0)
+  storageKey  String
+  checksum    String?
+  status      String   @default("PENDING")
+  startedAt   DateTime @default(now())
+  completedAt DateTime?
+  verifiedAt  DateTime?
+
+  instance Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([instanceId, startedAt])
+  @@index([status])
+  @@map("backups")
+}
+
+/// Per-step provisioning progress. This is what streams to the onboarding
+/// screen, so it must be written as each step runs — not batched at the end.
+model ProvisioningStep {
+  id          String                  @id @default(uuid()) @db.Uuid
+  instanceId  String                  @db.Uuid
+  stepKey     String
+  displayName String
+  status      ProvisioningStepStatus  @default(PENDING)
+  position    Int
+  message     String?
+  errorDetail String?
+  startedAt   DateTime?
+  finishedAt  DateTime?
+
+  instance Instance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@unique([instanceId, stepKey])
+  @@index([instanceId, position])
+  @@map("provisioning_steps")
+}
+
+/// Infrastructure-level audit trail. Distinct from the shop instance's own
+/// audit log, which records business actions (sales, refunds, adjustments).
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  actorId    String?
+  actorType  String   @default("system")
+  action     String
+  entityType String
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  beforeJson Json?
+  afterJson  Json?
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId, createdAt])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

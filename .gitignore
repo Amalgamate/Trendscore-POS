@@ -1,0 +1,39 @@
+node_modules/
+dist/
+build/
+.next/
+out/
+
+# Flutter / Dart
+.dart_tool/
+.packages
+.pub-cache/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+apps/shop_pos/.idea/
+
+# Environment / secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+# Local runtime state for provisioned shop instances
+infra/provisioning/instances/
+/var/lib/retail-os/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.log
+.vscode/
+.idea/
+
+# Local verification artefacts
+*.log
+migrate-test.cmd
+validate-schema.cmd
+

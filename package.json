@@ -1,0 +1,25 @@
+{
+  "name": "retail-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Fintech-grade Retail Operating System - Kenya-first POS with per-shop isolated instances",
+  "workspaces": [
+    "packages/*",
+    "apps/control-plane-api",
+    "apps/shop-api",
+    "apps/web"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build:tokens": "node packages/design-tokens/build.mjs",
+    "db:generate:control": "npm run prisma:generate -w control-plane-api",
+    "db:generate:shop": "npm run prisma:generate -w shop-api",
+    "db:migrate:control": "npm run prisma:migrate -w control-plane-api",
+    "db:migrate:shop": "npm run prisma:migrate -w shop-api",
+    "test": "npm run test -w payment-provider && npm run test -w control-plane-api && npm run test -w shop-api",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  }
+}

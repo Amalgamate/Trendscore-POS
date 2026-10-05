@@ -1,0 +1,736 @@
+// Shop Instance schema — Retail OS
+//
+// SCOPE: one shop's business data ONLY. Every provisioned instance runs
+// this same schema against its own PostgreSQL database. No shared tenant
+// table, no control-plane cross-join. See ADR-0001.
+//
+// Money is NUMERIC(14,2) everywhere. Never float.
+// Financial records are APPEND-ONLY: corrections happen via reversing
+// entries, never UPDATE or DELETE. See migrations/ for the triggers that
+// enforce this at the database level.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------- enums
+
+enum UserRole {
+  OWNER
+  MANAGER
+  CASHIER
+  STOCK_CLERK
+}
+
+enum PaymentMethod {
+  CASH
+  MPESA
+  // Card intentionally absent in v1.
+  CREDIT
+  BANK
+}
+
+enum SaleStatus {
+  DRAFT
+  COMPLETED
+  PARTIALLY_REFUNDED
+  REFUNDED
+  VOIDED
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+  TIMEOUT
+  UNKNOWN
+  REVERSED
+}
+
+enum StockMovementType {
+  PURCHASE
+  SALE
+  RETURN_TO_SUPPLIER
+  ADJUSTMENT_IN
+  ADJUSTMENT_OUT
+  DAMAGE
+  EXPIRY
+  RETURN_FROM_CUSTOMER
+  TRANSFER_IN
+  TRANSFER_OUT
+  /// Offline sync created a negative position; needs manager resolution.
+  VARIANCE
+}
+
+enum CashSessionStatus {
+  OPEN
+  CLOSED
+  RECONCILED
+}
+
+enum CashMovementType {
+  PAID_IN
+  PAID_OUT
+  DROP_TO_BANK
+  CASH_REFUND
+  EXPENSE
+  ADJUSTMENT
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum LedgerDirection {
+  DEBIT
+  CREDIT
+}
+
+enum EntityType {
+  SALE
+  PURCHASE
+  REFUND
+  ADJUSTMENT
+  EXPENSE
+  CUSTOMER_PAYMENT
+  SUPPLIER_PAYMENT
+  CASH_SESSION
+  OPENING_BALANCE
+}
+
+enum LedgerEntryType {
+  DEBIT
+  CREDIT
+}
+
+enum ExpenseStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  POSTED
+  VOID
+}
+
+// ---------------------------------------------------------------- users
+
+model User {
+  id           String   @id @default(uuid()) @db.Uuid
+  fullName     String
+  phone        String   @unique
+  /// PIN for fast till login. Hashed with argon2. Rate-limited at the edge.
+  pinHash      String
+  role         UserRole @default(CASHIER)
+  active       Boolean  @default(true)
+  lastLoginAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  cashSessions      CashSession[]
+  sales             Sale[]
+  cashMovements     CashMovement[]
+  auditLogs         AuditLog[]
+  approvalsGiven    Approval[]        @relation("ApprovedBy")
+  approvalsRequested Approval[]       @relation("ApprovalRequestedBy")
+  expensesRequested Expense[]        @relation("RequestedBy")
+  stockMovements    StockMovement[]
+
+  @@map("users")
+}
+
+/// Fine-grained permission overrides, layered on top of UserRole.
+model Permission {
+  id          String           @id @default(uuid()) @db.Uuid
+  code        String           @unique
+  description String?
+  roles       RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  role         UserRole
+  permissionId String   @db.Uuid
+
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([role, permissionId])
+  @@map("role_permissions")
+}
+
+// ---------------------------------------------------------------- business
+
+model Business {
+  id       String @id @default(uuid()) @db.Uuid
+  name     String
+  slug     String @unique
+  logoUrl  String?
+  phone    String?
+  email    String?
+  address  String?
+  county   String?
+  /// Kenyan VAT is 16%. Stored as a decimal rate, never a float.
+  vatRate  Decimal @default(0.16) @db.Decimal(5, 4)
+  currency String  @default("KES")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  categories   Category[]
+  products     Product[]
+  customers    Customer[]
+  suppliers    Supplier[]
+  sales        Sale[]
+  purchases    Purchase[]
+  cashSessions CashSession[]
+  expenses     Expense[]
+  expenseCategories ExpenseCategory[]
+  cashMovements CashMovement[]
+  stockMovements  StockMovement[]
+  auditLogs        AuditLog[]
+  settings     BusinessSetting[]
+
+  @@map("businesses")
+}
+
+model BusinessSetting {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  key        String
+  value      Json
+  updatedAt  DateTime @updatedAt
+
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@unique([businessId, key])
+  @@map("business_settings")
+}
+
+// ---------------------------------------------------------------- catalogue
+
+model Category {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  name       String
+  colorHex   String   @default("#0D9488")
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  products Product[]
+
+  @@unique([businessId, name])
+  @@map("categories")
+}
+
+model Product {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  categoryId String?  @db.Uuid
+  name       String
+  sku        String?
+  barcode    String?
+  /// Denormalised for fast POS lookup; authoritative value is the
+  /// product_cost below at the time of purchase.
+  costPrice  Decimal  @default(0) @db.Decimal(14, 2)
+  salePrice  Decimal  @db.Decimal(14, 2)
+  vatRate    Decimal  @default(0.16) @db.Decimal(5, 4)
+  unit       String   @default("pc")
+  stock      Decimal  @default(0) @db.Decimal(14, 3)
+  lowStockThreshold Decimal @default(5) @db.Decimal(14, 3)
+  active     Boolean  @default(true)
+  /// Set when an offline sync drives stock negative. Must be resolved by a
+  /// manager — we never silently clamp to zero.
+  varianceFlag Boolean @default(false)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business     Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  category     Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  stockMovements StockMovement[]
+  saleItems    SaleItem[]
+  purchaseItems PurchaseItem[]
+  refundItems  RefundItem[]
+
+  @@unique([businessId, sku])
+  @@unique([barcode])
+  @@index([businessId, active])
+  @@index([businessId, name])
+  @@map("products")
+}
+
+// ---------------------------------------------------------------- customers
+
+model Customer {
+  id          String   @id @default(uuid()) @db.Uuid
+  businessId  String   @db.Uuid
+  fullName    String
+  phone       String?
+  email       String?
+  address     String?
+  /// KES. A customer may exceed this only if a manager approved it.
+  creditLimit Decimal  @default(0) @db.Decimal(14, 2)
+  /// Denormalised running total. CustomerLedger is authoritative; this is
+  /// a cache rebuilt from the ledger whenever the two disagree.
+  balance     Decimal  @default(0) @db.Decimal(14, 2)
+  status      String   @default("ACTIVE")
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  business Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  sales     Sale[]
+  ledger    CustomerLedger[]
+  payments  CustomerPayment[]
+
+  @@index([businessId, status])
+  @@index([phone])
+  @@map("customers")
+}
+
+/// APPEND-ONLY. Debits increase what the customer owes, credits reduce it.
+/// No UPDATE, no DELETE — enforced by a database trigger in migration.
+model CustomerLedger {
+  id          String          @id @default(uuid()) @db.Uuid
+  customerId  String          @db.Uuid
+  businessId  String          @db.Uuid
+  entryType   LedgerEntryType
+  amount      Decimal         @db.Decimal(14, 2)
+  /// Running balance AFTER this entry.
+  balance     Decimal         @db.Decimal(14, 2)
+  entityType  EntityType
+  entityId    String?         @db.Uuid
+  reference   String?
+  note        String?
+  createdAt   DateTime        @default(now())
+  createdById String?         @db.Uuid
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([customerId, createdAt])
+  @@index([businessId, createdAt])
+  @@map("customer_ledger")
+}
+
+/// A payment received against a debt. Separate from Sale payments so debt
+/// settlement is independently traceable.
+model CustomerPayment {
+  id           String        @id @default(uuid()) @db.Uuid
+  customerId   String        @db.Uuid
+  businessId   String        @db.Uuid
+  amount       Decimal       @db.Decimal(14, 2)
+  method       PaymentMethod
+  reference    String?
+  mpesaReceipt String?       @unique
+  createdAt    DateTime      @default(now())
+  receivedById String?       @db.Uuid
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([customerId, createdAt])
+  @@map("customer_payments")
+}
+
+// ---------------------------------------------------------------- suppliers
+
+model Supplier {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  name       String
+  phone      String?
+  email      String?
+  address    String?
+  balance    Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business  Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  purchases Purchase[]
+
+  @@index([businessId])
+  @@map("suppliers")
+}
+
+// ---------------------------------------------------------------- sales
+
+model Sale {
+  id            String     @id @default(uuid()) @db.Uuid
+  businessId    String     @db.Uuid
+  receiptNumber String     @unique
+  cashierId     String     @db.Uuid
+  customerId    String?    @db.Uuid
+  cashSessionId String?    @db.Uuid
+
+  /// Client-generated ULID for offline sales. Unique, so a retried sync can
+  /// never create a second sale.
+  clientRef     String     @unique
+  idempotencyKey String    @unique
+
+  status   SaleStatus @default(DRAFT)
+
+  subtotal  Decimal @db.Decimal(14, 2)
+  discount  Decimal @default(0) @db.Decimal(14, 2)
+  vatAmount Decimal @default(0) @db.Decimal(14, 2)
+  total     Decimal @db.Decimal(14, 2)
+  /// Captured at sale time so historic profit survives cost-price changes.
+  costTotal Decimal @default(0) @db.Decimal(14, 2)
+
+  /// True when the till had no connectivity. M-Pesa is unavailable offline.
+  offline  Boolean   @default(false)
+  syncedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  voidedAt DateTime?
+  voidReason String?
+
+  business    Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  cashier     User          @relation(fields: [cashierId], references: [id], onDelete: Restrict)
+  customer    Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cashSession CashSession?  @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
+  items SaleItem[]
+  payments SalePayment[]
+  refunds  Refund[]
+  stockMovements StockMovement[] @relation("SaleStockMovements")
+
+  @@index([businessId, createdAt])
+  @@index([cashierId, createdAt])
+  @@index([status])
+  @@index([customerId])
+  @@map("sales")
+}
+
+model SaleItem {
+  id        String  @id @default(uuid()) @db.Uuid
+  saleId    String  @db.Uuid
+  productId String  @db.Uuid
+  quantity  Decimal @db.Decimal(14, 3)
+  unitPrice Decimal @db.Decimal(14, 2)
+  /// Cost captured at sale time, so historic profit stays accurate even
+  /// after the product's cost price changes.
+  unitCost  Decimal @db.Decimal(14, 2)
+  discount  Decimal @default(0) @db.Decimal(14, 2)
+  vatRate   Decimal @default(0.16) @db.Decimal(5, 4)
+  lineTotal Decimal @db.Decimal(14, 2)
+
+  sale    Sale    @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([saleId])
+  @@index([productId])
+  @@map("sale_items")
+}
+
+/// A payment against a sale. One sale may be settled by several methods
+/// (part cash, part M-Pesa) — routine in Kenya.
+model SalePayment {
+  id        String        @id @default(uuid()) @db.Uuid
+  saleId    String        @db.Uuid
+  method    PaymentMethod
+  status    PaymentStatus @default(PENDING)
+  amount    Decimal       @db.Decimal(14, 2)
+
+  mpesaReceipt      String? @unique
+  checkoutRequestId String?
+  idempotencyKey    String  @unique
+  resultCode        String?
+  resultDesc        String?
+  settledAt         DateTime?
+  /// Set when a late settlement forced a correcting entry.
+  reversalOfId      String? @db.Uuid
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  @@index([saleId])
+  @@index([status])
+  @@map("sale_payments")
+}
+
+model Refund {
+  id           String        @id @default(uuid()) @db.Uuid
+  saleId       String        @db.Uuid
+  businessId   String        @db.Uuid
+  amount       Decimal       @db.Decimal(14, 2)
+  method       PaymentMethod
+  reason       String
+  approvedById String?       @db.Uuid
+  createdAt    DateTime      @default(now())
+
+  sale  Sale        @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  items RefundItem[]
+  stockMovements StockMovement[] @relation("RefundStockMovements")
+
+  @@index([saleId])
+  @@map("refunds")
+}
+
+model RefundItem {
+  id        String  @id @default(uuid()) @db.Uuid
+  refundId  String  @db.Uuid
+  productId String  @db.Uuid
+  quantity  Decimal @db.Decimal(14, 3)
+  unitPrice Decimal @db.Decimal(14, 2)
+  amount    Decimal @db.Decimal(14, 2)
+
+  refund  Refund  @relation(fields: [refundId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([refundId])
+  @@map("refund_items")
+}
+
+// ---------------------------------------------------------------- inventory
+
+/// APPEND-ONLY. Every stock change in the system produces exactly one row
+/// here. `products.stock` is a cache of SUM(quantity); the ledger is truth.
+model StockMovement {
+  id          String            @id @default(uuid()) @db.Uuid
+  businessId  String            @db.Uuid
+  productId   String            @db.Uuid
+  type        StockMovementType
+  /// Signed: positive adds stock, negative removes it.
+  quantity    Decimal           @db.Decimal(14, 3)
+  /// Stock level after this movement.
+  balanceAfter Decimal          @db.Decimal(14, 3)
+  unitCost    Decimal           @default(0) @db.Decimal(14, 2)
+  reference   String?
+  note        String?
+  /// Mandatory for ADJUSTMENT_* — an unexplained adjustment is not allowed.
+  reason      String?
+  saleId      String?           @db.Uuid
+  purchaseId  String?           @db.Uuid
+  refundId    String?           @db.Uuid
+  createdById String?           @db.Uuid
+  createdAt   DateTime          @default(now())
+
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  sale     Sale?   @relation("SaleStockMovements", fields: [saleId], references: [id], onDelete: SetNull)
+  purchase Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  refund   Refund?   @relation("RefundStockMovements", fields: [refundId], references: [id], onDelete: SetNull)
+
+  @@index([productId, createdAt])
+  @@index([businessId, type])
+  @@map("stock_movements")
+}
+
+// ---------------------------------------------------------------- purchasing
+
+model Purchase {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  supplierId String?  @db.Uuid
+  reference  String?
+  invoiceNumber String?
+  status     String   @default("COMPLETED")
+  subtotal   Decimal  @db.Decimal(14, 2)
+  vatAmount  Decimal  @default(0) @db.Decimal(14, 2)
+  total      Decimal  @db.Decimal(14, 2)
+  paid       Decimal  @default(0) @db.Decimal(14, 2)
+  /// total - paid; what the shop owes this supplier.
+  balance    Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  business Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  supplier Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items    PurchaseItem[]
+  movements StockMovement[]
+
+  @@index([businessId, createdAt])
+  @@index([supplierId])
+  @@map("purchases")
+}
+
+model PurchaseItem {
+  id         String  @id @default(uuid()) @db.Uuid
+  purchaseId String  @db.Uuid
+  productId  String  @db.Uuid
+  quantity   Decimal @db.Decimal(14, 3)
+  unitCost   Decimal @db.Decimal(14, 2)
+  lineTotal  Decimal @db.Decimal(14, 2)
+
+  purchase Purchase @relation(fields: [purchaseId], references: [id], onDelete: Cascade)
+  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([purchaseId])
+  @@map("purchase_items")
+}
+
+// ---------------------------------------------------------------- cash control
+
+/// A cashier's working day. Expected cash is derived, never typed in.
+model CashSession {
+  id         String            @id @default(uuid()) @db.Uuid
+  businessId String            @db.Uuid
+  cashierId  String            @db.Uuid
+  status     CashSessionStatus @default(OPEN)
+  openedAt   DateTime          @default(now())
+  closedAt   DateTime?
+
+  openingCash  Decimal @db.Decimal(14, 2)
+  cashSales    Decimal @default(0) @db.Decimal(14, 2)
+  cashRefunds  Decimal @default(0) @db.Decimal(14, 2)
+  debtPayments Decimal @default(0) @db.Decimal(14, 2)
+  cashExpenses Decimal @default(0) @db.Decimal(14, 2)
+  dropsToBank  Decimal @default(0) @db.Decimal(14, 2)
+  otherIn      Decimal @default(0) @db.Decimal(14, 2)
+  otherOut     Decimal @default(0) @db.Decimal(14, 2)
+
+  /// openingCash + cashSales + debtPayments + otherIn - refunds - expenses - drops
+  expectedCash Decimal? @db.Decimal(14, 2)
+  /// Physically counted at close.
+  countedCash  Decimal? @db.Decimal(14, 2)
+  /// countedCash - expectedCash. Non-zero requires manager review.
+  variance     Decimal? @db.Decimal(14, 2)
+  varianceReason String?
+  reconciledById String? @db.Uuid
+
+  business Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  cashier  User          @relation(fields: [cashierId], references: [id], onDelete: Restrict)
+  sales    Sale[]
+  movements CashMovement[]
+
+  @@index([businessId, status])
+  @@index([cashierId, openedAt])
+  @@map("cash_sessions")
+}
+
+/// APPEND-ONLY record of cash in and out of a session, so the expected
+/// figure can be rebuilt from movements rather than trusted.
+model CashMovement {
+  id             String            @id @default(uuid()) @db.Uuid
+  businessId     String            @db.Uuid
+  cashSessionId  String            @db.Uuid
+  type           CashMovementType
+  direction      LedgerDirection
+  amount         Decimal           @db.Decimal(14, 2)
+  reason         String
+  reference      String?
+  expenseId      String?           @db.Uuid
+  createdById    String            @db.Uuid
+  createdAt      DateTime          @default(now())
+
+  cashSession CashSession @relation(fields: [cashSessionId], references: [id], onDelete: Restrict)
+  business    Business    @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  createdBy   User        @relation(fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([cashSessionId, createdAt])
+  @@map("cash_movements")
+}
+
+// ---------------------------------------------------------------- expenses
+
+model ExpenseCategory {
+  id         String  @id @default(uuid()) @db.Uuid
+  businessId String  @db.Uuid
+  name       String
+  /// Expenses above this need manager approval.
+  approvalThreshold Decimal @default(0) @db.Decimal(14, 2)
+  createdAt  DateTime @default(now())
+
+  business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  expenses Expense[]
+
+  @@unique([businessId, name])
+  @@map("expense_categories")
+}
+
+model Expense {
+  id         String        @id @default(uuid()) @db.Uuid
+  businessId String        @db.Uuid
+  categoryId String?       @db.Uuid
+  amount     Decimal       @db.Decimal(14, 2)
+  method     PaymentMethod
+  status     ExpenseStatus @default(DRAFT)
+  note       String?
+  reference  String?
+  expenseDate DateTime     @default(now())
+  requestedById String     @db.Uuid
+  approvedById  String?    @db.Uuid
+  approvedAt    DateTime?
+  rejectedReason String?
+  cashSessionId String?    @db.Uuid
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  business   Business         @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  requestedBy User            @relation("RequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+
+  @@index([businessId, expenseDate])
+  @@index([status])
+  @@map("expenses")
+}
+
+/// Generic approval workflow for anything needing sign-off: large expenses,
+/// credit-limit overrides, stock adjustments, cash variances.
+model Approval {
+  id         String         @id @default(uuid()) @db.Uuid
+  entityType EntityType
+  entityId   String         @db.Uuid
+  amount     Decimal?       @db.Decimal(14, 2)
+  reason     String
+  status     ApprovalStatus @default(PENDING)
+  requestedById String      @db.Uuid
+  approvedById  String?     @db.Uuid
+  decidedAt  DateTime?
+  decisionNote String?
+  createdAt  DateTime       @default(now())
+
+  requestedBy User @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  approvedBy  User? @relation("ApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@index([entityType, entityId])
+  @@map("approvals")
+}
+
+// ---------------------------------------------------------------- audit
+
+/// APPEND-ONLY. Answers "who did what, when, from where" for every
+/// material action. Never updated, never deleted.
+model AuditLog {
+  id         String   @id @default(uuid()) @db.Uuid
+  businessId String   @db.Uuid
+  userId     String?  @db.Uuid
+  action     String
+  entityType String
+  entityId   String?
+  beforeJson Json?
+  afterJson  Json?
+  ipAddress  String?
+  userAgent  String?
+  /// Populated when the shop is offline and entries sync up later.
+  deviceId   String?
+  createdAt  DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, createdAt])
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+  @@map("audit_logs")
+}
+
+/// Receipt counter. Sequential per business and gap-checked — a missing
+/// receipt number is a signal something went wrong.
+model ReceiptSequence {
+  businessId String @db.Uuid
+  year       Int
+  lastNumber Int    @default(0)
+
+  @@id([businessId, year])
+  @@map("receipt_sequences")
+}

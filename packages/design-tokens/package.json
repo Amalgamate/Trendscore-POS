@@ -1,0 +1,21 @@
+{
+  "name": "@retail-os/design-tokens",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Single source of truth for Retail OS design tokens. Emits TS + Dart.",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./css": "./dist/tokens.css"
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "node build.mjs",
+    "watch": "node build.mjs --watch"
+  }
+}
