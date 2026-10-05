@@ -1,0 +1,11 @@
+{
+  "//": "Build-only config. The main tsconfig also includes test/, which would emit to dist/src/ and dist/test/ because rootDir is the project root. Production entrypoints (dist/index.js, dist/seed.js, dist/create-owner.js) are referenced by the Dockerfile CMD and by the provisioning engine, so the emitted layout must be dist/<file>.js exactly.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "sourceMap": false
+  },
+  "include": ["src/**/*.ts"],
+  "exclude": ["node_modules", "dist", "test"]
+}

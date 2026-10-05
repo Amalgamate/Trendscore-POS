@@ -1,4 +1,5 @@
 {
+  "//": "@retail-os/payment-provider is deliberately NOT listed here. It is a workspace-only package and cannot be resolved when this image builds in an isolated context, so declaring it broke `docker build` with a 404. Nothing under src/ imports it yet. When POS payment handling is added in Phase 3, it must be copied into the image or published to the registry before being added to this list.",
   "name": "shop-api",
   "version": "0.1.0",
   "private": true,
@@ -6,7 +7,7 @@
   "main": "dist/index.js",
   "scripts": {
     "dev": "tsx watch src/index.ts",
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
@@ -19,8 +20,6 @@
   },
   "dependencies": {
     "@prisma/client": "^6.1.0",
-    "@retail-os/design-tokens": "*",
-    "@retail-os/payment-provider": "*",
     "argon2": "^0.41.1",
     "cors": "^2.8.5",
     "decimal.js": "^10.4.3",
