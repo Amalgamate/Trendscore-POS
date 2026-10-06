@@ -77,6 +77,6 @@ curl -fsSI --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/"
 # Keep the currently served container until the new route and certificate work.
 while IFS= read -r previous; do
   [[ -z "$previous" || "$previous" == "$NAME" ]] || "${DOCKER[@]}" rm -f "$previous"
-done < <("${DOCKER[@]}" ps -aq --filter "label=retailos.app=shop-pos" --filter "label=retailos.domain=$DOMAIN")
+done < <("${DOCKER[@]}" ps -aq --filter "label=retailos.app=shop-pos" --filter "label=retailos.domain=$DOMAIN" --format '{{.Names}}')
 
 echo "POS deployed: https://$DOMAIN (127.0.0.1:$PORT)"
