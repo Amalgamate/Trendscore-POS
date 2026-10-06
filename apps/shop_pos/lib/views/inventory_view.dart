@@ -67,18 +67,6 @@ class _InventoryViewState extends State<InventoryView> {
     }).toList();
   }
 
-  Money? _parseMoney(String text) {
-    final clean = text
-        .replaceAll(',', '')
-        .replaceAll('KES', '')
-        .replaceAll('kes', '')
-        .trim();
-    if (clean.isEmpty) return null;
-    final d = double.tryParse(clean);
-    if (d == null || d < 0) return null;
-    return Money.fromDouble(d);
-  }
-
   void _showProductEditor({PosProduct? product}) {
     final isEdit = product != null;
     final categories = _allCategories.skip(1).toList();
@@ -99,196 +87,328 @@ class _InventoryViewState extends State<InventoryView> {
       context: context,
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setModal) => Dialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          child: SizedBox(
-            width: math.min(560.0, MediaQuery.sizeOf(context).width - 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 18),
-                  decoration: BoxDecoration(
-                    color: AppColors.accent_primary.withAlpha(12),
-                    borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
-                    border: Border(bottom: BorderSide(color: AppColors.border_subtle)),
-                  ),
-                  child: Row(children: [
-                    Icon(isEdit ? Icons.edit_square : Icons.add_box_outlined,
-                        color: AppColors.accent_primary, size: 22),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(isEdit ? 'Edit: ${product.name}' : 'Add New Product',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700,
-                              color: AppColors.text_primary)),
+        builder: (ctx, setModal) {
+          final screenWidth = MediaQuery.of(context).size.width;
+          return Dialog(
+            backgroundColor: Colors.white,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: SizedBox(
+                width: math.min(620.0, screenWidth - 32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // ── Header ──────────────────────────────────────────
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        border: Border(
+                          bottom: BorderSide(color: AppColors.border_subtle),
+                          left: BorderSide(color: AppColors.accent_primary, width: 4),
+                        ),
+                      ),
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      child: Row(children: [
+                        Expanded(
+                          child: Text(
+                            isEdit ? 'Edit Product' : 'Add New Product',
+                            style: const TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.text_primary,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 20),
+                          onPressed: () => Navigator.pop(ctx),
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          color: AppColors.text_tertiary,
+                        ),
+                      ]),
                     ),
-                    IconButton(
-                      icon: const Icon(Icons.close, size: 20),
-                      onPressed: () => Navigator.pop(ctx),
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                    ),
-                  ]),
-                ),
-                // Body
-                Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _sectionLabel('Product Identity'),
-                        const SizedBox(height: 10),
-                        Row(
+
+                    // ── Body (scrollable, max height 520) ───────────────
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 520),
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            ImageUploadWidget(
-                              currentBase64: imageBase64,
-                              size: 88,
-                              label: 'Product Photo',
-                              borderRadius: 12,
-                              onImagePicked: (b64) => setModal(() => imageBase64 = b64),
-                              onImageCleared: () => setModal(() => imageBase64 = null),
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                children: [
-                                  _field(nameCtrl, 'Product Name *', hint: 'e.g. Fresh Whole Milk 1L'),
-                                  const SizedBox(height: 10),
-                                  DropdownButtonFormField<String>(
-                                    value: category,
-                                    decoration: _inputDeco('Category'),
-                                    items: categories.map((c) => DropdownMenuItem(
-                                      value: c,
-                                      child: Row(children: [
-                                        Icon(_catIcon(c), size: 16, color: AppColors.text_tertiary),
-                                        const SizedBox(width: 8),
-                                        Text(c),
-                                      ]),
-                                    )).toList(),
-                                    onChanged: (v) { if (v != null) setModal(() => category = v); },
+                            _modalSectionLabel('PRODUCT IDENTITY'),
+                            const SizedBox(height: 12),
+
+                            // Image + Name/Category row
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Column(
+                                  children: [
+                                    ImageUploadWidget(
+                                      currentBase64: imageBase64,
+                                      size: 100,
+                                      label: 'Product Photo',
+                                      borderRadius: 10,
+                                      onImagePicked: (b64) => setModal(() => imageBase64 = b64),
+                                      onImageCleared: () => setModal(() => imageBase64 = null),
+                                    ),
+                                    const SizedBox(height: 6),
+                                    const Text(
+                                      'Click to upload a photo',
+                                      style: TextStyle(fontSize: 10, color: AppColors.text_tertiary),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    children: [
+                                      TextField(
+                                        controller: nameCtrl,
+                                        decoration: _modalInputDeco('Product Name *',
+                                            hint: 'e.g. Fresh Whole Milk 1L'),
+                                      ),
+                                      const SizedBox(height: 12),
+                                      DropdownButtonFormField<String>(
+                                        value: category,
+                                        decoration: _modalInputDeco('Category'),
+                                        items: categories.map((c) => DropdownMenuItem(
+                                          value: c,
+                                          child: Row(children: [
+                                            Container(
+                                              width: 8,
+                                              height: 8,
+                                              decoration: BoxDecoration(
+                                                color: _catColor(c),
+                                                shape: BoxShape.circle,
+                                                border: Border.all(color: Colors.black12),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 6),
+                                            Icon(_catIcon(c), size: 15, color: AppColors.text_tertiary),
+                                            const SizedBox(width: 6),
+                                            Text(c),
+                                          ]),
+                                        )).toList(),
+                                        onChanged: (v) { if (v != null) setModal(() => category = v); },
+                                      ),
+                                    ],
                                   ),
-                                ],
-                              ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 16),
+
+                            // SKU + Barcode
+                            Row(children: [
+                              Expanded(child: TextField(
+                                controller: skuCtrl,
+                                decoration: _modalInputDeco('SKU Code', hint: 'e.g. MK-001'),
+                              )),
+                              const SizedBox(width: 12),
+                              Expanded(child: TextField(
+                                controller: barcodeCtrl,
+                                decoration: _modalInputDeco('Barcode / EAN', hint: '6901234567890'),
+                              )),
+                            ]),
+
+                            // ── PRICING ──────────────────────────────────
+                            const SizedBox(height: 16),
+                            _modalSectionLabel('PRICING'),
+                            const SizedBox(height: 12),
+                            Row(children: [
+                              Expanded(child: TextField(
+                                controller: priceCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: _modalInputDeco('Selling Price (KES) *', hint: '0'),
+                              )),
+                              const SizedBox(width: 12),
+                              Expanded(child: TextField(
+                                controller: costCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: _modalInputDeco('Cost Price (KES)', hint: '0 (optional)'),
+                              )),
+                            ]),
+                            const SizedBox(height: 6),
+                            const Text(
+                              'Prices are VAT-inclusive',
+                              style: TextStyle(fontSize: 11, color: AppColors.text_tertiary),
+                            ),
+
+                            // ── STOCK SETTINGS ───────────────────────────
+                            const SizedBox(height: 16),
+                            _modalSectionLabel('STOCK SETTINGS'),
+                            const SizedBox(height: 12),
+                            Row(children: [
+                              Expanded(child: TextField(
+                                controller: stockCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: _modalInputDeco(
+                                  isEdit ? 'Current Stock (units)' : 'Opening Stock (units)',
+                                  hint: '0',
+                                ),
+                              )),
+                              const SizedBox(width: 12),
+                              Expanded(child: TextField(
+                                controller: lowStockCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: _modalInputDeco('Low-Stock Alert At', hint: '10'),
+                              )),
+                            ]),
+
+                            // ── NOTES ────────────────────────────────────
+                            const SizedBox(height: 16),
+                            _modalSectionLabel('NOTES'),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: notesCtrl,
+                              maxLines: 2,
+                              decoration: _modalInputDeco('Internal notes (optional)'),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        Row(children: [
-                          Expanded(child: _field(skuCtrl, 'SKU Code', hint: 'e.g. MK-001')),
-                          const SizedBox(width: 12),
-                          Expanded(child: _field(barcodeCtrl, 'Barcode / EAN', hint: '6901234567890')),
-                        ]),
-                        const SizedBox(height: 20),
-                        _sectionLabel('Pricing'),
-                        const SizedBox(height: 10),
-                        Row(children: [
-                          Expanded(child: _field(priceCtrl, 'Selling Price (KES) *',
-                              hint: '0', type: TextInputType.number)),
-                          const SizedBox(width: 12),
-                          Expanded(child: _field(costCtrl, 'Cost Price (KES)',
-                              hint: '0 (optional)', type: TextInputType.number)),
-                        ]),
-                        const SizedBox(height: 20),
-                        _sectionLabel('Stock Settings'),
-                        const SizedBox(height: 10),
-                        Row(children: [
-                          Expanded(child: _field(stockCtrl,
-                              isEdit ? 'Current Stock (units)' : 'Opening Stock (units)',
-                              hint: '0', type: TextInputType.number)),
-                          const SizedBox(width: 12),
-                          Expanded(child: _field(lowStockCtrl, 'Low-Stock Alert At',
-                              hint: '10', type: TextInputType.number)),
-                        ]),
-                        const SizedBox(height: 20),
-                        _sectionLabel('Notes'),
-                        const SizedBox(height: 10),
-                        TextField(
-                          controller: notesCtrl,
-                          maxLines: 2,
-                          decoration: _inputDeco('Internal notes (optional)'),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                // Footer
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-                  decoration: BoxDecoration(
-                      border: Border(top: BorderSide(color: AppColors.border_subtle))),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.end,
-                    children: [
-                      TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
-                      const SizedBox(width: 8),
-                      FilledButton.icon(
-                        icon: Icon(isEdit ? Icons.save : Icons.add, size: 16),
-                        label: Text(isEdit ? 'Save Changes' : 'Add Product'),
-                        style: FilledButton.styleFrom(backgroundColor: AppColors.accent_primary),
-                        onPressed: () {
-                          final name = nameCtrl.text.trim();
-                          final parsedPrice = _parseMoney(priceCtrl.text);
-                          if (name.isEmpty || parsedPrice == null || parsedPrice.minorUnits <= 0) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Name and price are required.')));
-                            return;
-                          }
-                          final sku = skuCtrl.text.trim().isNotEmpty
-                              ? skuCtrl.text.trim()
-                              : 'SKU-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-                          final parsedCost = _parseMoney(costCtrl.text);
-                          final stock = int.tryParse(stockCtrl.text.trim()) ?? 0;
-                          final threshold = int.tryParse(lowStockCtrl.text.trim()) ?? 10;
-                          if (isEdit) {
-                            final updated = product.copyWith(
-                              name: name, sku: sku,
-                              barcode: barcodeCtrl.text.trim().isNotEmpty
-                                  ? barcodeCtrl.text.trim() : null,
-                              category: category,
-                              unitPrice: parsedPrice,
-                              costPrice: parsedCost,
-                              stock: stock, lowStockThreshold: threshold,
-                              notes: notesCtrl.text.trim().isNotEmpty
-                                  ? notesCtrl.text.trim() : null,
-                              imageBase64: imageBase64,
-                            );
-                            widget.state.updateProduct(updated);
-                            if (_selectedProduct?.id == product.id) {
-                              setState(() => _selectedProduct = updated);
-                            }
-                          } else {
-                            widget.state.addProduct(PosProduct(
-                              id: 'prod_${DateTime.now().millisecondsSinceEpoch}',
-                              name: name, sku: sku,
-                              barcode: barcodeCtrl.text.trim().isNotEmpty
-                                  ? barcodeCtrl.text.trim() : null,
-                              category: category,
-                              unitPrice: parsedPrice,
-                              costPrice: parsedCost,
-                              stock: stock, lowStockThreshold: threshold,
-                              icon: _catIcon(category), tint: _catColor(category),
-                              notes: notesCtrl.text.trim().isNotEmpty
-                                  ? notesCtrl.text.trim() : null,
-                              imageBase64: imageBase64,
-                            ));
-                          }
-                          setState(() {});
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                              content: Text(isEdit
-                                  ? '"$name" updated.' : '"$name" added to catalog.')));
-                        },
                       ),
-                    ],
-                  ),
+                    ),
+
+                    // ── Footer ──────────────────────────────────────────
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        border: Border(top: BorderSide(color: AppColors.border_subtle)),
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                style: TextButton.styleFrom(
+                                    foregroundColor: AppColors.text_secondary),
+                                child: const Text('Cancel'),
+                              ),
+                              const SizedBox(width: 8),
+                              FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppColors.accent_primary,
+                                  shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8)),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 24, vertical: 12),
+                                ),
+                                onPressed: () {
+                                  final name = nameCtrl.text.trim();
+                                  Money? parsedPrice;
+                                  try {
+                                    final clean = priceCtrl.text
+                                        .replaceAll(',', '')
+                                        .replaceAll('KES', '')
+                                        .replaceAll('kes', '')
+                                        .trim();
+                                    if (clean.isNotEmpty) parsedPrice = Money.parse(clean);
+                                  } catch (_) {}
+                                  if (name.isEmpty ||
+                                      parsedPrice == null ||
+                                      parsedPrice.minorUnits <= 0) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                            content: Text(
+                                                'Name and a valid price are required.')));
+                                    return;
+                                  }
+                                  Money? parsedCost;
+                                  try {
+                                    final clean = costCtrl.text
+                                        .replaceAll(',', '')
+                                        .replaceAll('KES', '')
+                                        .replaceAll('kes', '')
+                                        .trim();
+                                    if (clean.isNotEmpty) parsedCost = Money.parse(clean);
+                                  } catch (_) {}
+                                  final sku = skuCtrl.text.trim().isNotEmpty
+                                      ? skuCtrl.text.trim()
+                                      : 'SKU-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+                                  final stock =
+                                      int.tryParse(stockCtrl.text.trim()) ?? 0;
+                                  final threshold =
+                                      int.tryParse(lowStockCtrl.text.trim()) ?? 10;
+                                  if (isEdit) {
+                                    final updated = product.copyWith(
+                                      name: name,
+                                      sku: sku,
+                                      barcode: barcodeCtrl.text.trim().isNotEmpty
+                                          ? barcodeCtrl.text.trim()
+                                          : null,
+                                      category: category,
+                                      unitPrice: parsedPrice,
+                                      costPrice: parsedCost,
+                                      stock: stock,
+                                      lowStockThreshold: threshold,
+                                      notes: notesCtrl.text.trim().isNotEmpty
+                                          ? notesCtrl.text.trim()
+                                          : null,
+                                      imageBase64: imageBase64,
+                                    );
+                                    widget.state.updateProduct(updated);
+                                    if (_selectedProduct?.id == product.id) {
+                                      setState(() => _selectedProduct = updated);
+                                    }
+                                  } else {
+                                    widget.state.addProduct(PosProduct(
+                                      id: 'prod_${DateTime.now().millisecondsSinceEpoch}',
+                                      name: name,
+                                      sku: sku,
+                                      barcode: barcodeCtrl.text.trim().isNotEmpty
+                                          ? barcodeCtrl.text.trim()
+                                          : null,
+                                      category: category,
+                                      unitPrice: parsedPrice,
+                                      costPrice: parsedCost,
+                                      stock: stock,
+                                      lowStockThreshold: threshold,
+                                      icon: _catIcon(category),
+                                      tint: _catColor(category),
+                                      notes: notesCtrl.text.trim().isNotEmpty
+                                          ? notesCtrl.text.trim()
+                                          : null,
+                                      imageBase64: imageBase64,
+                                    ));
+                                  }
+                                  setState(() {});
+                                  Navigator.pop(ctx);
+                                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                      content: Text(isEdit
+                                          ? '"$name" updated.'
+                                          : '"$name" added to catalog.')));
+                                },
+                                child: Text(isEdit ? 'Save Changes' : 'Add Product'),
+                              ),
+                            ],
+                          ),
+                          if (!isEdit) ...[
+                            const SizedBox(height: 8),
+                            const Text(
+                              'Product will be added to the active catalogue',
+                              style: TextStyle(
+                                  fontSize: 10, color: AppColors.text_tertiary),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     );
   }
@@ -1104,17 +1224,35 @@ InputDecoration _inputDeco(String label, {String? hint}) => InputDecoration(
   contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
 );
 
-Widget _field(TextEditingController ctrl, String label,
-    {String? hint, TextInputType? type}) =>
-    TextField(controller: ctrl, keyboardType: type, decoration: _inputDeco(label, hint: hint));
+InputDecoration _modalInputDeco(String label, {String? hint}) => InputDecoration(
+  labelText: label,
+  hintText: hint,
+  filled: true,
+  fillColor: AppColors.bg_subtle,
+  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+  border: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(8),
+    borderSide: const BorderSide(color: AppColors.border_subtle),
+  ),
+  enabledBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(8),
+    borderSide: const BorderSide(color: AppColors.border_subtle),
+  ),
+  focusedBorder: OutlineInputBorder(
+    borderRadius: BorderRadius.circular(8),
+    borderSide: const BorderSide(color: AppColors.accent_primary, width: 1.5),
+  ),
+);
 
-Widget _sectionLabel(String text) => Row(children: [
-  Container(width: 3, height: 14,
-      decoration: BoxDecoration(color: AppColors.accent_primary, borderRadius: BorderRadius.circular(2))),
-  const SizedBox(width: 8),
-  Text(text, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700,
-      color: AppColors.text_secondary, letterSpacing: 0.3)),
-]);
+Widget _modalSectionLabel(String text) => Text(
+  text,
+  style: const TextStyle(
+    fontSize: 13,
+    fontWeight: FontWeight.w600,
+    color: AppColors.text_tertiary,
+    letterSpacing: 0.5,
+  ),
+);
 
 Widget _choiceButton({
   required String label, required IconData icon,

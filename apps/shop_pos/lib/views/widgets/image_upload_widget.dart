@@ -46,6 +46,7 @@ class ImageUploadWidget extends StatefulWidget {
 class _ImageUploadWidgetState extends State<ImageUploadWidget>
     with SingleTickerProviderStateMixin {
   bool _loading = false;
+  bool _hovered = false;
   late AnimationController _pulseCtrl;
   late Animation<double> _pulse;
 
@@ -78,6 +79,13 @@ class _ImageUploadWidgetState extends State<ImageUploadWidget>
       if (result != null && mounted) {
         widget.onImagePicked(result.base64Jpeg);
       }
+    } catch (error) {
+      if (mounted) {
+        final message = error.toString().replaceFirst(RegExp(r'^Exception: '), '');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not upload image: $message')),
+        );
+      }
     } finally {
       if (mounted) setState(() => _loading = false);
     }
@@ -96,6 +104,8 @@ class _ImageUploadWidgetState extends State<ImageUploadWidget>
           // Main tile
           MouseRegion(
             cursor: SystemMouseCursors.click,
+            onEnter: (_) => setState(() => _hovered = true),
+            onExit: (_) => setState(() => _hovered = false),
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: _pick,
@@ -109,7 +119,9 @@ class _ImageUploadWidgetState extends State<ImageUploadWidget>
                   border: Border.all(
                     color: hasImage
                         ? AppColors.accent_primary.withAlpha(60)
-                        : AppColors.border_subtle,
+                        : (_hovered
+                            ? AppColors.accent_primary.withAlpha(120)
+                            : AppColors.border_subtle),
                     width: hasImage ? 2 : 1,
                   ),
                   boxShadow: hasImage

@@ -1,0 +1,39 @@
+Analyzing shop_pos...                                           
+
+   info - Unnecessary use of multiple underscores - lib\main.dart:506:27 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\main.dart:506:31 - unnecessary_underscores
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\views\cash_drawer_view.dart:91:19 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\views\cash_drawer_view.dart:378:29 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\customers_view.dart:502:43 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\customers_view.dart:719:43 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\customers_view.dart:895:43 - unnecessary_underscores
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\views\inventory_view.dart:177:41 - deprecated_member_use
+   info - Statements in an if should be enclosed in a block - lib\views\inventory_view.dart:579:47 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\views\inventory_view.dart:580:12 - curly_braces_in_flow_control_structures
+   info - Don't use 'BuildContext's across async gaps - lib\views\inventory_view.dart:581:28 - use_build_context_synchronously
+   info - Statements in an if should be enclosed in a block - lib\views\inventory_view.dart:603:39 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\views\inventory_view.dart:604:10 - curly_braces_in_flow_control_structures
+   info - Unnecessary use of multiple underscores - lib\views\inventory_view.dart:797:53 - unnecessary_underscores
+warning - A value for optional parameter 'primaryColor' isn't ever given - lib\views\login_view.dart:17:10 - unused_element_parameter
+warning - A value for optional parameter 'secondaryColor' isn't ever given - lib\views\login_view.dart:18:10 - unused_element_parameter
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:510:29 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:510:33 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:583:29 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:583:33 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:586:31 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:586:35 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:988:29 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:988:33 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:991:31 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\login_view.dart:991:35 - unnecessary_underscores
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\views\purchase_orders_view.dart:155:19 - deprecated_member_use
+   info - Unnecessary use of multiple underscores - lib\views\receipt_dialog.dart:227:37 - unnecessary_underscores
+   info - Unnecessary use of multiple underscores - lib\views\receipt_dialog.dart:227:41 - unnecessary_underscores
+   info - Statements in an if should be enclosed in a block - lib\views\reports_view.dart:124:55 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\views\reports_view.dart:125:59 - curly_braces_in_flow_control_structures
+   info - Statements in an if should be enclosed in a block - lib\views\reports_view.dart:126:61 - curly_braces_in_flow_control_structures
+   info - Unnecessary use of multiple underscores - lib\views\reports_view.dart:698:35 - unnecessary_underscores
+   info - 'value' is deprecated and shouldn't be used. Use initialValue instead. This will set the initial value for the form field. This feature was deprecated after v3.33.0-1.0.pre - lib\views\settings_view.dart:250:21 - deprecated_member_use
+   info - Use the null-aware marker '?' rather than a null check via an 'if' - lib\views\settings_view.dart:1022:15 - use_null_aware_elements
+
+35 issues found. (ran in 6.2s)

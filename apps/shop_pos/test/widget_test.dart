@@ -20,7 +20,7 @@ void main() {
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     final state = PosState();
-    state.currentUser = state.users.first;
+    state.currentLoggedInUser = state.users.first;
     await tester.pumpWidget(RetailPosApp(state: state));
     await tester.pump();
   }
