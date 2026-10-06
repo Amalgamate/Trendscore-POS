@@ -76,9 +76,15 @@ jobs:
         run: npm test
 
       - name: Validate control-plane schema
+        env:
+          DATABASE_URL: postgresql://postgres:testpass@localhost:5432/control_plane
+          DIRECT_URL: postgresql://postgres:testpass@localhost:5432/control_plane
         run: npx prisma validate --schema apps/control-plane-api/prisma/schema.prisma
 
       - name: Validate shop-instance schema
+        env:
+          DATABASE_URL: postgresql://postgres:testpass@localhost:5432/shop_instance
+          DIRECT_URL: postgresql://postgres:testpass@localhost:5432/shop_instance
         run: npx prisma validate --schema apps/shop-api/prisma/schema.prisma
 
       - name: Shop-instance migrations + immutability guarantees
