@@ -1,71 +1,49 @@
 // AUTO-GENERATED from packages/design-tokens/tokens.json
-// Light Premium Theme for General Shop POS
-//
-// TODO: Currency ('KES') and VAT (16%) are currently configured as system defaults.
-// When Business Settings API is connected, these must load dynamically per tenant.
+// Do not edit by hand. Run: npm run build:tokens
 
 // ignore_for_file: constant_identifier_names, non_constant_identifier_names
 
 import 'package:flutter/material.dart';
 
 /// Design tokens for the Retail OS POS.
-/// Solid flat colors, mature enterprise aesthetic, light canvas.
+/// Mirrors packages/design-tokens/tokens.json exactly.
 class AppColors {
   const AppColors._();
 
-  // Canvas & Surfaces (Light Premium Palette)
-  static const Color bg_canvas = Color(0xFFF8FAFC);       // Slate 50
-  static const Color bg_surface = Color(0xFFFFFFFF);      // Pure White
-  static const Color bg_subtle = Color(0xFFF1F5F9);       // Slate 100
-  static const Color bg_inverse = Color(0xFF0F172A);      // Slate 900 (legacy/contrast)
-  
-  // Borders & Dividers
-  static const Color border_subtle = Color(0xFFE2E8F0);   // Slate 200
-  static const Color border_strong = Color(0xFFCBD5E1);   // Slate 300
-  
-  // Typography
-  static const Color text_primary = Color(0xFF0F172A);    // Slate 900
-  static const Color text_secondary = Color(0xFF475569);  // Slate 600
-  static const Color text_tertiary = Color(0xFF94A3B8);   // Slate 400
+  static const Color bg_canvas = Color(0xFFF9FAFB);
+  static const Color bg_surface = Color(0xFFFFFFFF);
+  static const Color bg_subtle = Color(0xFFF3F4F6);
+  static const Color bg_inverse = Color(0xFF0A1628);
+  static const Color border_subtle = Color(0xFFE5E7EB);
+  static const Color border_strong = Color(0xFFD1D5DB);
+  static const Color text_primary = Color(0xFF111827);
+  static const Color text_secondary = Color(0xFF374151);
+  static const Color text_tertiary = Color(0xFF6B7280);
   static const Color text_inverse = Color(0xFFFFFFFF);
-  
-  // Accents (Teal / Mature Retail Palette)
-  static const Color accent_primary = Color(0xFF0D9488);  // Teal 600
-  static const Color accent_light = Color(0xFFF0FDFA);    // Teal 50
-  static const Color accent_inverse = Color(0xFF134E4A);  // Teal 900
-  
-  // Status Colors
-  static const Color status_success = Color(0xFF16A34A);  // Green 600
-  static const Color status_warning = Color(0xFFD97706);  // Amber 600
-  static const Color status_danger = Color(0xFFDC2626);   // Red 600
-  static const Color status_info = Color(0xFF2563EB);     // Blue 600
+  static const Color accent_primary = Color(0xFF0D9488);
+  static const Color accent_inverse = Color(0xFF0F1F3D);
+  static const Color status_success = Color(0xFF16A34A);
+  static const Color status_warning = Color(0xFFD97706);
+  static const Color status_danger = Color(0xFFDC2626);
+  static const Color status_info = Color(0xFF2563EB);
 
-  // Emerald aliases (for legacy references)
-  static const Color emerald_400 = Color(0xFF34D399);
-  static const Color emerald_500 = Color(0xFF10B981);
-  static const Color emerald_600 = Color(0xFF0D9488); // Aligned to teal accent
-  static const Color emerald_700 = Color(0xFF0F766E);
-
-  // Raw palette tokens
+  /// Raw palette for charts and status dots.
   static const Color pnavy900 = Color(0xFF0A1628);
   static const Color pnavy800 = Color(0xFF0F1F3D);
   static const Color pnavy700 = Color(0xFF1B2F52);
-  static const Color pslate900 = Color(0xFF0F172A);
-  static const Color pslate700 = Color(0xFF334155);
-  static const Color pslate600 = Color(0xFF475569);
-  static const Color pslate500 = Color(0xFF64748B);
-  static const Color pslate400 = Color(0xFF94A3B8);
-  static const Color pslate300 = Color(0xFFCBD5E1);
-  static const Color pslate200 = Color(0xFFE2E8F0);
-  static const Color pslate100 = Color(0xFFF1F5F9);
-  static const Color pslate050 = Color(0xFFF8FAFC);
+  static const Color pslate900 = Color(0xFF111827);
+  static const Color pslate700 = Color(0xFF374151);
+  static const Color pslate500 = Color(0xFF6B7280);
+  static const Color pslate400 = Color(0xFF9CA3AF);
+  static const Color pslate300 = Color(0xFFD1D5DB);
+  static const Color pslate200 = Color(0xFFE5E7EB);
+  static const Color pslate100 = Color(0xFFF3F4F6);
+  static const Color pslate050 = Color(0xFFF9FAFB);
   static const Color pwhite = Color(0xFFFFFFFF);
-  
   static const Color pteal700 = Color(0xFF0F766E);
   static const Color pteal600 = Color(0xFF0D9488);
   static const Color pteal500 = Color(0xFF14B8A6);
   static const Color pteal050 = Color(0xFFF0FDFA);
-  
   static const Color pgreen600 = Color(0xFF16A34A);
   static const Color pgreen050 = Color(0xFFF0FDF4);
   static const Color pred600 = Color(0xFFDC2626);
@@ -89,9 +67,9 @@ class AppSpacing {
 
 class AppRadius {
   const AppRadius._();
-  static const BorderRadius sm = BorderRadius.all(Radius.circular(6));
-  static const BorderRadius md = BorderRadius.all(Radius.circular(10));
-  static const BorderRadius lg = BorderRadius.all(Radius.circular(14));
+  static const BorderRadius sm = BorderRadius.all(Radius.circular(4));
+  static const BorderRadius md = BorderRadius.all(Radius.circular(8));
+  static const BorderRadius lg = BorderRadius.all(Radius.circular(12));
 }
 
 class AppText {
@@ -163,30 +141,14 @@ ThemeData buildRetailOsTheme() {
       error: AppColors.status_danger,
     ),
     dividerColor: AppColors.border_subtle,
-    cardTheme: CardThemeData(
-      color: AppColors.bg_surface,
-      elevation: 0,
-      shape: RoundedRectangleBorder(
-        borderRadius: AppRadius.md,
-        side: const BorderSide(color: AppColors.border_subtle),
-      ),
-    ),
-    dialogTheme: const DialogThemeData(
-      backgroundColor: AppColors.bg_surface,
-      elevation: 4,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.all(Radius.circular(16)),
-      ),
-    ),
     textTheme: base.textTheme.apply(
       bodyColor: AppColors.text_primary,
       displayColor: AppColors.text_primary,
     ),
     appBarTheme: const AppBarTheme(
-      backgroundColor: AppColors.bg_surface,
-      foregroundColor: AppColors.text_primary,
+      backgroundColor: AppColors.bg_inverse,
+      foregroundColor: AppColors.text_inverse,
       elevation: 0,
-      scrolledUnderElevation: 0,
     ),
   );
 }
