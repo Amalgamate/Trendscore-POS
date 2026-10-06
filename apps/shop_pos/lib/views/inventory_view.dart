@@ -67,6 +67,18 @@ class _InventoryViewState extends State<InventoryView> {
     }).toList();
   }
 
+  Money? _parseMoney(String text) {
+    final clean = text
+        .replaceAll(',', '')
+        .replaceAll('KES', '')
+        .replaceAll('kes', '')
+        .trim();
+    if (clean.isEmpty) return null;
+    final d = double.tryParse(clean);
+    if (d == null || d < 0) return null;
+    return Money.fromDouble(d);
+  }
+
   void _showProductEditor({PosProduct? product}) {
     final isEdit = product != null;
     final categories = _allCategories.skip(1).toList();
@@ -218,8 +230,8 @@ class _InventoryViewState extends State<InventoryView> {
                         style: FilledButton.styleFrom(backgroundColor: AppColors.accent_primary),
                         onPressed: () {
                           final name = nameCtrl.text.trim();
-                          final priceVal = int.tryParse(priceCtrl.text.replaceAll(',', '').trim()) ?? 0;
-                          if (name.isEmpty || priceVal <= 0) {
+                          final parsedPrice = _parseMoney(priceCtrl.text);
+                          if (name.isEmpty || parsedPrice == null || parsedPrice.minorUnits <= 0) {
                             ScaffoldMessenger.of(context).showSnackBar(
                                 const SnackBar(content: Text('Name and price are required.')));
                             return;
@@ -227,7 +239,7 @@ class _InventoryViewState extends State<InventoryView> {
                           final sku = skuCtrl.text.trim().isNotEmpty
                               ? skuCtrl.text.trim()
                               : 'SKU-${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-                          final costVal = int.tryParse(costCtrl.text.replaceAll(',', '').trim());
+                          final parsedCost = _parseMoney(costCtrl.text);
                           final stock = int.tryParse(stockCtrl.text.trim()) ?? 0;
                           final threshold = int.tryParse(lowStockCtrl.text.trim()) ?? 10;
                           if (isEdit) {
@@ -236,8 +248,8 @@ class _InventoryViewState extends State<InventoryView> {
                               barcode: barcodeCtrl.text.trim().isNotEmpty
                                   ? barcodeCtrl.text.trim() : null,
                               category: category,
-                              unitPrice: Money.shillings(priceVal),
-                              costPrice: costVal != null ? Money.shillings(costVal) : null,
+                              unitPrice: parsedPrice,
+                              costPrice: parsedCost,
                               stock: stock, lowStockThreshold: threshold,
                               notes: notesCtrl.text.trim().isNotEmpty
                                   ? notesCtrl.text.trim() : null,
@@ -254,8 +266,8 @@ class _InventoryViewState extends State<InventoryView> {
                               barcode: barcodeCtrl.text.trim().isNotEmpty
                                   ? barcodeCtrl.text.trim() : null,
                               category: category,
-                              unitPrice: Money.shillings(priceVal),
-                              costPrice: costVal != null ? Money.shillings(costVal) : null,
+                              unitPrice: parsedPrice,
+                              costPrice: parsedCost,
                               stock: stock, lowStockThreshold: threshold,
                               icon: _catIcon(category), tint: _catColor(category),
                               notes: notesCtrl.text.trim().isNotEmpty

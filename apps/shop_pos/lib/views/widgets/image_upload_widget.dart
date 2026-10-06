@@ -69,11 +69,12 @@ class _ImageUploadWidgetState extends State<ImageUploadWidget>
 
   Future<void> _pick() async {
     if (_loading) return;
-    setState(() => _loading = true);
     try {
-      final result = await ImageService.pickAndProcess(
+      final pickFuture = ImageService.pickAndProcess(
         maxEdgePx: widget.isLogo ? ImageService.logoMaxPx : ImageService.productMaxPx,
       );
+      if (mounted) setState(() => _loading = true);
+      final result = await pickFuture;
       if (result != null && mounted) {
         widget.onImagePicked(result.base64Jpeg);
       }
@@ -173,15 +174,52 @@ class _ImageUploadWidgetState extends State<ImageUploadWidget>
 
   Widget _buildContent(bool hasImage) {
     if (hasImage) {
-      return Image.memory(
-        base64Decode(widget.currentBase64!.split(',').last),
-        fit: BoxFit.cover,
-        width: widget.size,
-        height: widget.size,
-        gaplessPlayback: true,
-      );
+      try {
+        final clean = widget.currentBase64!.split(',').last.replaceAll(RegExp(r'\s+'), '');
+        final bytes = base64Decode(clean);
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.memory(
+              bytes,
+              fit: BoxFit.cover,
+              width: widget.size,
+              height: widget.size,
+              gaplessPlayback: true,
+              errorBuilder: (ctx, err, stack) => _buildPlaceholder(),
+            ),
+            Positioned(
+              bottom: 4,
+              left: 4,
+              right: 4,
+              child: Container(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.black.withAlpha(160),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  'Change',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        );
+      } catch (_) {
+        return _buildPlaceholder();
+      }
     }
 
+    return _buildPlaceholder();
+  }
+
+  Widget _buildPlaceholder() {
     return Column(
       mainAxisAlignment: MainAxisAlignment.center,
       children: [

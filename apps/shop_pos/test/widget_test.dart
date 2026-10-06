@@ -19,7 +19,9 @@ void main() {
     tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
-    await tester.pumpWidget(RetailPosApp(state: PosState()));
+    final state = PosState();
+    state.currentUser = state.users.first;
+    await tester.pumpWidget(RetailPosApp(state: state));
     await tester.pump();
   }
 
