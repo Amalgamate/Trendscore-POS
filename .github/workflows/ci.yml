@@ -10,7 +10,7 @@ on:
 # is running. Version comes from the tag or the root package.json version.
 env:
   REGISTRY: ghcr.io
-  IMAGE_PREFIX: ${{ github.repository_owner }}
+  IMAGE_PREFIX: amalgamate
 
 jobs:
   # ---------------------------------------------------------------------
@@ -102,8 +102,8 @@ jobs:
             context: ./apps/shop-api
             dockerfile: ./apps/shop-api/Dockerfile
           - name: shop-pos
-            context: ./apps/shop-pos
-            dockerfile: ./apps/shop-pos/Dockerfile
+            context: ./apps/shop_pos
+            dockerfile: ./apps/shop_pos/Dockerfile
 
     steps:
       - uses: actions/checkout@v4

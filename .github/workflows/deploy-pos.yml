@@ -1,0 +1,92 @@
+name: Deploy Retail POS
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: read
+
+concurrency:
+  group: retail-pos-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      DOMAIN: www.gutagala.trendscore.co.ke
+      EXPECTED_IP: 185.127.16.124
+      TLS_EMAIL: admin@trendscore.app
+      IMAGE: ghcr.io/amalgamate/shop-pos:sha-${{ github.event.workflow_run.head_sha }}
+      DEPLOY_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
+      REMOTE_DIR: /tmp/retailpos-${{ github.run_id }}-${{ github.run_attempt }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+
+      - name: Confirm DNS points to the production host
+        run: |
+          set -euo pipefail
+          resolved="$(dig +short A "$DOMAIN" | sort -u)"
+          echo "Domain: $DOMAIN"
+          echo "Expected IPv4: $EXPECTED_IP"
+          echo "Resolved IPv4: ${resolved:-<none>}"
+          printf '%s\n' "$resolved" | grep -Fxq "$EXPECTED_IP" || {
+            echo "DNS must resolve to $EXPECTED_IP before deploy and certificate issuance." >&2
+            exit 1
+          }
+
+      - name: Configure production SSH
+        id: configure_ssh
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+        run: bash scripts/ci/configure-deploy-ssh.sh
+
+      - name: Prepare short-lived GHCR credentials on the host
+        env:
+          GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          auth="$(printf '%s' "${GITHUB_ACTOR}:${GHCR_TOKEN}" | base64 -w0)"
+          printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/retailpos-docker-config.json"
+          chmod 600 "$RUNNER_TEMP/retailpos-docker-config.json"
+          ssh production "mkdir -m 700 '$REMOTE_DIR'"
+          scp "$RUNNER_TEMP/retailpos-docker-config.json" "production:$REMOTE_DIR/config.json"
+          ssh production "chmod 600 '$REMOTE_DIR/config.json'"
+          rm -f "$RUNNER_TEMP/retailpos-docker-config.json"
+
+      - name: Copy POS deployment script
+        run: |
+          set -euo pipefail
+          scp scripts/deploy-pos.sh "production:$REMOTE_DIR/deploy-pos.sh"
+          ssh production "chmod 700 '$REMOTE_DIR/deploy-pos.sh'"
+
+      - name: Deploy container, bind Nginx, and issue SSL
+        run: |
+          set -euo pipefail
+          ssh production "sudo env DOCKER_CONFIG='$REMOTE_DIR' bash '$REMOTE_DIR/deploy-pos.sh' '$IMAGE' '$DOMAIN' '$TLS_EMAIL' '$DEPLOY_ID'"
+
+      - name: Verify public HTTPS
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --location --max-time 30 \
+            --output /dev/null --write-out 'HTTPS %{http_code}\n' "https://$DOMAIN/"
+          openssl s_client -connect "${DOMAIN}:443" -servername "$DOMAIN" </dev/null 2>/dev/null \
+            | openssl x509 -noout -checkhost "$DOMAIN" -enddate
+
+      - name: Remove temporary deployment files
+        if: always() && steps.configure_ssh.outcome == 'success'
+        run: ssh production "sudo rm -rf '$REMOTE_DIR'"
