@@ -1,5 +1,7 @@
 # Build the Flutter POS as a static web application, then serve it with Node.
-FROM ghcr.io/cirruslabs/flutter:stable AS builder
+# Match the Flutter SDK used to generate pubspec.lock. A moving stable tag
+# can make `--enforce-lockfile` fail when SDK-bundled package versions change.
+FROM ghcr.io/cirruslabs/flutter:3.38.3 AS builder
 WORKDIR /app
 
 COPY pubspec.yaml pubspec.lock ./
