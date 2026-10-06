@@ -18,7 +18,7 @@
     "db:generate:shop": "npm run prisma:generate -w shop-api",
     "db:migrate:control": "npm run prisma:migrate -w control-plane-api",
     "db:migrate:shop": "npm run prisma:migrate -w shop-api",
-    "test": "npm run test -w payment-provider && npm run test -w control-plane-api && npm run test -w shop-api",
+    "test": "npm run test -w @retail-os/payment-provider && npm run test -w control-plane-api && npm run test -w shop-api",
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   }

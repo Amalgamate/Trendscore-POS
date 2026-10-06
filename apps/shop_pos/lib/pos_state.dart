@@ -1,0 +1,1319 @@
+import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:math' as math;
+import 'package:flutter/material.dart';
+import 'cart.dart';
+import 'theme/tokens.dart';
+
+/// A product in the shop catalog.
+class PosProduct {
+  PosProduct({
+    required this.id,
+    required this.name,
+    required this.sku,
+    this.barcode,
+    required this.category,
+    required this.unitPrice,
+    this.costPrice,
+    required this.stock,
+    this.lowStockThreshold = 10,
+    required this.icon,
+    required this.tint,
+    this.taxRateBasisPoints = defaultVatRateBasisPoints,
+    this.isActive = true,
+    this.notes,
+    this.imageBase64,
+  });
+
+  final String id;
+  String name;
+  String sku;
+  String? barcode;
+  String category;
+  Money unitPrice;
+  Money? costPrice;
+  int stock;
+  int lowStockThreshold;
+  final IconData icon;
+  final Color tint;
+  final int taxRateBasisPoints;
+  bool isActive;
+  String? notes;
+  /// Base64-encoded 1:1 JPEG product image (data URI), or null if none.
+  String? imageBase64;
+
+  bool get isOutOfStock => stock <= 0;
+  bool get isLowStock => stock > 0 && stock <= lowStockThreshold;
+
+  double? get marginPercent {
+    if (costPrice == null || costPrice!.minorUnits == 0) return null;
+    return ((unitPrice.minorUnits - costPrice!.minorUnits) / costPrice!.minorUnits) * 100;
+  }
+
+  PosProduct copyWith({
+    String? name,
+    String? sku,
+    String? barcode,
+    String? category,
+    Money? unitPrice,
+    Money? costPrice,
+    int? stock,
+    int? lowStockThreshold,
+    IconData? icon,
+    Color? tint,
+    int? taxRateBasisPoints,
+    bool? isActive,
+    String? notes,
+    Object? imageBase64 = _sentinel,
+  }) {
+    return PosProduct(
+      id: id,
+      name: name ?? this.name,
+      sku: sku ?? this.sku,
+      barcode: barcode ?? this.barcode,
+      category: category ?? this.category,
+      unitPrice: unitPrice ?? this.unitPrice,
+      costPrice: costPrice ?? this.costPrice,
+      stock: stock ?? this.stock,
+      lowStockThreshold: lowStockThreshold ?? this.lowStockThreshold,
+      icon: icon ?? this.icon,
+      tint: tint ?? this.tint,
+      taxRateBasisPoints: taxRateBasisPoints ?? this.taxRateBasisPoints,
+      isActive: isActive ?? this.isActive,
+      notes: notes ?? this.notes,
+      imageBase64: imageBase64 == _sentinel ? this.imageBase64 : (imageBase64 as String?),
+    );
+  }
+
+  static const Object _sentinel = Object();
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'sku': sku,
+    'barcode': barcode,
+    'category': category,
+    'unitPriceMinor': unitPrice.minorUnits,
+    'costPriceMinor': costPrice?.minorUnits,
+    'stock': stock,
+    'lowStockThreshold': lowStockThreshold,
+    'iconCode': icon.codePoint,
+    'iconFontFamily': icon.fontFamily,
+    'tint': tint.toARGB32(),
+    'taxRateBasisPoints': taxRateBasisPoints,
+    'isActive': isActive,
+    'notes': notes,
+    'imageBase64': imageBase64,
+  };
+
+  factory PosProduct.fromJson(Map<String, dynamic> json) => PosProduct(
+    id: json['id'] as String,
+    name: json['name'] as String,
+    sku: json['sku'] as String,
+    barcode: json['barcode'] as String?,
+    category: json['category'] as String,
+    unitPrice: Money(json['unitPriceMinor'] as int? ?? 0),
+    costPrice: json['costPriceMinor'] != null ? Money(json['costPriceMinor'] as int) : null,
+    stock: json['stock'] as int? ?? 0,
+    lowStockThreshold: json['lowStockThreshold'] as int? ?? 10,
+    icon: _iconFromCode(json['iconCode'] as int?),
+    tint: Color(json['tint'] as int? ?? 0xFFF1F5F9),
+    taxRateBasisPoints: json['taxRateBasisPoints'] as int? ?? defaultVatRateBasisPoints,
+    isActive: json['isActive'] as bool? ?? true,
+    notes: json['notes'] as String?,
+    imageBase64: json['imageBase64'] as String?,
+  );
+
+  static IconData _iconFromCode(int? code) {
+    if (code == null) return Icons.inventory_2_outlined;
+    switch (code) {
+      case 0xe6e8: return Icons.water_drop_outlined;
+      case 0xe0d6: return Icons.bakery_dining_outlined;
+      case 0xe21a: return Icons.egg_alt_outlined;
+      case 0xe2e6: return Icons.grain;
+      case 0xe5d2: return Icons.spa_outlined;
+      case 0xe333: return Icons.icecream_outlined;
+      case 0xe463: return Icons.oil_barrel_outlined;
+      case 0xe206: return Icons.eco_outlined;
+      case 0xe3a7: return Icons.local_drink_outlined;
+      case 0xe532: return Icons.rice_bowl_outlined;
+      default: return Icons.inventory_2_outlined;
+    }
+  }
+}
+
+
+/// A line item in a completed or printed sale.
+class SaleRecordItem {
+  const SaleRecordItem({
+    required this.productId,
+    required this.productName,
+    required this.unitPrice,
+    required this.quantity,
+    required this.lineTotal,
+  });
+
+  final String productId;
+  final String productName;
+  final Money unitPrice;
+  final int quantity;
+  final Money lineTotal;
+}
+
+enum SaleStatus {
+  completed('Completed', AppColors.status_success),
+  reversed('Reversed', AppColors.status_danger);
+
+  const SaleStatus(this.label, this.color);
+  final String label;
+  final Color color;
+}
+
+/// Completed sale record in the immutable sales ledger.
+class SaleRecord {
+  SaleRecord({
+    required this.receiptNumber,
+    required this.timestamp,
+    required this.cashier,
+    required this.items,
+    required this.subtotal,
+    required this.vatAmount,
+    required this.paymentMethod,
+    required this.paymentReference,
+    this.customer,
+    this.status = SaleStatus.completed,
+    this.reversalReason,
+    this.cashTendered,
+    this.changeDue,
+  });
+
+  final String receiptNumber;
+  final DateTime timestamp;
+  final String cashier;
+  final List<SaleRecordItem> items;
+  final Money subtotal;
+  final Money vatAmount;
+  final SalePaymentMethod paymentMethod;
+  final String paymentReference;
+  final PosCustomer? customer;
+  SaleStatus status;
+  String? reversalReason;
+  final Money? cashTendered;
+  final Money? changeDue;
+
+  int get totalUnits => items.fold(0, (sum, i) => sum + i.quantity);
+  bool get isReversed => status == SaleStatus.reversed;
+}
+
+enum LedgerEntryType {
+  saleDebit('Goods on Credit', true),
+  paymentCredit('Debt Payment', false),
+  reversal('Reversal Entry', false);
+
+  const LedgerEntryType(this.label, this.isDebit);
+  final String label;
+  final bool isDebit;
+}
+
+/// An entry in a customer's immutable credit ledger.
+class CustomerLedgerEntry {
+  const CustomerLedgerEntry({
+    required this.id,
+    required this.timestamp,
+    required this.type,
+    required this.amount,
+    required this.reference,
+    required this.runningBalance,
+  });
+
+  final String id;
+  final DateTime timestamp;
+  final LedgerEntryType type;
+  final Money amount;
+  final String reference;
+  final Money runningBalance;
+}
+
+/// A registered customer with credit account.
+class PosCustomer {
+  PosCustomer({
+    required this.id,
+    required this.name,
+    required this.phone,
+    required this.creditLimit,
+    required this.currentBalance,
+    List<CustomerLedgerEntry>? history,
+  }) : ledger = history ?? [];
+
+  final String id;
+  final String name;
+  final String phone;
+  final Money creditLimit;
+  Money currentBalance;
+  final List<CustomerLedgerEntry> ledger;
+
+  Money get availableCredit =>
+      creditLimit > currentBalance ? Money(creditLimit.minorUnits - currentBalance.minorUnits) : const Money(0);
+}
+
+enum CashMovementType {
+  floatIn('Opening Float', true),
+  saleCash('Cash Sale', true),
+  expenseOut('Expense Out', false),
+  dropOut('Cash Drop', false);
+
+  const CashMovementType(this.label, this.isInflow);
+  final String label;
+  final bool isInflow;
+}
+
+class CashMovement {
+  const CashMovement({
+    required this.id,
+    required this.timestamp,
+    required this.type,
+    required this.amount,
+    required this.reason,
+    required this.cashier,
+  });
+
+  final String id;
+  final DateTime timestamp;
+  final CashMovementType type;
+  final Money amount;
+  final String reason;
+  final String cashier;
+}
+
+/// A till shift with cash drawer management and reconciliation.
+class CashShift {
+  CashShift({
+    required this.shiftId,
+    required this.openedAt,
+    required this.openingFloat,
+    required this.cashier,
+  })  : cashSales = const Money(0),
+        cashPaidIn = const Money(0),
+        cashPaidOut = const Money(0),
+        movements = [
+          CashMovement(
+            id: 'mov_init',
+            timestamp: openedAt,
+            type: CashMovementType.floatIn,
+            amount: openingFloat,
+            reason: 'Opening till float',
+            cashier: cashier,
+          ),
+        ];
+
+  final String shiftId;
+  final DateTime openedAt;
+  final Money openingFloat;
+  final String cashier;
+  Money cashSales;
+  Money cashPaidIn;
+  Money cashPaidOut;
+  final List<CashMovement> movements;
+  bool isClosed = false;
+  Money? closingCounted;
+  Money? variance;
+
+  Money get expectedCash => Money(
+        openingFloat.minorUnits + cashSales.minorUnits + cashPaidIn.minorUnits - cashPaidOut.minorUnits,
+      );
+}
+
+enum PosUserRole {
+  owner,
+  manager,
+  cashier,
+  stockClerk,
+}
+
+class PosUser {
+  PosUser({
+    required this.id,
+    required this.fullName,
+    required this.phone,
+    required this.pin,
+    required this.role,
+    this.active = true,
+    this.color = const Color(0xFF10B981),
+  });
+
+  final String id;
+  String fullName;
+  String phone;
+  String pin;
+  PosUserRole role;
+  bool active;
+  Color color;
+
+  String get roleDisplay {
+    switch (role) {
+      case PosUserRole.owner:
+        return 'Owner';
+      case PosUserRole.manager:
+        return 'Manager';
+      case PosUserRole.cashier:
+        return 'Cashier';
+      case PosUserRole.stockClerk:
+        return 'Stock Clerk';
+    }
+  }
+
+  String get rolePermissions {
+    switch (role) {
+      case PosUserRole.owner:
+        return 'Full System & Business Owner Access';
+      case PosUserRole.manager:
+        return 'Supervisory: Till drops, reversals, stock variance';
+      case PosUserRole.cashier:
+        return 'POS Counter: Ring sales, cash drawer, receipts';
+      case PosUserRole.stockClerk:
+        return 'Stockroom: Inventory counts, shelf stock, receiving';
+    }
+  }
+
+  String get firstName => fullName.trim().split(' ').first;
+
+  String get initials {
+    final parts = fullName.trim().split(' ');
+    if (parts.length >= 2) return '${parts[0][0]}${parts[1][0]}'.toUpperCase();
+    return fullName.substring(0, math.min(2, fullName.length)).toUpperCase();
+  }
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'fullName': fullName,
+    'phone': phone,
+    'pin': pin,
+    'role': role.index,
+    'color': color.toARGB32(),
+    'active': active,
+  };
+
+  factory PosUser.fromJson(Map<String, dynamic> json) => PosUser(
+    id: json['id'] as String,
+    fullName: json['fullName'] as String,
+    phone: json['phone'] as String,
+    pin: json['pin'] as String,
+    role: PosUserRole.values[(json['role'] as int? ?? 2).clamp(0, PosUserRole.values.length - 1)],
+    color: Color(json['color'] as int? ?? 0xFF10B981),
+    active: json['active'] as bool? ?? true,
+  );
+}
+
+/// Global reactive state for the Retail OS POS.
+class PosState extends ChangeNotifier {
+  PosState() {
+    _initSampleData();
+    _loadFromStorage();
+  }
+
+  final Cart cart = Cart();
+  String activeCashier = 'John Mwangi';
+  String get activeCashierName => activeCashier;
+  set activeCashierName(String name) {
+    activeCashier = name;
+    notifyListeners();
+  }
+
+  // ─── Customizable Brand & Store Identity ───────────────────────────────
+  String shopName = 'ShopSmart POS';
+  String storeBranch = 'Kilimani Market · Counter 01';
+  String tillId = 'TILL-01';
+  String brandLogoUrl = '';
+  /// Uploaded brand logo as base64 data URI (overrides brandLogoUrl when set).
+  String? brandLogoBase64;
+  String heroImageUrl = 'cashier_banner.jpg';
+  String brandTagline = 'Your shop. Your customers. Everything in one place.';
+
+  // ─── Hardware & Peripherals ─────────────────────────────────────────────
+  bool autoPrintReceipt = true;
+  bool cashDrawerKick = true;
+  bool requirePinForReversal = true;
+  String printerPaperSize = '80mm';
+  String serverUrl = 'http://localhost:3000';
+
+  late List<PosUser> users;
+  PosUser? currentLoggedInUser;
+
+  /// True once the async _loadFromStorage() has completed.
+  bool sessionLoaded = false;
+
+  List<PosUser> get activeUsers => users.where((u) => u.active).toList();
+
+  void addUser(PosUser user) {
+    users.add(user);
+    notifyListeners();
+    _persistAll();
+  }
+
+  void updateUser(PosUser updated) {
+    final idx = users.indexWhere((u) => u.id == updated.id);
+    if (idx != -1) {
+      users[idx] = updated;
+      if (currentLoggedInUser?.id == updated.id) {
+        currentLoggedInUser = updated;
+        activeCashier = updated.fullName;
+      }
+      notifyListeners();
+      _persistAll();
+    }
+  }
+
+  void deleteUser(String id) {
+    users.removeWhere((u) => u.id == id);
+    notifyListeners();
+    _persistAll();
+  }
+
+  void toggleUserActive(String id) {
+    final idx = users.indexWhere((u) => u.id == id);
+    if (idx != -1) {
+      users[idx].active = !users[idx].active;
+      notifyListeners();
+      _persistAll();
+    }
+  }
+
+  late List<PosProduct> products;
+  late List<PosCustomer> customers;
+  late List<SaleRecord> sales;
+  List<SaleRecord> get salesLedger => sales;
+  late CashShift shift;
+  Money get expectedDrawerCash => shift.expectedCash;
+  PosCustomer? selectedCustomer;
+
+  void addProduct(PosProduct p) {
+    products.insert(0, p);
+    notifyListeners();
+    _persistAll();
+  }
+
+  void updateProduct(PosProduct updated) {
+    final idx = products.indexWhere((p) => p.id == updated.id);
+    if (idx != -1) {
+      products[idx] = updated;
+      notifyListeners();
+      _persistAll();
+    }
+  }
+
+  void deleteProduct(String productId) {
+    products.removeWhere((p) => p.id == productId);
+    notifyListeners();
+    _persistAll();
+  }
+
+  void addCustomer(PosCustomer c) {
+    customers.insert(0, c);
+    notifyListeners();
+  }
+
+
+  int savedTabIndex = 0;
+  static const int sessionTimeoutMinutes = 60; // 1 hour unattended session threshold
+
+  void setActiveTab(int index) {
+    savedTabIndex = index;
+    touchSession();
+    _saveActiveTab(index);
+  }
+
+  Future<void> _saveActiveTab(int index) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('session_active_tab', index);
+    } catch (_) {}
+  }
+
+  /// Touch session on any user action so the 1-hour unattended window rolls forward
+  Future<void> touchSession() async {
+    if (currentLoggedInUser == null) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt('session_last_active', DateTime.now().millisecondsSinceEpoch);
+    } catch (_) {}
+  }
+
+  Future<void> logout() async {
+    await persistSession(null);
+  }
+
+  // ─── Persistence Methods ───────────────────────────────────────────────
+  Future<void> loadInitialState() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      shopName = prefs.getString('shop_name') ?? shopName;
+      storeBranch = prefs.getString('store_branch') ?? storeBranch;
+      tillId = prefs.getString('till_id') ?? tillId;
+      brandLogoUrl = prefs.getString('brand_logo_url') ?? brandLogoUrl;
+      brandLogoBase64 = prefs.getString('brand_logo_base64');
+      heroImageUrl = prefs.getString('hero_image_url') ?? heroImageUrl;
+      brandTagline = prefs.getString('brand_tagline') ?? brandTagline;
+
+      autoPrintReceipt = prefs.getBool('auto_print_receipt') ?? autoPrintReceipt;
+      cashDrawerKick = prefs.getBool('cash_drawer_kick') ?? cashDrawerKick;
+      requirePinForReversal = prefs.getBool('require_pin_reversal') ?? requirePinForReversal;
+      printerPaperSize = prefs.getString('printer_paper_size') ?? printerPaperSize;
+      serverUrl = prefs.getString('server_url') ?? serverUrl;
+
+      final usersJson = prefs.getString('users_json');
+      if (usersJson != null) {
+        try {
+          final list = jsonDecode(usersJson) as List;
+          users = list.map((item) => PosUser.fromJson(item as Map<String, dynamic>)).toList();
+        } catch (e) {
+          debugPrint('Error parsing users_json: $e');
+        }
+      }
+
+      final productsJson = prefs.getString('products_json');
+      if (productsJson != null) {
+        try {
+          final list = jsonDecode(productsJson) as List;
+          products = list.map((item) => PosProduct.fromJson(item as Map<String, dynamic>)).toList();
+        } catch (e) {
+          debugPrint('Error parsing products_json: $e');
+        }
+      }
+
+      // Check session validity (1 hour unattended threshold)
+      final lastActiveMs = prefs.getInt('session_last_active');
+      final savedUserJson = prefs.getString('session_user_json');
+      final savedUserId = prefs.getString('session_user_id');
+
+      if (lastActiveMs != null && (savedUserJson != null || savedUserId != null)) {
+        final nowMs = DateTime.now().millisecondsSinceEpoch;
+        final elapsedMinutes = (nowMs - lastActiveMs) / (1000 * 60);
+
+        if (elapsedMinutes < sessionTimeoutMinutes) {
+          // Session is STILL VALID (< 1 hour unattended)
+          PosUser? restoredUser;
+          if (savedUserJson != null && savedUserJson.isNotEmpty) {
+            try {
+              restoredUser = PosUser.fromJson(jsonDecode(savedUserJson) as Map<String, dynamic>);
+            } catch (_) {}
+          }
+          if (restoredUser == null && savedUserId != null && savedUserId.isNotEmpty) {
+            try {
+              restoredUser = users.firstWhere((u) => u.id == savedUserId);
+            } catch (_) {}
+          }
+
+          if (restoredUser != null) {
+            currentLoggedInUser = restoredUser;
+            activeCashier = restoredUser.fullName;
+            savedTabIndex = prefs.getInt('session_active_tab') ?? 0;
+            // Roll forward last active timestamp
+            await prefs.setInt('session_last_active', nowMs);
+          } else {
+            currentLoggedInUser = null;
+          }
+        } else {
+          // Expired (> 1 hour unattended)
+          debugPrint('Session expired after ${elapsedMinutes.toStringAsFixed(1)} minutes unattended');
+          currentLoggedInUser = null;
+          await prefs.remove('session_user_id');
+          await prefs.remove('session_user_json');
+          await prefs.remove('session_last_active');
+        }
+      } else {
+        currentLoggedInUser = null;
+      }
+
+      sessionLoaded = true;
+      notifyListeners();
+    } catch (e) {
+      debugPrint('Error loading saved settings from storage: $e');
+      sessionLoaded = true;
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadFromStorage() => loadInitialState();
+
+  Future<void> _persistAll() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('shop_name', shopName);
+      await prefs.setString('store_branch', storeBranch);
+      await prefs.setString('till_id', tillId);
+      await prefs.setString('brand_logo_url', brandLogoUrl);
+      if (brandLogoBase64 != null) {
+        await prefs.setString('brand_logo_base64', brandLogoBase64!);
+      } else {
+        await prefs.remove('brand_logo_base64');
+      }
+      await prefs.setString('hero_image_url', heroImageUrl);
+      await prefs.setString('brand_tagline', brandTagline);
+
+      await prefs.setBool('auto_print_receipt', autoPrintReceipt);
+      await prefs.setBool('cash_drawer_kick', cashDrawerKick);
+      await prefs.setBool('require_pin_reversal', requirePinForReversal);
+      await prefs.setString('printer_paper_size', printerPaperSize);
+      await prefs.setString('server_url', serverUrl);
+
+      final usersList = users.map((u) => u.toJson()).toList();
+      await prefs.setString('users_json', jsonEncode(usersList));
+
+      final productsList = products.map((p) => p.toJson()).toList();
+      await prefs.setString('products_json', jsonEncode(productsList));
+
+      // Persist session if active
+      if (currentLoggedInUser != null) {
+        await prefs.setString('session_user_id', currentLoggedInUser!.id);
+        await prefs.setString('session_user_json', jsonEncode(currentLoggedInUser!.toJson()));
+        await prefs.setInt('session_last_active', DateTime.now().millisecondsSinceEpoch);
+        await prefs.setInt('session_active_tab', savedTabIndex);
+      }
+    } catch (e) {
+      debugPrint('Error persisting settings: $e');
+    }
+  }
+
+  /// Call when a user logs in or out to immediately persist/clear the session.
+  Future<void> persistSession(PosUser? user, {int? tabIndex}) async {
+    currentLoggedInUser = user;
+    if (user != null) activeCashier = user.fullName;
+    if (tabIndex != null) savedTabIndex = tabIndex;
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      if (user != null) {
+        await prefs.setString('session_user_id', user.id);
+        await prefs.setString('session_user_json', jsonEncode(user.toJson()));
+        await prefs.setInt('session_last_active', DateTime.now().millisecondsSinceEpoch);
+        if (tabIndex != null) {
+          await prefs.setInt('session_active_tab', tabIndex);
+        }
+      } else {
+        await prefs.remove('session_user_id');
+        await prefs.remove('session_user_json');
+        await prefs.remove('session_last_active');
+      }
+    } catch (e) {
+      debugPrint('Error persisting session: $e');
+    }
+  }
+
+  Future<void> saveSettings({
+    String? newShopName,
+    String? newStoreBranch,
+    String? newTillId,
+    String? newBrandLogoUrl,
+    String? newBrandLogoBase64,
+    bool clearLogoBase64 = false,
+    String? newHeroImageUrl,
+    String? newBrandTagline,
+    bool? newAutoPrintReceipt,
+    bool? newCashDrawerKick,
+    bool? newRequirePinForReversal,
+    String? newPrinterPaperSize,
+    String? newServerUrl,
+  }) async {
+    if (newShopName != null) shopName = newShopName;
+    if (newStoreBranch != null) storeBranch = newStoreBranch;
+    if (newTillId != null) tillId = newTillId;
+    if (newBrandLogoUrl != null) brandLogoUrl = newBrandLogoUrl;
+    if (newBrandLogoBase64 != null) brandLogoBase64 = newBrandLogoBase64;
+    if (clearLogoBase64) brandLogoBase64 = null;
+    if (newHeroImageUrl != null) heroImageUrl = newHeroImageUrl;
+    if (newBrandTagline != null) brandTagline = newBrandTagline;
+    if (newAutoPrintReceipt != null) autoPrintReceipt = newAutoPrintReceipt;
+    if (newCashDrawerKick != null) cashDrawerKick = newCashDrawerKick;
+    if (newRequirePinForReversal != null) requirePinForReversal = newRequirePinForReversal;
+    if (newPrinterPaperSize != null) printerPaperSize = newPrinterPaperSize;
+    if (newServerUrl != null) serverUrl = newServerUrl;
+
+    notifyListeners();
+    await _persistAll();
+  }
+
+  Future<void> resetCatalogueToDefaults() async {
+    _initDefaultProducts();
+    notifyListeners();
+    await _persistAll();
+  }
+
+  Future<void> resetUsersToDefaults() async {
+    _initDefaultUsers();
+    notifyListeners();
+    await _persistAll();
+  }
+
+  int _receiptCounter = 1042;
+
+  void _initDefaultUsers() {
+    users = [
+      PosUser(
+        id: 'usr_1',
+        fullName: 'John Mwangi',
+        phone: '+254 712 345 678',
+        pin: '1234',
+        role: PosUserRole.cashier,
+        color: const Color(0xFF10B981),
+      ),
+      PosUser(
+        id: 'usr_2',
+        fullName: 'Wanjiku Karanja',
+        phone: '+254 722 987 654',
+        pin: '2222',
+        role: PosUserRole.cashier,
+        color: const Color(0xFF0D9488),
+      ),
+      PosUser(
+        id: 'usr_3',
+        fullName: 'Amina Hassan',
+        phone: '+254 701 555 777',
+        pin: '9999',
+        role: PosUserRole.manager,
+        color: const Color(0xFF7C3AED),
+      ),
+      PosUser(
+        id: 'usr_4',
+        fullName: 'Otieno Juma',
+        phone: '+254 733 111 222',
+        pin: '3333',
+        role: PosUserRole.stockClerk,
+        color: const Color(0xFF2563EB),
+      ),
+      PosUser(
+        id: 'usr_5',
+        fullName: 'David Kamau',
+        phone: '+254 720 000 111',
+        pin: '0000',
+        role: PosUserRole.owner,
+        color: const Color(0xFFD97706),
+      ),
+    ];
+
+  }
+
+  void _initDefaultProducts() {
+    products = [
+      PosProduct(
+        id: 'prod_1',
+        name: 'Fresh milk 500ml',
+        sku: 'MLK-500',
+        category: 'Dairy',
+        unitPrice: const Money.shillings(65),
+        stock: 24,
+        lowStockThreshold: 10,
+        icon: Icons.water_drop_outlined,
+        tint: const Color(0xFFE9F2FF),
+      ),
+      PosProduct(
+        id: 'prod_2',
+        name: 'White bread 400g',
+        sku: 'BRD-400',
+        category: 'Bakery',
+        unitPrice: const Money.shillings(75),
+        stock: 18,
+        lowStockThreshold: 8,
+        icon: Icons.bakery_dining_outlined,
+        tint: const Color(0xFFFFF3DF),
+      ),
+      PosProduct(
+        id: 'prod_3',
+        name: 'Farm eggs (tray of 30)',
+        sku: 'EGG-TR30',
+        category: 'Dairy',
+        unitPrice: const Money.shillings(480),
+        stock: 8,
+        lowStockThreshold: 10,
+        icon: Icons.egg_alt_outlined,
+        tint: const Color(0xFFFFF1D6),
+      ),
+      PosProduct(
+        id: 'prod_4',
+        name: 'Supa maize flour 2kg',
+        sku: 'MZE-2KG',
+        category: 'Groceries',
+        unitPrice: const Money.shillings(185),
+        stock: 31,
+        lowStockThreshold: 12,
+        icon: Icons.grain,
+        tint: const Color(0xFFEAF5E9),
+      ),
+      PosProduct(
+        id: 'prod_5',
+        name: 'Fresh tomatoes 1kg',
+        sku: 'TOM-1KG',
+        category: 'Produce',
+        unitPrice: const Money.shillings(120),
+        stock: 14,
+        lowStockThreshold: 6,
+        icon: Icons.spa_outlined,
+        tint: const Color(0xFFFFE9E5),
+      ),
+      PosProduct(
+        id: 'prod_6',
+        name: 'Long-life yoghurt 250ml',
+        sku: 'YGT-250',
+        category: 'Dairy',
+        unitPrice: const Money.shillings(55),
+        stock: 16,
+        lowStockThreshold: 10,
+        icon: Icons.icecream_outlined,
+        tint: const Color(0xFFF3EAFE),
+      ),
+      PosProduct(
+        id: 'prod_7',
+        name: 'Cooking oil 1L bottle',
+        sku: 'OIL-1L',
+        category: 'Groceries',
+        unitPrice: const Money.shillings(320),
+        stock: 5,
+        lowStockThreshold: 10,
+        icon: Icons.oil_barrel_outlined,
+        tint: const Color(0xFFFFF5D9),
+      ),
+      PosProduct(
+        id: 'prod_8',
+        name: 'Sweet Bananas (bunch)',
+        sku: 'BAN-BNCH',
+        category: 'Produce',
+        unitPrice: const Money.shillings(90),
+        stock: 20,
+        lowStockThreshold: 8,
+        icon: Icons.eco_outlined,
+        tint: const Color(0xFFF4F5D9),
+      ),
+      PosProduct(
+        id: 'prod_9',
+        name: 'Kenya Cane 250ml',
+        sku: 'KC-250',
+        category: 'Beverages',
+        unitPrice: const Money.shillings(260),
+        stock: 12,
+        lowStockThreshold: 6,
+        icon: Icons.local_drink_outlined,
+        tint: const Color(0xFFE5F7ED),
+      ),
+      PosProduct(
+        id: 'prod_10',
+        name: 'Basmati Rice 2kg',
+        sku: 'RCE-2KG',
+        category: 'Groceries',
+        unitPrice: const Money.shillings(390),
+        stock: 19,
+        lowStockThreshold: 8,
+        icon: Icons.rice_bowl_outlined,
+        tint: const Color(0xFFF0FDF4),
+      ),
+    ];
+
+  }
+
+  void _initSampleData() {
+    _initDefaultUsers();
+    _initDefaultProducts();
+    customers = [
+      PosCustomer(
+        id: 'cust_1',
+        name: 'Mama Oliech Kitchen',
+        phone: '+254 722 102 304',
+        creditLimit: const Money.shillings(25000),
+        currentBalance: const Money.shillings(4200),
+        history: [
+          CustomerLedgerEntry(
+            id: 'led_1',
+            timestamp: DateTime.now().subtract(const Duration(days: 2)),
+            type: LedgerEntryType.saleDebit,
+            amount: const Money.shillings(5200),
+            reference: 'RCP-2026-1039',
+            runningBalance: const Money.shillings(5200),
+          ),
+          CustomerLedgerEntry(
+            id: 'led_2',
+            timestamp: DateTime.now().subtract(const Duration(days: 1)),
+            type: LedgerEntryType.paymentCredit,
+            amount: const Money.shillings(1000),
+            reference: 'MPESA: QCG928A81K',
+            runningBalance: const Money.shillings(4200),
+          ),
+        ],
+      ),
+      PosCustomer(
+        id: 'cust_2',
+        name: 'Kariuki Hardware Supplies',
+        phone: '+254 733 456 789',
+        creditLimit: const Money.shillings(40000),
+        currentBalance: const Money.shillings(12500),
+        history: [
+          CustomerLedgerEntry(
+            id: 'led_3',
+            timestamp: DateTime.now().subtract(const Duration(days: 3)),
+            type: LedgerEntryType.saleDebit,
+            amount: const Money.shillings(12500),
+            reference: 'RCP-2026-1025',
+            runningBalance: const Money.shillings(12500),
+          ),
+        ],
+      ),
+      PosCustomer(
+        id: 'cust_3',
+        name: 'Teacher Wanjiku',
+        phone: '+254 710 987 654',
+        creditLimit: const Money.shillings(10000),
+        currentBalance: const Money.shillings(850),
+        history: [
+          CustomerLedgerEntry(
+            id: 'led_4',
+            timestamp: DateTime.now().subtract(const Duration(hours: 18)),
+            type: LedgerEntryType.saleDebit,
+            amount: const Money.shillings(850),
+            reference: 'RCP-2026-1040',
+            runningBalance: const Money.shillings(850),
+          ),
+        ],
+      ),
+    ];
+
+    sales = [
+      SaleRecord(
+        receiptNumber: 'RCP-2026-1040',
+        timestamp: DateTime.now().subtract(const Duration(hours: 1, minutes: 24)),
+        cashier: activeCashier,
+        items: [
+          SaleRecordItem(
+            productId: 'prod_1',
+            productName: 'Fresh milk 500ml',
+            unitPrice: const Money.shillings(65),
+            quantity: 2,
+            lineTotal: const Money.shillings(130),
+          ),
+          SaleRecordItem(
+            productId: 'prod_4',
+            productName: 'Supa maize flour 2kg',
+            unitPrice: const Money.shillings(185),
+            quantity: 1,
+            lineTotal: const Money.shillings(185),
+          ),
+        ],
+        subtotal: const Money.shillings(315),
+        vatAmount: const Money.shillings(315).vatIncludedAt(defaultVatRateBasisPoints),
+        paymentMethod: SalePaymentMethod.mpesa,
+        paymentReference: 'MPESA: QDH189XP01',
+      ),
+      SaleRecord(
+        receiptNumber: 'RCP-2026-1041',
+        timestamp: DateTime.now().subtract(const Duration(minutes: 42)),
+        cashier: activeCashier,
+        items: [
+          SaleRecordItem(
+            productId: 'prod_7',
+            productName: 'Cooking oil 1L bottle',
+            unitPrice: const Money.shillings(320),
+            quantity: 1,
+            lineTotal: const Money.shillings(320),
+          ),
+          SaleRecordItem(
+            productId: 'prod_2',
+            productName: 'White bread 400g',
+            unitPrice: const Money.shillings(75),
+            quantity: 2,
+            lineTotal: const Money.shillings(150),
+          ),
+        ],
+        subtotal: const Money.shillings(470),
+        vatAmount: const Money.shillings(470).vatIncludedAt(defaultVatRateBasisPoints),
+        paymentMethod: SalePaymentMethod.cash,
+        paymentReference: 'CASH',
+        cashTendered: const Money.shillings(500),
+        changeDue: const Money.shillings(30),
+      ),
+    ];
+
+    shift = CashShift(
+      shiftId: 'SHIFT-20261006-01',
+      openedAt: DateTime.now().subtract(const Duration(hours: 4)),
+      openingFloat: const Money.shillings(5000),
+      cashier: activeCashier,
+    );
+
+    // Record the past cash sale in the shift
+    shift.cashSales = shift.cashSales + const Money.shillings(470);
+    shift.movements.add(
+      CashMovement(
+        id: 'mov_sale_1041',
+        timestamp: DateTime.now().subtract(const Duration(minutes: 42)),
+        type: CashMovementType.saleCash,
+        amount: const Money.shillings(470),
+        reason: 'Sale RCP-2026-1041',
+        cashier: activeCashier,
+      ),
+    );
+  }
+
+  // --- Cart Actions ---
+
+  bool addToCart(PosProduct product, {void Function(String reason)? onRefused}) {
+    final line = CartLine(
+      productId: product.id,
+      name: product.name,
+      unitPrice: product.unitPrice,
+      stock: product.stock,
+    );
+    final added = cart.add(line, onRefused: onRefused);
+    if (added) notifyListeners();
+    return added;
+  }
+
+  void changeQuantity(String productId, int delta, {void Function(String reason)? onRefused}) {
+    cart.changeQuantity(productId, delta, onRefused: onRefused);
+    notifyListeners();
+  }
+
+  void clearCart() {
+    cart.clear();
+    selectedCustomer = null;
+    notifyListeners();
+  }
+
+  void selectCustomer(PosCustomer? customer) {
+    selectedCustomer = customer;
+    notifyListeners();
+  }
+
+  // --- Sale Checkout ---
+
+  SaleRecord completeSale({
+    required SalePaymentMethod method,
+    required String paymentReference,
+    Money? cashTendered,
+    Money? changeDue,
+  }) {
+    assert(cart.canCheckout, 'Cart must be non-empty and within stock limits');
+
+    _receiptCounter++;
+    final receiptNum = 'RCP-2026-$_receiptCounter';
+    final now = DateTime.now();
+
+    final items = cart.lines
+        .map((l) => SaleRecordItem(
+              productId: l.productId,
+              productName: l.name,
+              unitPrice: l.unitPrice,
+              quantity: l.quantity,
+              lineTotal: l.lineTotal,
+            ))
+        .toList();
+
+    final saleSubtotal = cart.subtotal;
+    final saleVat = cart.vatAmount;
+
+    // 1. Deduct shelf stock
+    for (final line in cart.lines) {
+      final product = products.firstWhere((p) => p.id == line.productId);
+      product.stock -= line.quantity;
+    }
+
+    // 2. If Credit, append to Customer Credit Ledger
+    if (method == SalePaymentMethod.credit && selectedCustomer != null) {
+      final newBalance = selectedCustomer!.currentBalance + saleSubtotal;
+      selectedCustomer!.currentBalance = newBalance;
+      selectedCustomer!.ledger.insert(
+        0,
+        CustomerLedgerEntry(
+          id: 'led_sale_${now.millisecondsSinceEpoch}',
+          timestamp: now,
+          type: LedgerEntryType.saleDebit,
+          amount: saleSubtotal,
+          reference: receiptNum,
+          runningBalance: newBalance,
+        ),
+      );
+    }
+
+    // 3. If Cash, append to Shift Cash movements
+    if (method == SalePaymentMethod.cash) {
+      shift.cashSales = shift.cashSales + saleSubtotal;
+      shift.movements.insert(
+        0,
+        CashMovement(
+          id: 'mov_$receiptNum',
+          timestamp: now,
+          type: CashMovementType.saleCash,
+          amount: saleSubtotal,
+          reason: 'Sale $receiptNum',
+          cashier: activeCashier,
+        ),
+      );
+    }
+
+    // 4. Create Immutable Sale Record
+    final record = SaleRecord(
+      receiptNumber: receiptNum,
+      timestamp: now,
+      cashier: activeCashier,
+      items: items,
+      subtotal: saleSubtotal,
+      vatAmount: saleVat,
+      paymentMethod: method,
+      paymentReference: paymentReference,
+      customer: selectedCustomer,
+      cashTendered: cashTendered,
+      changeDue: changeDue,
+    );
+
+    sales.insert(0, record);
+
+    // 5. Clear cart
+    cart.clear();
+    selectedCustomer = null;
+
+    notifyListeners();
+    return record;
+  }
+
+  // --- Sale Reversal (ADR-0001 & ADR-0002) ---
+
+  void reverseSale(SaleRecord sale, String reason) {
+    if (sale.isReversed) return;
+
+    sale.status = SaleStatus.reversed;
+    sale.reversalReason = reason;
+
+    // 1. Return stock to shelf
+    for (final item in sale.items) {
+      final p = products.firstWhere((prod) => prod.id == item.productId, orElse: () => products.first);
+      p.stock += item.quantity;
+    }
+
+    // 2. Reverse customer debit if credit
+    if (sale.paymentMethod == SalePaymentMethod.credit && sale.customer != null) {
+      final cust = sale.customer!;
+      final newBal = Money(
+        cust.currentBalance.minorUnits >= sale.subtotal.minorUnits
+            ? cust.currentBalance.minorUnits - sale.subtotal.minorUnits
+            : 0,
+      );
+      cust.currentBalance = newBal;
+      cust.ledger.insert(
+        0,
+        CustomerLedgerEntry(
+          id: 'rev_${DateTime.now().millisecondsSinceEpoch}',
+          timestamp: DateTime.now(),
+          type: LedgerEntryType.reversal,
+          amount: sale.subtotal,
+          reference: 'Reversal: ${sale.receiptNumber}',
+          runningBalance: newBal,
+        ),
+      );
+    }
+
+    // 3. Reverse cash in shift if cash
+    if (sale.paymentMethod == SalePaymentMethod.cash) {
+      shift.cashPaidOut = shift.cashPaidOut + sale.subtotal;
+      shift.movements.insert(
+        0,
+        CashMovement(
+          id: 'rev_mov_${DateTime.now().millisecondsSinceEpoch}',
+          timestamp: DateTime.now(),
+          type: CashMovementType.expenseOut,
+          amount: sale.subtotal,
+          reason: 'Refund Reversal: ${sale.receiptNumber}',
+          cashier: activeCashier,
+        ),
+      );
+    }
+
+    notifyListeners();
+  }
+
+  // --- Inventory Adjustments ---
+
+  void adjustStock(String productId, int delta, String reason) {
+    final prod = products.firstWhere((p) => p.id == productId);
+    final newStock = prod.stock + delta;
+    if (newStock < 0) return;
+    prod.stock = newStock;
+    notifyListeners();
+  }
+
+  // --- Customer Credit Payment ---
+
+  void recordCustomerPayment(String customerId, Money amount, String reference) {
+    final cust = customers.firstWhere((c) => c.id == customerId);
+    final newBal = Money(
+      cust.currentBalance.minorUnits >= amount.minorUnits ? cust.currentBalance.minorUnits - amount.minorUnits : 0,
+    );
+    cust.currentBalance = newBal;
+    cust.ledger.insert(
+      0,
+      CustomerLedgerEntry(
+        id: 'pmt_${DateTime.now().millisecondsSinceEpoch}',
+        timestamp: DateTime.now(),
+        type: LedgerEntryType.paymentCredit,
+        amount: amount,
+        reference: reference,
+        runningBalance: newBal,
+      ),
+    );
+
+    // If payment was cash, it goes into till
+    if (reference.toUpperCase().contains('CASH')) {
+      shift.cashPaidIn = shift.cashPaidIn + amount;
+      shift.movements.insert(
+        0,
+        CashMovement(
+          id: 'mov_debt_${DateTime.now().millisecondsSinceEpoch}',
+          timestamp: DateTime.now(),
+          type: CashMovementType.floatIn,
+          amount: amount,
+          reason: 'Debt payment from ${cust.name}',
+          cashier: activeCashier,
+        ),
+      );
+    }
+
+    notifyListeners();
+  }
+
+  // --- Cash Drawer Drops & Expenses ---
+
+  void recordCashDrop(Money amount, String reason, bool isCashIn) {
+    if (isCashIn) {
+      shift.cashPaidIn = shift.cashPaidIn + amount;
+      shift.movements.insert(
+        0,
+        CashMovement(
+          id: 'drop_${DateTime.now().millisecondsSinceEpoch}',
+          timestamp: DateTime.now(),
+          type: CashMovementType.floatIn,
+          amount: amount,
+          reason: reason,
+          cashier: activeCashier,
+        ),
+      );
+    } else {
+      shift.cashPaidOut = shift.cashPaidOut + amount;
+      shift.movements.insert(
+        0,
+        CashMovement(
+          id: 'exp_${DateTime.now().millisecondsSinceEpoch}',
+          timestamp: DateTime.now(),
+          type: CashMovementType.expenseOut,
+          amount: amount,
+          reason: reason,
+          cashier: activeCashier,
+        ),
+      );
+    }
+    notifyListeners();
+  }
+
+  // --- Shift Close ---
+
+  void closeShift(Money countedCash) {
+    shift.isClosed = true;
+    shift.closingCounted = countedCash;
+    shift.variance = Money(countedCash.minorUnits - shift.expectedCash.minorUnits);
+    notifyListeners();
+  }
+}
