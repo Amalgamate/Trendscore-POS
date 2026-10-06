@@ -574,7 +574,7 @@ class _InventoryViewState extends State<InventoryView> {
         ],
       ),
     );
-    if (confirmed == true) {
+    if (confirmed == true && mounted) {
       widget.state.deleteProduct(product.id);
       if (_selectedProduct?.id == product.id) setState(() => _selectedProduct = null);
       else setState(() {});
