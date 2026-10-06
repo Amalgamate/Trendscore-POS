@@ -21,6 +21,7 @@ class AppColors {
   static const Color text_tertiary = Color(0xFF6B7280);
   static const Color text_inverse = Color(0xFFFFFFFF);
   static const Color accent_primary = Color(0xFF0D9488);
+  static const Color accent_light = Color(0xFFF0FDFA);
   static const Color accent_inverse = Color(0xFF0F1F3D);
   static const Color status_success = Color(0xFF16A34A);
   static const Color status_warning = Color(0xFFD97706);
