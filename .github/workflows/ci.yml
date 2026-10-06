@@ -48,6 +48,14 @@ jobs:
       - name: Install
         run: npm ci
 
+      # The repository has two independent Prisma schemas. Generate both
+      # clients explicitly so typecheck uses the enums and models from each
+      # schema instead of whichever client a package postinstall generated.
+      - name: Generate Prisma clients
+        run: |
+          npm run db:generate:control
+          npm run db:generate:shop
+
       - name: Generate design tokens
         run: npm run build:tokens
 

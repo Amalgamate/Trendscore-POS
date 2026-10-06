@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+import { provision, summarise, customerVisibleSteps } from '../../src/modules/provisioning/runner.js';
+import { orderedSteps, validateContext, STEPS } from '../../src/modules/provisioning/steps.js';
 import { renderComposeFile } from '../../src/modules/provisioning/compose-template.js';
-import { makeContext } from './helpers.js';
+import { makeContext, makeDeps, succeeded } from './helpers.js';
 
 /**
  * The generated compose file is parsed as YAML here, not just string-matched.
@@ -49,11 +51,6 @@ describe('compose template is valid YAML', () => {
     expect(test?.[1]).toContain('ping');
   });
 });
-import { provision, summarise, customerVisibleSteps } from '../../src/modules/provisioning/runner.js';
-import { orderedSteps, validateContext, STEPS } from '../../src/modules/provisioning/steps.js';
-import { renderComposeFile } from '../../src/modules/provisioning/compose-template.js';
-import { makeContext, makeDeps, succeeded } from './helpers.js';
-
 describe('workflow definition', () => {
   it('has unique step keys', () => {
     const keys = STEPS.map((s) => s.key);
