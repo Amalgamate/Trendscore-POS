@@ -16,7 +16,6 @@ import 'views/login_view.dart';
 import 'views/reports_view.dart';
 import 'views/settings_view.dart';
 import 'views/purchase_orders_view.dart';
-import 'views/app_menu_view.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -69,7 +68,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isLocked = widget.state.currentLoggedInUser == null;
-    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 8);
+    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 7);
     _startInactivityTimer();
   }
 
@@ -107,10 +106,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   Set<int> _accessibleTabs(PosUser? user) {
     if (user == null) return const <int>{};
     return switch (user.role) {
-      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8},
-      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8},
-      PosUserRole.cashier => const <int>{0, 1, 4, 8},
-      PosUserRole.stockClerk => const <int>{2, 7, 8},
+      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7},
+      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7},
+      PosUserRole.cashier => const <int>{0, 1, 4},
+      PosUserRole.stockClerk => const <int>{2, 7},
     };
   }
 
@@ -193,8 +192,6 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(height: 16),
-                if (allowedTabs.contains(8)) _moreTile(Icons.apps_rounded, 'All Apps', 8, ctx),
-                const SizedBox(height: 8),
                 const Text('More Operations', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.text_tertiary, letterSpacing: 0.5)),
                 const SizedBox(height: 8),
                 if (allowedTabs.contains(7)) _moreTile(Icons.local_shipping_outlined, 'Purchase & Supplier Orders', 7, ctx),
@@ -352,10 +349,6 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             ReportsView(state: widget.state),
             SettingsView(state: widget.state),
             PurchaseOrdersView(state: widget.state),
-            AppMenuView(
-              visibleTabs: allowedTabs,
-              onSelectTab: _selectTab,
-            ),
           ];
 
           if (isMobile) {
@@ -602,7 +595,6 @@ class _NavigationSidebar extends StatelessWidget {
 
           // Nav Items
           for (final item in <({int tab, IconData icon, String label})>[
-            (tab: 8, icon: Icons.apps_rounded, label: 'Apps'),
             (tab: 0, icon: Icons.point_of_sale, label: 'POS'),
             (tab: 1, icon: Icons.receipt_long_outlined, label: 'Sales'),
             (tab: 2, icon: Icons.inventory_2_outlined, label: 'Stock'),
