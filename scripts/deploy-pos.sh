@@ -65,7 +65,9 @@ done
 
 seed_result="$("${DOCKER[@]}" run --rm --network "$NETWORK" -e "DATABASE_URL=$DATABASE_URL" -e "DIRECT_URL=$DATABASE_URL" \
   --entrypoint node "$API_IMAGE" dist/scripts/seed.js Gutagala gutagala)"
-BUSINESS_ID="$(node -e 'process.stdout.write(JSON.parse(process.argv[1]).businessId)' "$seed_result")"
+# Keep the host deployment script independent of Node.js. The API image has
+# already emitted the seed result as JSON; extract the UUID with POSIX tools.
+BUSINESS_ID="$(printf '%s\n' "$seed_result" | sed -n 's/.*"businessId":"\([^"]*\)".*/\1/p')"
 [[ "$BUSINESS_ID" =~ ^[0-9a-fA-F-]{36}$ ]] || { echo "Could not resolve the Gutagala business id" >&2; exit 1; }
 
 # Credentials travel as a short-lived file and are never interpolated into a
