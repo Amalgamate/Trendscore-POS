@@ -72,6 +72,13 @@ BUSINESS_ID="$(printf '%s\n' "$seed_result" | sed -n 's/.*"businessId":"\([^"]*\
 
 # Credentials travel as a short-lived file and are never interpolated into a
 # logged command line or retained in the running API container environment.
+# The API image runs as the unprivileged `retail` user. Give that UID read-only
+# access to the one-shot bind-mounted file; it lives inside the mode-700 temp
+# directory and is removed immediately after this command (or by the trap).
+RETAIL_UID="$("${DOCKER[@]}" run --rm --entrypoint id "$API_IMAGE" -u retail)"
+[[ "$RETAIL_UID" =~ ^[0-9]+$ ]] || { echo "Could not resolve the API container user" >&2; exit 1; }
+chown "$RETAIL_UID" "$ADMIN_CONFIG"
+chmod 400 "$ADMIN_CONFIG"
 "${DOCKER[@]}" run --rm --network "$NETWORK" --mount "type=bind,src=$ADMIN_CONFIG,dst=/run/secrets/super-admin.json,readonly" \
   -e "DATABASE_URL=$DATABASE_URL" -e "DIRECT_URL=$DATABASE_URL" \
   --entrypoint node "$API_IMAGE" dist/scripts/create-super-admin.js /run/secrets/super-admin.json
