@@ -90,9 +90,17 @@ async function main(): Promise<number> {
   ctx.hostname = `${slug}.${baseDomain}`;
 
   const commands: string[] = [];
+  const platformAdminPhone = process.env.POS_SUPER_ADMIN_PHONE;
+  const platformAdminPin = process.env.POS_SUPER_ADMIN_PIN;
+  if (Boolean(platformAdminPhone) !== Boolean(platformAdminPin)) {
+    throw new Error('Set both POS_SUPER_ADMIN_PHONE and POS_SUPER_ADMIN_PIN, or leave both unset.');
+  }
   const deps: ProvisioningDeps = {
     runCommand: async (cmd, args, opts) => {
-      const line = `${cmd} ${args.join(' ')}`;
+      const safeArgs = args.includes('create-super-admin.js')
+        ? [...args.slice(0, -1), '[initial PIN redacted]']
+        : args;
+      const line = `${cmd} ${safeArgs.join(' ')}`;
       commands.push(line);
       console.log(`    $ ${line}`);
       if (dryRun) return { code: 0, stdout: '(dry-run)', stderr: '' };
@@ -106,6 +114,9 @@ async function main(): Promise<number> {
       },
     },
     secrets: createSecretGenerator(),
+    platformSuperAdmin: platformAdminPhone && platformAdminPin
+      ? { phone: platformAdminPhone, initialPin: platformAdminPin }
+      : undefined,
     log: (level, msg, meta) => {
       const line = `[${level}] ${msg}`;
       console.log(`  ${line}${meta ? ` ${JSON.stringify(meta)}` : ''}`);

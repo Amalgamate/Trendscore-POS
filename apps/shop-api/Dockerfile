@@ -26,7 +26,7 @@ COPY src ./src
 RUN npm run build
 
 # Fail the build, not the deployment, if an entrypoint is missing.
-RUN test -f dist/index.js && test -f dist/scripts/seed.js && test -f dist/scripts/create-owner.js
+RUN test -f dist/index.js && test -f dist/scripts/seed.js && test -f dist/scripts/create-owner.js && test -f dist/scripts/create-super-admin.js
 
 # ----------------------------------------------------------------------
 FROM node:20-alpine AS runtime

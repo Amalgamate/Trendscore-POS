@@ -26,7 +26,8 @@ jobs:
       DOMAIN: www.gutagala.trendscore.co.ke
       EXPECTED_IP: 185.127.16.124
       TLS_EMAIL: admin@trendscore.app
-      IMAGE: ghcr.io/amalgamate/shop-pos:sha-${{ github.event.workflow_run.head_sha }}
+      POS_IMAGE: ghcr.io/amalgamate/shop-pos:sha-${{ github.event.workflow_run.head_sha }}
+      API_IMAGE: ghcr.io/amalgamate/shop-api:sha-${{ github.event.workflow_run.head_sha }}
       DEPLOY_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
       REMOTE_DIR: /tmp/retailpos-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -58,15 +59,24 @@ jobs:
       - name: Prepare short-lived GHCR credentials on the host
         env:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          POS_SUPER_ADMIN_PHONE: ${{ secrets.POS_SUPER_ADMIN_PHONE }}
+          POS_SUPER_ADMIN_PIN: ${{ secrets.POS_SUPER_ADMIN_PIN }}
         run: |
           set -euo pipefail
+          test -n "$POS_SUPER_ADMIN_PHONE" || { echo "Missing production secret POS_SUPER_ADMIN_PHONE" >&2; exit 1; }
+          [[ "$POS_SUPER_ADMIN_PIN" =~ ^[0-9]{4,6}$ ]] || { echo "Missing or invalid production secret POS_SUPER_ADMIN_PIN" >&2; exit 1; }
           auth="$(printf '%s' "${GITHUB_ACTOR}:${GHCR_TOKEN}" | base64 -w0)"
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/retailpos-docker-config.json"
           chmod 600 "$RUNNER_TEMP/retailpos-docker-config.json"
+          jq -n --arg phone "$POS_SUPER_ADMIN_PHONE" --arg pin "$POS_SUPER_ADMIN_PIN" '{phone:$phone,pin:$pin}' > "$RUNNER_TEMP/retailpos-super-admin.json"
+          chmod 600 "$RUNNER_TEMP/retailpos-super-admin.json"
           ssh production "mkdir -m 700 '$REMOTE_DIR'"
           scp "$RUNNER_TEMP/retailpos-docker-config.json" "production:$REMOTE_DIR/config.json"
+          scp "$RUNNER_TEMP/retailpos-super-admin.json" "production:$REMOTE_DIR/super-admin.json"
           ssh production "chmod 600 '$REMOTE_DIR/config.json'"
+          ssh production "chmod 600 '$REMOTE_DIR/super-admin.json'"
           rm -f "$RUNNER_TEMP/retailpos-docker-config.json"
+          rm -f "$RUNNER_TEMP/retailpos-super-admin.json"
 
       - name: Copy POS deployment script
         run: |
@@ -77,7 +87,7 @@ jobs:
       - name: Deploy container, bind Nginx, and issue SSL
         run: |
           set -euo pipefail
-          ssh production "sudo env DOCKER_CONFIG='$REMOTE_DIR' bash '$REMOTE_DIR/deploy-pos.sh' '$IMAGE' '$DOMAIN' '$TLS_EMAIL' '$DEPLOY_ID'"
+          ssh production "sudo env DOCKER_CONFIG='$REMOTE_DIR' bash '$REMOTE_DIR/deploy-pos.sh' '$POS_IMAGE' '$API_IMAGE' '$DOMAIN' '$TLS_EMAIL' '$DEPLOY_ID' '$REMOTE_DIR/super-admin.json'"
 
       - name: Verify public HTTPS
         run: |

@@ -38,10 +38,14 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     // demotion or deactivation takes effect immediately despite an old JWT.
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, fullName: true, role: true, active: true },
+      select: { id: true, fullName: true, role: true, active: true, mustChangePin: true },
     });
     if (!user || !user.active) {
       return sendError(res, 401, 'INVALID_TOKEN', 'This staff account is inactive or no longer exists.');
+    }
+    const isPinChangeRequest = req.method === 'POST' && req.baseUrl === '/auth' && req.path === '/change-pin';
+    if (user.mustChangePin && !isPinChangeRequest) {
+      return sendError(res, 403, 'PIN_CHANGE_REQUIRED', 'Change your initial PIN before using the POS.');
     }
     res.locals.auth = { userId: user.id, role: user.role, name: user.fullName } satisfies AuthLocals;
     return next();

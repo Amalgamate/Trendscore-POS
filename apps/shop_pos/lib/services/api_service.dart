@@ -83,6 +83,23 @@ class ApiService {
     return null;
   }
 
+  Future<bool> changePin(String pin) async {
+    lastError = null;
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/change-pin'),
+        headers: _headers,
+        body: jsonEncode({'pin': pin}),
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) return true;
+      lastError = _messageFromResponse(res.body) ?? 'Could not update PIN (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not update PIN on the shop API.';
+      debugPrint('API changePin error: $e');
+    }
+    return false;
+  }
+
   Future<Map<String, dynamic>?> createStaffUser(Map<String, dynamic> payload) async {
     lastError = null;
     try {

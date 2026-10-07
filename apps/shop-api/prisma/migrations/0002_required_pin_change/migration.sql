@@ -1,0 +1,3 @@
+ALTER TABLE "users"
+ADD COLUMN "mustChangePin" BOOLEAN NOT NULL DEFAULT false,
+ADD COLUMN "isPlatformSuperAdmin" BOOLEAN NOT NULL DEFAULT false;

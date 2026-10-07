@@ -434,6 +434,7 @@ class PosUser {
     this.pin = '',
     required this.role,
     this.active = true,
+    this.mustChangePin = false,
     this.color = const Color(0xFF10B981),
   });
 
@@ -443,6 +444,7 @@ class PosUser {
   String pin;
   PosUserRole role;
   bool active;
+  bool mustChangePin;
   Color color;
 
   String get roleDisplay {
@@ -520,6 +522,7 @@ class PosUser {
       phone: json['phone'] as String? ?? '',
       role: role,
       active: json['active'] as bool? ?? true,
+      mustChangePin: json['mustChangePin'] as bool? ?? false,
       color: color,
     );
   }
@@ -572,7 +575,7 @@ class PosState extends ChangeNotifier {
   bool cashDrawerKick = true;
   bool requirePinForReversal = true;
   String printerPaperSize = '80mm';
-  String serverUrl = 'http://localhost:4000';
+  String serverUrl = kIsWeb ? '${Uri.base.origin}/api' : 'http://localhost:4000';
 
   late List<PosUser> users;
   PosUser? currentLoggedInUser;
@@ -648,6 +651,28 @@ class PosState extends ChangeNotifier {
     final user = PosUser.fromApi(userJson);
     currentLoggedInUser = user;
     activeCashier = user.fullName;
+    if (user.mustChangePin) {
+      notifyListeners();
+      return user;
+    }
+    await _finishAuthenticatedLogin(user);
+    return user;
+  }
+
+  Future<void> completeRequiredPinChange(String newPin) async {
+    final user = currentLoggedInUser;
+    if (user == null || !user.mustChangePin) {
+      throw PosException('There is no required PIN change for this session.');
+    }
+    final changed = await ApiService.instance.changePin(newPin);
+    if (!changed) {
+      throw PosException(ApiService.instance.lastError ?? 'Could not update your PIN.');
+    }
+    user.mustChangePin = false;
+    await _finishAuthenticatedLogin(user);
+  }
+
+  Future<void> _finishAuthenticatedLogin(PosUser user) async {
     catalogueSyncMessage = 'Signed in as ${user.roleDisplay}. Refreshing shop data…';
     if (user.role == PosUserRole.owner) {
       final remoteUsers = await ApiService.instance.getStaffUsers();
@@ -658,7 +683,6 @@ class PosState extends ChangeNotifier {
     notifyListeners();
     await syncCatalogueFromApi();
     await persistSession(user);
-    return user;
   }
 
   Future<void> toggleUserActive(String id) async {

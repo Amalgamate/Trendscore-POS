@@ -2,7 +2,7 @@
  * Auth module — PIN-based cashier login.
  *
  * Produces a short-lived JWT that the POS includes in subsequent requests.
- * Rate limiting must be applied at the reverse-proxy layer (Traefik); this
+ * Rate limiting must be applied at the reverse-proxy layer; this
  * handler trusts that the caller has already been rate-limited.
  */
 import type { Router } from 'express';
@@ -37,6 +37,10 @@ const StaffUpdateSchema = z.object({
   active: z.boolean().optional(),
 }).refine((data) => Object.keys(data).length > 0, 'At least one field is required.');
 
+const ChangePinSchema = z.object({
+  pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits'),
+});
+
 function normalizePhone(input: string): string {
   const digits = input.replace(/\D/g, '');
   if (digits.startsWith('254')) return digits;
@@ -64,7 +68,7 @@ export function authRouter(): Router {
     try {
       const user = await prisma.user.findUnique({
         where: { phone: normalizePhone(body.phone) },
-        select: { id: true, fullName: true, phone: true, role: true, pinHash: true, active: true },
+        select: { id: true, fullName: true, phone: true, role: true, pinHash: true, active: true, mustChangePin: true },
       });
 
       if (!user || !user.active) {
@@ -91,7 +95,13 @@ export function authRouter(): Router {
 
       return send200(res, {
         token,
-        user: { id: user.id, fullName: user.fullName, phone: user.phone, role: user.role },
+        user: {
+          id: user.id,
+          fullName: user.fullName,
+          phone: user.phone,
+          role: user.role,
+          mustChangePin: user.mustChangePin,
+        },
       });
     } catch (err) {
       if (err instanceof Error && err.message === 'Enter a valid Kenyan phone number.') {
@@ -99,6 +109,23 @@ export function authRouter(): Router {
       }
       console.error('auth/login error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'An unexpected error occurred.');
+    }
+  });
+
+  router.post('/change-pin', requireAuth, async (req, res) => {
+    const body = parseBody(ChangePinSchema, req, res);
+    if (!body) return;
+    const auth = res.locals.auth;
+    try {
+      const pinHash = await argon2.hash(body.pin, { type: argon2.argon2id });
+      await prisma.user.update({
+        where: { id: auth.userId },
+        data: { pinHash, mustChangePin: false },
+      });
+      return send200(res, { ok: true });
+    } catch (err) {
+      console.error('auth/change-pin error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Could not update the PIN.');
     }
   });
 

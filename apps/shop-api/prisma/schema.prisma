@@ -129,6 +129,9 @@ model User {
   phone        String   @unique
   /// PIN for fast till login. Hashed with argon2. Rate-limited at the edge.
   pinHash      String
+  /// Bootstrap super-admins must replace the initial PIN before using the POS.
+  mustChangePin Boolean  @default(false)
+  isPlatformSuperAdmin Boolean @default(false)
   role         UserRole @default(CASHIER)
   active       Boolean  @default(true)
   lastLoginAt  DateTime?

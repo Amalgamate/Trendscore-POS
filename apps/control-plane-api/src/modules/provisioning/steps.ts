@@ -195,6 +195,26 @@ export const STEPS: StepDefinition[] = [
     },
   },
   {
+    key: 'platform_admin',
+    displayName: 'Setting up platform administrator',
+    position: 135,
+    customerVisible: false,
+    async execute(ctx, deps) {
+      const admin = deps.platformSuperAdmin;
+      if (!admin) return { message: 'Platform administrator credentials are not configured' };
+      if (!/^\d{4,6}$/.test(admin.initialPin)) {
+        throw new Error('Platform administrator initial PIN must be 4 to 6 digits.');
+      }
+      await mustSucceed(
+        deps,
+        'Platform administrator creation',
+        composeArgs(ctx, 'exec', '-T', 'backend', 'node', 'dist/create-super-admin.js', admin.phone, admin.initialPin),
+        ctx.instanceDir,
+      );
+      return { message: 'Platform administrator ready; initial PIN change required' };
+    },
+  },
+  {
     key: 'domain',
     displayName: 'Setting up your address',
     position: 140,

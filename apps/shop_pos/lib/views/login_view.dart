@@ -174,6 +174,26 @@ class _LoginViewState extends State<LoginView> {
     final user = await widget.state.authenticateShopUser(phone, _pin);
     if (!mounted) return;
     if (user != null) {
+      if (user.mustChangePin) {
+        setState(() => _isLoading = false);
+        final newPin = await _promptRequiredPinChange();
+        if (!mounted) return;
+        if (newPin == null) {
+          await widget.state.logout();
+          return;
+        }
+        try {
+          await widget.state.completeRequiredPinChange(newPin);
+        } catch (error) {
+          await widget.state.logout();
+          if (!mounted) return;
+          setState(() {
+            _pin = '';
+            _errorMsg = error.toString();
+          });
+          return;
+        }
+      }
       widget.onAuthenticated();
     } else {
       _shakeKey.currentState?.shake();
@@ -183,6 +203,76 @@ class _LoginViewState extends State<LoginView> {
         _errorMsg = widget.state.catalogueSyncMessage ?? 'Phone number or PIN is incorrect.';
       });
     }
+  }
+
+  Future<String?> _promptRequiredPinChange() async {
+    final pinController = TextEditingController();
+    final confirmController = TextEditingController();
+    String? error;
+    final result = await showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => PopScope(
+        canPop: false,
+        child: StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Set a new PIN'),
+          content: SizedBox(
+            width: 360,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('This initial PIN can only be used once. Choose a new 4–6 digit PIN to continue.'),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: pinController,
+                  obscureText: true,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(labelText: 'New PIN'),
+                ),
+                TextField(
+                  controller: confirmController,
+                  obscureText: true,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                  decoration: const InputDecoration(labelText: 'Confirm new PIN'),
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Text(error!, style: const TextStyle(color: Color(0xFFDC2626))),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () {
+                final pin = pinController.text;
+                if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+                  setDialogState(() => error = 'PIN must contain 4 to 6 digits.');
+                } else if (pin != confirmController.text) {
+                  setDialogState(() => error = 'The PINs do not match.');
+                } else if (pin == '000000') {
+                  setDialogState(() => error = 'Choose a PIN different from the initial PIN.');
+                } else {
+                  Navigator.of(dialogContext).pop(pin);
+                }
+              },
+              child: const Text('Save PIN and continue'),
+            ),
+          ],
+        ),
+        ),
+      ),
+    );
+    pinController.dispose();
+    confirmController.dispose();
+    return result;
   }
 
   void _showCashierPicker() {

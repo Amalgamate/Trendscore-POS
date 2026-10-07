@@ -79,6 +79,8 @@ export interface ProvisioningDeps {
   };
   /** Secrets source. Never log or echo what this returns. */
   secrets: SecretGenerator;
+  /** Optional bootstrap administrator applied to each new shop instance. */
+  platformSuperAdmin?: { phone: string; initialPin: string };
   /** Structured logging; secrets must never be passed to this. */
   log: (level: 'info' | 'warn' | 'error', msg: string, meta?: Record<string, unknown>) => void;
   /** Emitted after each step so the onboarding screen can stream progress. */
@@ -129,6 +131,7 @@ export type StepKey =
   | 'migrations'
   | 'seed'
   | 'owner'
+  | 'platform_admin'
   | 'domain'
   | 'tls'
   | 'health_check'
