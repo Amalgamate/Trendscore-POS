@@ -47,7 +47,7 @@ class ApiService {
       final res = await http.post(
         Uri.parse('$baseUrl/auth/login'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'phone': phone.replaceAll(RegExp(r'\s+'), ''), 'pin': pin}),
+        body: jsonEncode({'phone': phone.replaceAll(RegExp(r'\D'), ''), 'pin': pin}),
       ).timeout(const Duration(seconds: 5));
 
       if (res.statusCode == 200) {
@@ -65,6 +65,62 @@ class ApiService {
       debugPrint('API login failed: $e');
       return null;
     }
+  }
+
+  Future<List<Map<String, dynamic>>?> getStaffUsers() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/auth/users'), headers: _headers)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        return List<Map<String, dynamic>>.from(decoded['data'] as List? ?? const []);
+      }
+      lastError = _messageFromResponse(res.body) ?? 'Could not fetch staff accounts (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not fetch staff accounts from the shop API.';
+      debugPrint('API getStaffUsers error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> createStaffUser(Map<String, dynamic> payload) async {
+    lastError = null;
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/auth/users'),
+        headers: _headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 201 || res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        return Map<String, dynamic>.from(decoded['data'] as Map);
+      }
+      lastError = _messageFromResponse(res.body) ?? 'Could not create staff account (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not create staff account on the shop API.';
+      debugPrint('API createStaffUser error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> updateStaffUser(String id, Map<String, dynamic> payload) async {
+    lastError = null;
+    try {
+      final res = await http.patch(
+        Uri.parse('$baseUrl/auth/users/$id'),
+        headers: _headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        return Map<String, dynamic>.from(decoded['data'] as Map);
+      }
+      lastError = _messageFromResponse(res.body) ?? 'Could not update staff account (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not update staff account on the shop API.';
+      debugPrint('API updateStaffUser error: $e');
+    }
+    return null;
   }
 
   /// Fetch products catalog

@@ -8,7 +8,7 @@ import type { StockMovementType } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { parseBody, parseQuery, send200, send201, sendError } from '../../lib/http';
-import { requireAuth } from '../../lib/auth.middleware';
+import { requireAuth, requireRole } from '../../lib/auth.middleware';
 
 const ListProductsQuerySchema = z.object({
   category: z.string().optional(),
@@ -137,7 +137,7 @@ export function productsRouter(businessId: string): Router {
   });
 
   // POST /products
-  router.post('/', requireAuth, async (req, res) => {
+  router.post('/', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     const body = parseBody(CreateProductSchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;
@@ -195,7 +195,7 @@ export function productsRouter(businessId: string): Router {
 
   // POST /products/import — create CSV rows and their opening stock in one
   // business-scoped transaction, so a failed batch cannot leave half an import.
-  router.post('/import', requireAuth, async (req, res) => {
+  router.post('/import', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     const body = parseBody(ImportProductsSchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;
@@ -258,7 +258,7 @@ export function productsRouter(businessId: string): Router {
   });
 
   // PATCH /products/:id
-  router.patch('/:id', requireAuth, async (req, res) => {
+  router.patch('/:id', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     const body = parseBody(UpdateProductSchema, req, res);
     if (!body) return;
 
@@ -285,7 +285,7 @@ export function productsRouter(businessId: string): Router {
 
   // DELETE /products/:id — deactivate, preserving references from receipts,
   // stock movements, and historical reports.
-  router.delete('/:id', requireAuth, async (req, res) => {
+  router.delete('/:id', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     try {
       const existing = await prisma.product.findFirst({
         where: { id: req.params.id, businessId },
@@ -307,7 +307,7 @@ export function productsRouter(businessId: string): Router {
   });
 
   // POST /products/:id/adjust-stock
-  router.post('/:id/adjust-stock', requireAuth, async (req, res) => {
+  router.post('/:id/adjust-stock', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     const body = parseBody(StockAdjustSchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;

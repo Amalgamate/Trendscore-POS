@@ -6,7 +6,7 @@ import { Router as ExpressRouter } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
 import { parseBody, parseQuery, send200, send201, sendError } from '../../lib/http';
-import { requireAuth } from '../../lib/auth.middleware';
+import { requireAuth, requireRole } from '../../lib/auth.middleware';
 
 const ListQuerySchema = z.object({
   search: z.string().optional(),
@@ -37,7 +37,7 @@ export function customersRouter(businessId: string): Router {
   const router = ExpressRouter();
 
   // GET /customers
-  router.get('/', requireAuth, async (req, res) => {
+  router.get('/', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     const query = parseQuery(ListQuerySchema, req, res);
     if (!query) return;
 
@@ -79,7 +79,7 @@ export function customersRouter(businessId: string): Router {
   });
 
   // GET /customers/:id
-  router.get('/:id', requireAuth, async (req, res) => {
+  router.get('/:id', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     try {
       const customer = await prisma.customer.findFirst({
         where: { id: req.params.id, businessId },
@@ -103,7 +103,7 @@ export function customersRouter(businessId: string): Router {
   });
 
   // POST /customers
-  router.post('/', requireAuth, async (req, res) => {
+  router.post('/', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     const body = parseBody(CreateCustomerSchema, req, res);
     if (!body) return;
 
@@ -119,7 +119,7 @@ export function customersRouter(businessId: string): Router {
   });
 
   // PATCH /customers/:id
-  router.patch('/:id', requireAuth, async (req, res) => {
+  router.patch('/:id', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
     const body = parseBody(UpdateCustomerSchema, req, res);
     if (!body) return;
 
@@ -138,7 +138,7 @@ export function customersRouter(businessId: string): Router {
   });
 
   // POST /customers/:id/payments
-  router.post('/:id/payments', requireAuth, async (req, res) => {
+  router.post('/:id/payments', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     const body = parseBody(RecordPaymentSchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;
@@ -191,7 +191,7 @@ export function customersRouter(businessId: string): Router {
   });
 
   // GET /customers/:id/ledger
-  router.get('/:id/ledger', requireAuth, async (req, res) => {
+  router.get('/:id/ledger', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     try {
       const entries = await prisma.customerLedger.findMany({
         where: { customerId: req.params.id },

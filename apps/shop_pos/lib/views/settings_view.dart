@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../pos_state.dart';
 import '../theme/tokens.dart';
 import '../services/api_service.dart';
+import '../services/favicon_service.dart';
 import 'widgets/image_upload_widget.dart';
 
 /// POS Settings and Configuration screen.
@@ -34,6 +35,7 @@ class _SettingsViewState extends State<SettingsView> {
   bool _isCheckingConnection = false;
   bool? _connectionResult;
   bool _isSaving = false;
+  int _selectedSettingsSection = 0;
   /// Pending logo base64 (picked this session, not yet saved)
   String? _pendingLogoBase64;
   bool _clearLogo = false;
@@ -87,6 +89,11 @@ class _SettingsViewState extends State<SettingsView> {
       newPrinterPaperSize: _printerPaperSize,
     );
     _clearLogo = false;
+    FaviconService.update(
+      widget.state.brandLogoBase64?.isNotEmpty == true
+          ? widget.state.brandLogoBase64
+          : widget.state.brandLogoUrl,
+    );
 
     ApiService.instance.configure(_serverUrlController.text);
 
@@ -223,16 +230,16 @@ class _SettingsViewState extends State<SettingsView> {
                   ),
                   const SizedBox(height: 14),
 
-                  const Text('4-Digit Terminal Login PIN *', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text_secondary)),
+                  Text(existingUser == null ? 'Staff PIN (4–6 digits) *' : 'New staff PIN (leave blank to keep current)', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text_secondary)),
                   const SizedBox(height: 6),
                   TextField(
                     controller: pinCtrl,
-                    maxLength: 4,
+                    maxLength: 6,
                     obscureText: obscurePin,
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     decoration: InputDecoration(
-                      hintText: '4 digits (e.g. 1234)',
+                      hintText: existingUser == null ? '4–6 digits' : 'Leave blank to keep current PIN',
                       filled: true,
                       fillColor: AppColors.bg_subtle,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
@@ -284,7 +291,7 @@ class _SettingsViewState extends State<SettingsView> {
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              onPressed: () {
+              onPressed: () async {
                 final name = nameCtrl.text.trim();
                 final phone = phoneCtrl.text.trim();
                 final pin = pinCtrl.text.trim();
@@ -293,28 +300,42 @@ class _SettingsViewState extends State<SettingsView> {
                   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid staff name.')));
                   return;
                 }
-                if (pin.length != 4) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PIN must be exactly 4 numeric digits.')));
+                if (phone.replaceAll(RegExp(r'\D'), '').length < 9) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid staff phone number.')));
+                  return;
+                }
+                if ((existingUser == null && !RegExp(r'^\d{4,6}$').hasMatch(pin)) ||
+                    (existingUser != null && pin.isNotEmpty && !RegExp(r'^\d{4,6}$').hasMatch(pin))) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PIN must be 4 to 6 numeric digits.')));
                   return;
                 }
 
-                if (existingUser != null) {
-                  existingUser.fullName = name;
-                  existingUser.phone = phone;
-                  existingUser.pin = pin;
-                  existingUser.role = selectedRole;
-                  existingUser.color = roleColor(selectedRole);
-                  widget.state.updateUser(existingUser);
-                } else {
-                  final newUser = PosUser(
-                    id: 'usr_${DateTime.now().millisecondsSinceEpoch}',
-                    fullName: name,
-                    phone: phone,
-                    pin: pin,
-                    role: selectedRole,
-                    color: roleColor(selectedRole),
-                  );
-                  widget.state.addUser(newUser);
+                try {
+                  if (existingUser != null) {
+                    await widget.state.updateUser(PosUser(
+                      id: existingUser.id,
+                      fullName: name,
+                      phone: phone,
+                      pin: pin,
+                      role: selectedRole,
+                      active: existingUser.active,
+                      color: roleColor(selectedRole),
+                    ));
+                  } else {
+                    await widget.state.addUser(PosUser(
+                      id: '',
+                      fullName: name,
+                      phone: phone,
+                      pin: pin,
+                      role: selectedRole,
+                      color: roleColor(selectedRole),
+                    ));
+                  }
+                } catch (error) {
+                  if (ctx.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('PosException: ', ''))));
+                  }
+                  return;
                 }
 
                 setState(() {});
@@ -322,7 +343,7 @@ class _SettingsViewState extends State<SettingsView> {
 
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
-                    content: Text('Staff account $name saved. Active PIN: $pin'),
+                    content: Text('Staff account $name saved.'),
                     backgroundColor: AppColors.status_success,
                   ),
                 );
@@ -352,37 +373,31 @@ class _SettingsViewState extends State<SettingsView> {
   Widget build(BuildContext context) {
     final users = widget.state.users;
 
-    return Scaffold(
-      backgroundColor: AppColors.bg_canvas,
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+    final settingsContent = SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(28, 26, 28, 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
             // Top Bar with Save Button
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'Terminal & Brand Settings',
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.w800, color: AppColors.text_primary),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Customize branding, hero imagery, shop names, staff accounts, and hardware',
-                      style: TextStyle(fontSize: 13, color: AppColors.text_tertiary),
-                    ),
-                  ],
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('Settings', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800, color: AppColors.text_primary)),
+                      SizedBox(height: 4),
+                      Text('Manage store, team, terminal and data preferences', style: TextStyle(fontSize: 13, color: AppColors.text_tertiary)),
+                    ],
+                  ),
                 ),
                 FilledButton.icon(
                   onPressed: _isSaving ? null : _saveAllSettings,
                   icon: _isSaving
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.save_outlined, size: 18),
-                  label: const Text('Save All Settings'),
+          label: const Text('Save Changes'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.accent_primary,
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
@@ -394,6 +409,7 @@ class _SettingsViewState extends State<SettingsView> {
             const SizedBox(height: 28),
 
             // ─── 1. Brand & Store Identity ───────────────────────────────
+            if (_selectedSettingsSection == 0) ...[
             _buildSection(
               title: 'Brand Identity & Store Profile',
               icon: Icons.storefront_outlined,
@@ -564,8 +580,10 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 24),
+            ],
 
             // ─── 2. Users, Roles & Staff Access Section ──────────────────
+            if (_selectedSettingsSection == 1) ...[
             _buildSection(
               title: 'Users, Roles & Staff Access Control',
               icon: Icons.manage_accounts_outlined,
@@ -581,7 +599,7 @@ class _SettingsViewState extends State<SettingsView> {
               ),
               children: [
                 const Text(
-                  'Manage authorized till attendants, supervisors, and store managers. Each staff member logs into the POS terminal with their personalized 4-digit PIN.',
+                  'Manage staff access. Staff sign in with their phone number and 4–6 digit PIN; PINs are verified by the shop API and never stored in the browser.',
                   style: TextStyle(fontSize: 13, color: AppColors.text_secondary, height: 1.4),
                 ),
                 const SizedBox(height: 18),
@@ -691,9 +709,13 @@ class _SettingsViewState extends State<SettingsView> {
                               child: Switch(
                                 value: u.active,
                                 activeThumbColor: AppColors.accent_primary,
-                                onChanged: (val) {
-                                  widget.state.toggleUserActive(u.id);
-                                  setState(() {});
+                                onChanged: (val) async {
+                                  try {
+                                    await widget.state.toggleUserActive(u.id);
+                                    if (mounted) setState(() {});
+                                  } catch (error) {
+                                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('PosException: ', ''))));
+                                  }
                                 },
                               ),
                             ),
@@ -709,12 +731,15 @@ class _SettingsViewState extends State<SettingsView> {
                           IconButton(
                             tooltip: 'Delete User',
                             icon: const Icon(Icons.delete_outline, color: AppColors.status_danger, size: 18),
-                            onPressed: () {
-                              widget.state.deleteUser(u.id);
-                              setState(() {});
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('Removed ${u.fullName} from staff accounts.')),
-                              );
+                            onPressed: () async {
+                              try {
+                                await widget.state.deleteUser(u.id);
+                                if (!mounted) return;
+                                setState(() {});
+                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deactivated ${u.fullName}.')));
+                              } catch (error) {
+                                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('PosException: ', ''))));
+                              }
                             },
                           ),
                       ],
@@ -725,8 +750,10 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 24),
+            ],
 
             // ─── 3. Hardware & Peripherals ─────────────────────────────────
+            if (_selectedSettingsSection == 2) ...[
             _buildSection(
               title: 'Hardware & Peripherals',
               icon: Icons.print_outlined,
@@ -780,8 +807,10 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 24),
+            ],
 
             // ─── 4. Cloud & Synchronization ───────────────────────────────
+            if (_selectedSettingsSection == 3) ...[
             _buildSection(
               title: 'Server & Cloud Synchronization',
               icon: Icons.cloud_sync_outlined,
@@ -843,8 +872,10 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 24),
+            ],
 
             // ─── 5. Data & Catalogue Reset / Recovery ────────────────────
+            if (_selectedSettingsSection == 4) ...[
             _buildSection(
               title: 'Data & Catalogue Management',
               icon: Icons.storage_outlined,
@@ -913,6 +944,7 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 36),
+            ],
 
             // Bottom Sticky Save Bar
             Center(
@@ -923,7 +955,7 @@ class _SettingsViewState extends State<SettingsView> {
                   icon: _isSaving
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                       : const Icon(Icons.check, size: 20),
-                  label: Text(_isSaving ? 'Saving Changes...' : 'Save All Settings'),
+                  label: Text(_isSaving ? 'Saving Changes...' : 'Save Changes'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.accent_primary,
                     padding: const EdgeInsets.symmetric(vertical: 18),
@@ -934,6 +966,167 @@ class _SettingsViewState extends State<SettingsView> {
             ),
             const SizedBox(height: 20),
           ],
+        ),
+      ),
+    );
+    return Scaffold(
+      backgroundColor: AppColors.bg_canvas,
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final compact = constraints.maxWidth < 980;
+          return Padding(
+            padding: EdgeInsets.all(compact ? 12 : 20),
+            child: compact
+                ? Column(
+                    children: [
+                      _buildSettingsNavigation(compact: true),
+                      const SizedBox(height: 12),
+                      Expanded(child: settingsContent),
+                    ],
+                  )
+                : Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      SizedBox(width: 246, child: _buildSettingsNavigation()),
+                      const SizedBox(width: 18),
+                      Expanded(child: settingsContent),
+                    ],
+                  ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildSettingsNavigation({bool compact = false}) {
+    const sections = <({int id, String label, IconData icon})>[
+      (id: 0, label: 'Store & Branding', icon: Icons.storefront_outlined),
+      (id: 1, label: 'Staff & Access', icon: Icons.manage_accounts_outlined),
+      (id: 2, label: 'Devices & Receipts', icon: Icons.print_outlined),
+      (id: 3, label: 'Server & Sync', icon: Icons.cloud_sync_outlined),
+      (id: 4, label: 'Data & Recovery', icon: Icons.storage_outlined),
+    ];
+
+    if (compact) {
+      return SizedBox(
+        height: 52,
+        child: ListView.separated(
+          scrollDirection: Axis.horizontal,
+          itemCount: sections.length,
+          separatorBuilder: (_, _) => const SizedBox(width: 8),
+          itemBuilder: (context, index) {
+            final section = sections[index];
+            final selected = _selectedSettingsSection == section.id;
+            return ChoiceChip(
+              selected: selected,
+              avatar: Icon(section.icon, size: 17),
+              label: Text(section.label),
+              onSelected: (_) => setState(() => _selectedSettingsSection = section.id),
+              selectedColor: AppColors.accent_light,
+              side: BorderSide(color: selected ? AppColors.accent_primary : AppColors.border_subtle),
+              labelStyle: TextStyle(
+                color: selected ? AppColors.accent_primary : AppColors.text_secondary,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+              ),
+            );
+          },
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 18, 14, 18),
+      decoration: BoxDecoration(
+        color: AppColors.bg_surface,
+        border: Border.all(color: AppColors.border_subtle),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(8, 2, 8, 14),
+            child: Row(
+              children: [
+                Icon(Icons.tune_rounded, color: AppColors.accent_primary, size: 20),
+                SizedBox(width: 9),
+                Text('Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+              ],
+            ),
+          ),
+          const Divider(height: 1, color: AppColors.border_subtle),
+          const SizedBox(height: 16),
+          _settingsGroupLabel('STORE'),
+          _settingsNavTile(sections[0]),
+          const SizedBox(height: 14),
+          _settingsGroupLabel('PEOPLE'),
+          _settingsNavTile(sections[1]),
+          const SizedBox(height: 14),
+          _settingsGroupLabel('TERMINAL'),
+          _settingsNavTile(sections[2]),
+          _settingsNavTile(sections[3]),
+          const SizedBox(height: 14),
+          _settingsGroupLabel('DATA'),
+          _settingsNavTile(sections[4]),
+          Container(
+            margin: const EdgeInsets.only(top: 20),
+            padding: const EdgeInsets.all(11),
+            decoration: BoxDecoration(
+              color: AppColors.bg_subtle,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.info_outline, size: 16, color: AppColors.text_tertiary),
+                SizedBox(width: 8),
+                Expanded(child: Text('Store and terminal preferences save with Save Changes. Staff access updates immediately.', style: AppText.xs)),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsGroupLabel(String label) => Padding(
+        padding: const EdgeInsets.fromLTRB(9, 0, 9, 6),
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1, color: AppColors.text_tertiary),
+        ),
+      );
+
+  Widget _settingsNavTile(({int id, String label, IconData icon}) section) {
+    final selected = _selectedSettingsSection == section.id;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 3),
+      child: Material(
+        color: selected ? AppColors.accent_light : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(10),
+          onTap: () => setState(() => _selectedSettingsSection = section.id),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
+            child: Row(
+              children: [
+                Icon(section.icon, size: 18, color: selected ? AppColors.accent_primary : AppColors.text_tertiary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    section.label,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                      color: selected ? AppColors.accent_primary : AppColors.text_secondary,
+                    ),
+                  ),
+                ),
+                if (selected) const Icon(Icons.chevron_right_rounded, size: 17, color: AppColors.accent_primary),
+              ],
+            ),
+          ),
         ),
       ),
     );

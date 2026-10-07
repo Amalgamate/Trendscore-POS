@@ -6,7 +6,7 @@ import { Router as ExpressRouter } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
 import { parseBody, send200, sendError } from '../../lib/http';
-import { requireAuth } from '../../lib/auth.middleware';
+import { requireAuth, requireRole } from '../../lib/auth.middleware';
 
 const UpdateBusinessSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -53,7 +53,7 @@ export function businessRouter(businessId: string): Router {
   });
 
   // PATCH /business
-  router.patch('/', requireAuth, async (req, res) => {
+  router.patch('/', requireAuth, requireRole('OWNER'), async (req, res) => {
     const body = parseBody(UpdateBusinessSchema, req, res);
     if (!body) return;
     try {
@@ -66,7 +66,7 @@ export function businessRouter(businessId: string): Router {
   });
 
   // PUT /business/settings/:key
-  router.put('/settings/:key', requireAuth, async (req, res) => {
+  router.put('/settings/:key', requireAuth, requireRole('OWNER'), async (req, res) => {
     const key = req.params.key;
     if (!key) return sendError(res, 400, 'BAD_REQUEST', 'Missing setting key.');
     const body = parseBody(UpsertSettingSchema, req, res);
@@ -85,7 +85,7 @@ export function businessRouter(businessId: string): Router {
   });
 
   // GET /business/reports/dashboard
-  router.get('/reports/dashboard', requireAuth, async (req, res) => {
+  router.get('/reports/dashboard', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
     try {
       const now = new Date();
       const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);

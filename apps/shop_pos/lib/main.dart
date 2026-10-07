@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'cart.dart';
 import 'pos_state.dart';
 import 'services/api_service.dart';
+import 'services/favicon_service.dart';
 import 'theme/tokens.dart';
 import 'views/cash_drawer_view.dart';
 import 'views/checkout_modal.dart';
@@ -15,11 +16,17 @@ import 'views/login_view.dart';
 import 'views/reports_view.dart';
 import 'views/settings_view.dart';
 import 'views/purchase_orders_view.dart';
+import 'views/app_menu_view.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final state = PosState();
   await state.loadInitialState();
+  FaviconService.update(
+    state.brandLogoBase64?.isNotEmpty == true
+        ? state.brandLogoBase64
+        : state.brandLogoUrl,
+  );
   ApiService.instance.configure(state.serverUrl);
   if (state.currentLoggedInUser != null) {
     state.catalogueSyncMessage = 'Local-only mode: lock the till and re-enter your PIN to sync the shop catalogue.';
@@ -62,7 +69,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isLocked = widget.state.currentLoggedInUser == null;
-    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 7);
+    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 8);
     _startInactivityTimer();
   }
 
@@ -97,13 +104,30 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     });
   }
 
+  Set<int> _accessibleTabs(PosUser? user) {
+    if (user == null) return const <int>{};
+    return switch (user.role) {
+      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8},
+      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8},
+      PosUserRole.cashier => const <int>{0, 1, 4, 8},
+      PosUserRole.stockClerk => const <int>{2, 7, 8},
+    };
+  }
+
   void _selectTab(int index) {
+    final user = widget.state.currentLoggedInUser;
+    if (!_accessibleTabs(user).contains(index)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your staff role does not have access to that section.')),
+      );
+      return;
+    }
     setState(() => _activeTabIndex = index);
     widget.state.setActiveTab(index);
     _onUserInteraction();
   }
 
-  void _showMoreSheet(BuildContext context, PosUser? currentUser) {
+  void _showMoreSheet(BuildContext context, PosUser? currentUser, Set<int> allowedTabs) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
@@ -169,12 +193,14 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(height: 16),
+                if (allowedTabs.contains(8)) _moreTile(Icons.apps_rounded, 'All Apps', 8, ctx),
+                const SizedBox(height: 8),
                 const Text('More Operations', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.text_tertiary, letterSpacing: 0.5)),
                 const SizedBox(height: 8),
-                _moreTile(Icons.local_shipping_outlined, 'Purchase & Supplier Orders', 7, ctx),
-                _moreTile(Icons.account_balance_wallet_outlined, 'Cash Drawer & Shifts', 4, ctx),
-                _moreTile(Icons.analytics_outlined, 'Reports & Analytics', 5, ctx),
-                _moreTile(Icons.settings_outlined, 'Settings & Hardware', 6, ctx),
+                if (allowedTabs.contains(7)) _moreTile(Icons.local_shipping_outlined, 'Purchase & Supplier Orders', 7, ctx),
+                if (allowedTabs.contains(4)) _moreTile(Icons.account_balance_wallet_outlined, 'Cash Drawer & Shifts', 4, ctx),
+                if (allowedTabs.contains(5)) _moreTile(Icons.analytics_outlined, 'Reports & Analytics', 5, ctx),
+                if (allowedTabs.contains(6)) _moreTile(Icons.settings_outlined, 'Settings & Hardware', 6, ctx),
               ],
             ),
           ),
@@ -288,7 +314,12 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
       return LoginView(
         state: widget.state,
         onAuthenticated: () {
-          widget.state.persistSession(widget.state.currentLoggedInUser, tabIndex: _activeTabIndex);
+          final user = widget.state.currentLoggedInUser;
+          final allowedTabs = _accessibleTabs(user);
+          if (!allowedTabs.contains(_activeTabIndex) && allowedTabs.isNotEmpty) {
+            _activeTabIndex = allowedTabs.first;
+          }
+          widget.state.persistSession(user, tabIndex: _activeTabIndex);
           _startInactivityTimer();
           setState(() => _isLocked = false);
         },
@@ -302,6 +333,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         listenable: widget.state,
         builder: (context, _) {
           final currentUser = widget.state.currentLoggedInUser;
+          final allowedTabs = _accessibleTabs(currentUser);
+          if (!allowedTabs.contains(_activeTabIndex) && allowedTabs.isNotEmpty) {
+            _activeTabIndex = allowedTabs.first;
+          }
           final screenWidth = MediaQuery.sizeOf(context).width;
           final isMobile = screenWidth < 768;
 
@@ -317,6 +352,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             ReportsView(state: widget.state),
             SettingsView(state: widget.state),
             PurchaseOrdersView(state: widget.state),
+            AppMenuView(
+              visibleTabs: allowedTabs,
+              onSelectTab: _selectTab,
+            ),
           ];
 
           if (isMobile) {
@@ -330,10 +369,11 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
               ),
               bottomNavigationBar: _MobileBottomNav(
                 activeIndex: _activeTabIndex,
+                visibleTabs: allowedTabs,
                 onSelectTab: _selectTab,
                 onOpenMore: () {
                   _onUserInteraction();
-                  _showMoreSheet(context, currentUser);
+                  _showMoreSheet(context, currentUser, allowedTabs);
                 },
                 activeCashier: currentUser?.fullName ?? widget.state.activeCashier,
               ),
@@ -346,6 +386,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                 // Left Navigation Rail
                 _NavigationSidebar(
                   activeIndex: _activeTabIndex,
+                  visibleTabs: allowedTabs,
                   onSelectTab: _selectTab,
                   onLockTill: _lockTill,
                   onOpenSync: () {
@@ -393,19 +434,23 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
 class _MobileBottomNav extends StatelessWidget {
   const _MobileBottomNav({
     required this.activeIndex,
+    required this.visibleTabs,
     required this.onSelectTab,
     required this.onOpenMore,
     required this.activeCashier,
   });
 
   final int activeIndex;
+  final Set<int> visibleTabs;
   final ValueChanged<int> onSelectTab;
   final VoidCallback onOpenMore;
   final String activeCashier;
 
   @override
   Widget build(BuildContext context) {
-    final isMoreActive = activeIndex >= 4;
+    const primaryTabs = <int>[0, 1, 2, 3];
+    final visiblePrimary = primaryTabs.where(visibleTabs.contains).toList();
+    final isMoreActive = !visiblePrimary.contains(activeIndex);
 
     return Container(
       decoration: const BoxDecoration(
@@ -426,10 +471,24 @@ class _MobileBottomNav extends StatelessWidget {
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _mobileNavItem(Icons.point_of_sale, 'POS', 0, activeIndex == 0, () => onSelectTab(0)),
-              _mobileNavItem(Icons.receipt_long_outlined, 'Sales', 1, activeIndex == 1, () => onSelectTab(1)),
-              _mobileNavItem(Icons.inventory_2_outlined, 'Stock', 2, activeIndex == 2, () => onSelectTab(2)),
-              _mobileNavItem(Icons.people_outline, 'Customers', 3, activeIndex == 3, () => onSelectTab(3)),
+              for (final tab in visiblePrimary)
+                _mobileNavItem(
+                  switch (tab) {
+                    0 => Icons.point_of_sale,
+                    1 => Icons.receipt_long_outlined,
+                    2 => Icons.inventory_2_outlined,
+                    _ => Icons.people_outline,
+                  },
+                  switch (tab) {
+                    0 => 'POS',
+                    1 => 'Sales',
+                    2 => 'Stock',
+                    _ => 'Credit',
+                  },
+                  tab,
+                  activeIndex == tab,
+                  () => onSelectTab(tab),
+                ),
               _mobileNavItem(Icons.menu_rounded, 'More', 4, isMoreActive, onOpenMore),
             ],
           ),
@@ -471,6 +530,7 @@ class _MobileBottomNav extends StatelessWidget {
 class _NavigationSidebar extends StatelessWidget {
   const _NavigationSidebar({
     required this.activeIndex,
+    required this.visibleTabs,
     required this.onSelectTab,
     required this.onLockTill,
     required this.onOpenSync,
@@ -482,6 +542,7 @@ class _NavigationSidebar extends StatelessWidget {
   });
 
   final int activeIndex;
+  final Set<int> visibleTabs;
   final ValueChanged<int> onSelectTab;
   final VoidCallback onLockTill;
   final VoidCallback onOpenSync;
@@ -540,54 +601,24 @@ class _NavigationSidebar extends StatelessWidget {
           const SizedBox(height: 18),
 
           // Nav Items
-          _NavIcon(
-            icon: Icons.point_of_sale,
-            label: 'POS',
-            isSelected: activeIndex == 0,
-            onTap: () => onSelectTab(0),
-          ),
-          _NavIcon(
-            icon: Icons.receipt_long_outlined,
-            label: 'Sales',
-            isSelected: activeIndex == 1,
-            onTap: () => onSelectTab(1),
-          ),
-          _NavIcon(
-            icon: Icons.inventory_2_outlined,
-            label: 'Stock',
-            isSelected: activeIndex == 2,
-            onTap: () => onSelectTab(2),
-          ),
-          _NavIcon(
-            icon: Icons.local_shipping_outlined,
-            label: 'Orders',
-            isSelected: activeIndex == 7,
-            onTap: () => onSelectTab(7),
-          ),
-          _NavIcon(
-            icon: Icons.people_outline,
-            label: 'Credit',
-            isSelected: activeIndex == 3,
-            onTap: () => onSelectTab(3),
-          ),
-          _NavIcon(
-            icon: Icons.account_balance_wallet_outlined,
-            label: 'Till',
-            isSelected: activeIndex == 4,
-            onTap: () => onSelectTab(4),
-          ),
-          _NavIcon(
-            icon: Icons.analytics_outlined,
-            label: 'Reports',
-            isSelected: activeIndex == 5,
-            onTap: () => onSelectTab(5),
-          ),
-          _NavIcon(
-            icon: Icons.settings_outlined,
-            label: 'Settings',
-            isSelected: activeIndex == 6,
-            onTap: () => onSelectTab(6),
-          ),
+          for (final item in <({int tab, IconData icon, String label})>[
+            (tab: 8, icon: Icons.apps_rounded, label: 'Apps'),
+            (tab: 0, icon: Icons.point_of_sale, label: 'POS'),
+            (tab: 1, icon: Icons.receipt_long_outlined, label: 'Sales'),
+            (tab: 2, icon: Icons.inventory_2_outlined, label: 'Stock'),
+            (tab: 7, icon: Icons.local_shipping_outlined, label: 'Orders'),
+            (tab: 3, icon: Icons.people_outline, label: 'Credit'),
+            (tab: 4, icon: Icons.account_balance_wallet_outlined, label: 'Till'),
+            (tab: 5, icon: Icons.analytics_outlined, label: 'Reports'),
+            (tab: 6, icon: Icons.settings_outlined, label: 'Settings'),
+          ])
+            if (visibleTabs.contains(item.tab))
+              _NavIcon(
+                icon: item.icon,
+                label: item.label,
+                isSelected: activeIndex == item.tab,
+                onTap: () => onSelectTab(item.tab),
+              ),
 
           const Spacer(),
 

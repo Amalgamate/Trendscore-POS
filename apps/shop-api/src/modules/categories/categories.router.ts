@@ -6,7 +6,7 @@ import { Router as ExpressRouter } from 'express';
 import { z } from 'zod';
 import { prisma } from '../../lib/prisma';
 import { parseBody, send200, send201, sendError } from '../../lib/http';
-import { requireAuth } from '../../lib/auth.middleware';
+import { requireAuth, requireRole } from '../../lib/auth.middleware';
 
 const CreateCategorySchema = z.object({
   name: z.string().min(1).max(100),
@@ -36,7 +36,7 @@ export function categoriesRouter(businessId: string): Router {
   });
 
   // POST /categories
-  router.post('/', requireAuth, async (req, res) => {
+  router.post('/', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     const body = parseBody(CreateCategorySchema, req, res);
     if (!body) return;
     try {
@@ -52,7 +52,7 @@ export function categoriesRouter(businessId: string): Router {
   });
 
   // PATCH /categories/:id
-  router.patch('/:id', requireAuth, async (req, res) => {
+  router.patch('/:id', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     const body = parseBody(CreateCategorySchema.partial(), req, res);
     if (!body) return;
     try {

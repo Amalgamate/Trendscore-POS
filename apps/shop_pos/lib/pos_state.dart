@@ -431,7 +431,7 @@ class PosUser {
     required this.id,
     required this.fullName,
     required this.phone,
-    required this.pin,
+    this.pin = '',
     required this.role,
     this.active = true,
     this.color = const Color(0xFF10B981),
@@ -483,17 +483,53 @@ class PosUser {
     'id': id,
     'fullName': fullName,
     'phone': phone,
-    'pin': pin,
     'role': role.index,
     'color': color.toARGB32(),
     'active': active,
   };
 
+  Map<String, dynamic> toApiJson({bool includePin = false}) => {
+    'fullName': fullName,
+    'phone': phone,
+    'role': switch (role) {
+      PosUserRole.owner => 'OWNER',
+      PosUserRole.manager => 'MANAGER',
+      PosUserRole.cashier => 'CASHIER',
+      PosUserRole.stockClerk => 'STOCK_CLERK',
+    },
+    if (includePin && pin.isNotEmpty) 'pin': pin,
+    if (id.isNotEmpty) 'active': active,
+  };
+
+  factory PosUser.fromApi(Map<String, dynamic> json) {
+    final role = switch (json['role'] as String? ?? 'CASHIER') {
+      'OWNER' => PosUserRole.owner,
+      'MANAGER' => PosUserRole.manager,
+      'STOCK_CLERK' => PosUserRole.stockClerk,
+      _ => PosUserRole.cashier,
+    };
+    final color = switch (role) {
+      PosUserRole.owner => const Color(0xFFD97706),
+      PosUserRole.manager => const Color(0xFF7C3AED),
+      PosUserRole.cashier => const Color(0xFF10B981),
+      PosUserRole.stockClerk => const Color(0xFF2563EB),
+    };
+    return PosUser(
+      id: json['id'] as String,
+      fullName: json['fullName'] as String? ?? 'Staff',
+      phone: json['phone'] as String? ?? '',
+      role: role,
+      active: json['active'] as bool? ?? true,
+      color: color,
+    );
+  }
+
   factory PosUser.fromJson(Map<String, dynamic> json) => PosUser(
     id: json['id'] as String,
     fullName: json['fullName'] as String,
     phone: json['phone'] as String,
-    pin: json['pin'] as String,
+    // Migrate old browser records without restoring plaintext PINs.
+    pin: '',
     role: PosUserRole.values[(json['role'] as int? ?? 2).clamp(0, PosUserRole.values.length - 1)],
     color: Color(json['color'] as int? ?? 0xFF10B981),
     active: json['active'] as bool? ?? true,
@@ -546,38 +582,98 @@ class PosState extends ChangeNotifier {
 
   List<PosUser> get activeUsers => users.where((u) => u.active).toList();
 
-  void addUser(PosUser user) {
-    users.add(user);
+  Future<void> addUser(PosUser user) async {
+    if (!ApiService.instance.hasToken || currentLoggedInUser?.role != PosUserRole.owner) {
+      throw PosException('Only an online owner can create a staff account.');
+    }
+    final response = await ApiService.instance.createStaffUser(user.toApiJson(includePin: true));
+    if (response == null) {
+      throw PosException(ApiService.instance.lastError ?? 'Could not create staff account.');
+    }
+    users.add(PosUser.fromApi(response));
+    user.pin = '';
     notifyListeners();
-    _persistAll();
+    await _persistAll();
   }
 
-  void updateUser(PosUser updated) {
+  Future<void> updateUser(PosUser updated) async {
+    if (!ApiService.instance.hasToken || currentLoggedInUser?.role != PosUserRole.owner) {
+      throw PosException('Only an online owner can update staff accounts.');
+    }
+    final payload = updated.toApiJson(includePin: true)..remove('active');
+    final response = await ApiService.instance.updateStaffUser(updated.id, payload);
+    if (response == null) {
+      throw PosException(ApiService.instance.lastError ?? 'Could not update staff account.');
+    }
+    final saved = PosUser.fromApi(response);
+    updated.pin = '';
     final idx = users.indexWhere((u) => u.id == updated.id);
     if (idx != -1) {
-      users[idx] = updated;
+      users[idx] = saved;
       if (currentLoggedInUser?.id == updated.id) {
-        currentLoggedInUser = updated;
-        activeCashier = updated.fullName;
+        currentLoggedInUser = saved;
+        activeCashier = saved.fullName;
       }
       notifyListeners();
-      _persistAll();
+      await _persistAll();
     }
   }
 
-  void deleteUser(String id) {
+  Future<void> deleteUser(String id) async {
+    if (!ApiService.instance.hasToken || currentLoggedInUser?.role != PosUserRole.owner) {
+      throw PosException('Only an online owner can deactivate staff accounts.');
+    }
+    if (currentLoggedInUser?.id == id) {
+      throw PosException('Your active owner account cannot be deactivated here.');
+    }
+    final response = await ApiService.instance.updateStaffUser(id, {'active': false});
+    if (response == null) {
+      throw PosException(ApiService.instance.lastError ?? 'Could not deactivate staff account.');
+    }
     users.removeWhere((u) => u.id == id);
     notifyListeners();
-    _persistAll();
+    await _persistAll();
   }
 
-  void toggleUserActive(String id) {
-    final idx = users.indexWhere((u) => u.id == id);
-    if (idx != -1) {
-      users[idx].active = !users[idx].active;
+  Future<PosUser?> authenticateShopUser(String phone, String pin) async {
+    ApiService.instance.configure(serverUrl);
+    final auth = await ApiService.instance.login(phone, pin);
+    if (auth == null) {
+      catalogueSyncMessage = ApiService.instance.lastError ?? 'The shop API could not authenticate this account.';
       notifyListeners();
-      _persistAll();
+      return null;
     }
+
+    final userJson = Map<String, dynamic>.from(auth['user'] as Map);
+    final user = PosUser.fromApi(userJson);
+    currentLoggedInUser = user;
+    activeCashier = user.fullName;
+    catalogueSyncMessage = 'Signed in as ${user.roleDisplay}. Refreshing shop data…';
+    if (user.role == PosUserRole.owner) {
+      final remoteUsers = await ApiService.instance.getStaffUsers();
+      if (remoteUsers != null) {
+        users = remoteUsers.map(PosUser.fromApi).toList();
+      }
+    }
+    notifyListeners();
+    await syncCatalogueFromApi();
+    await persistSession(user);
+    return user;
+  }
+
+  Future<void> toggleUserActive(String id) async {
+    final idx = users.indexWhere((u) => u.id == id);
+    if (idx == -1) return;
+    final response = await ApiService.instance.updateStaffUser(
+      id,
+      {'active': !users[idx].active},
+    );
+    if (response == null) {
+      throw PosException(ApiService.instance.lastError ?? 'Could not update staff status.');
+    }
+    users[idx] = PosUser.fromApi(response);
+    notifyListeners();
+    await _persistAll();
   }
 
   late List<PosProduct> products;
@@ -730,19 +826,6 @@ class PosState extends ChangeNotifier {
     products[index] = product.copyWith(isActive: active);
     notifyListeners();
     await _persistAll();
-  }
-
-  Future<void> connectToShopApi(String phone, String pin) async {
-    ApiService.instance.configure(serverUrl);
-    catalogueSyncMessage = 'Connecting to shop API…';
-    notifyListeners();
-    final auth = await ApiService.instance.login(phone, pin);
-    if (auth == null) {
-      catalogueSyncMessage = 'Local-only mode: ${ApiService.instance.lastError ?? 'API login failed.'}';
-      notifyListeners();
-      return;
-    }
-    await syncCatalogueFromApi();
   }
 
   Future<void> syncCatalogueFromApi() async {
@@ -1213,6 +1296,9 @@ class PosState extends ChangeNotifier {
         try {
           final list = jsonDecode(usersJson) as List;
           users = list.map((item) => PosUser.fromJson(item as Map<String, dynamic>)).toList();
+          // Rewrite legacy browser records immediately; older versions stored
+          // staff PINs in plaintext inside users_json.
+          await prefs.setString('users_json', jsonEncode(users.map((u) => u.toJson()).toList()));
         } catch (e) {
           debugPrint('Error parsing users_json: $e');
         }
@@ -1248,49 +1334,13 @@ class PosState extends ChangeNotifier {
         await prefs.setString('products_json', jsonEncode(products.map((item) => item.toJson()).toList()));
       }
 
-      // Check session validity (1 hour unattended threshold)
-      final lastActiveMs = prefs.getInt('session_last_active');
-      final savedUserJson = prefs.getString('session_user_json');
-      final savedUserId = prefs.getString('session_user_id');
-
-      if (lastActiveMs != null && (savedUserJson != null || savedUserId != null)) {
-        final nowMs = DateTime.now().millisecondsSinceEpoch;
-        final elapsedMinutes = (nowMs - lastActiveMs) / (1000 * 60);
-
-        if (elapsedMinutes < sessionTimeoutMinutes) {
-          // Session is STILL VALID (< 1 hour unattended)
-          PosUser? restoredUser;
-          if (savedUserJson != null && savedUserJson.isNotEmpty) {
-            try {
-              restoredUser = PosUser.fromJson(jsonDecode(savedUserJson) as Map<String, dynamic>);
-            } catch (_) {}
-          }
-          if (restoredUser == null && savedUserId != null && savedUserId.isNotEmpty) {
-            try {
-              restoredUser = users.firstWhere((u) => u.id == savedUserId);
-            } catch (_) {}
-          }
-
-          if (restoredUser != null) {
-            currentLoggedInUser = restoredUser;
-            activeCashier = restoredUser.fullName;
-            savedTabIndex = prefs.getInt('session_active_tab') ?? 0;
-            // Roll forward last active timestamp
-            await prefs.setInt('session_last_active', nowMs);
-          } else {
-            currentLoggedInUser = null;
-          }
-        } else {
-          // Expired (> 1 hour unattended)
-          debugPrint('Session expired after ${elapsedMinutes.toStringAsFixed(1)} minutes unattended');
-          currentLoggedInUser = null;
-          await prefs.remove('session_user_id');
-          await prefs.remove('session_user_json');
-          await prefs.remove('session_last_active');
-        }
-      } else {
-        currentLoggedInUser = null;
-      }
+      // The JWT is intentionally memory-only. A cached user object is not an
+      // authentication credential, so every browser restart requires a PIN.
+      currentLoggedInUser = null;
+      savedTabIndex = prefs.getInt('session_active_tab') ?? 0;
+      await prefs.remove('session_user_id');
+      await prefs.remove('session_user_json');
+      await prefs.remove('session_last_active');
 
       sessionLoaded = true;
       notifyListeners();
@@ -1346,6 +1396,7 @@ class PosState extends ChangeNotifier {
 
   /// Call when a user logs in or out to immediately persist/clear the session.
   Future<void> persistSession(PosUser? user, {int? tabIndex}) async {
+    if (user == null) ApiService.instance.setToken(null);
     currentLoggedInUser = user;
     if (user != null) activeCashier = user.fullName;
     if (tabIndex != null) savedTabIndex = tabIndex;
@@ -1580,7 +1631,11 @@ class PosState extends ChangeNotifier {
   }
 
   void _initSampleData({required bool includeProducts}) {
-    _initDefaultUsers();
+    if (includeProducts) {
+      _initDefaultUsers();
+    } else {
+      users = <PosUser>[];
+    }
     _initDefaultCategories();
     if (includeProducts) {
       _initDefaultProducts();

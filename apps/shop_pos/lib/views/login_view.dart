@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -113,6 +112,7 @@ class _LoginViewState extends State<LoginView> {
   String? _errorMsg;
   bool _isLoading = false;
   int _selectedUserIdx = 0;
+  final TextEditingController _phoneController = TextEditingController();
 
   final _shakeKey = GlobalKey<_ShakeControllerState>();
   final FocusNode _focusNode = FocusNode();
@@ -122,10 +122,10 @@ class _LoginViewState extends State<LoginView> {
   PosUser get _user {
     if (_users.isEmpty) {
       return PosUser(
-        id: 'usr_default',
-        fullName: 'John Mwangi',
-        phone: '+254 700 000 000',
-        pin: '1234',
+        id: 'staff-login',
+        fullName: 'Staff member',
+        phone: '',
+        pin: '',
         role: PosUserRole.cashier,
       );
     }
@@ -144,6 +144,7 @@ class _LoginViewState extends State<LoginView> {
   @override
   void dispose() {
     _focusNode.dispose();
+    _phoneController.dispose();
     super.dispose();
   }
 
@@ -153,125 +154,33 @@ class _LoginViewState extends State<LoginView> {
       _errorMsg = null;
       if (key == '⌫') {
         if (_pin.isNotEmpty) _pin = _pin.substring(0, _pin.length - 1);
-      } else if (key == 'BIO') {
-        _handleBiometricAuth();
       } else if (key == 'CLR') {
         _pin = '';
       } else {
-        if (_pin.length < 4) {
+        if (_pin.length < 6) {
           _pin += key;
-          if (_pin.length == 4) {
-            _verifyPin();
-          }
         }
       }
     });
   }
 
-  void _handleBiometricAuth() {
-    // Biometric touch: either instant verified login or staff quick switcher
-    showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 24),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 56,
-                  height: 56,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFE8F8F2),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFD1FAE5)),
-                  ),
-                  child: const Icon(Icons.fingerprint, color: Color(0xFF0D9488), size: 32),
-                ),
-                const SizedBox(height: 16),
-                const Text(
-                  'Biometric Authentication',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF0F172A),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'Authenticate as ${_user.fullName} using terminal biometrics.',
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF64748B)),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _showCashierPicker();
-                        },
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          side: const BorderSide(color: Color(0xFFCBD5E1)),
-                        ),
-                        child: const Text('Switch Staff', style: TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.w600)),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          unawaited(widget.state.connectToShopApi(_user.phone, _pin));
-                          widget.state.currentLoggedInUser = _user;
-                          widget.state.activeCashierName = _user.fullName;
-                          widget.onAuthenticated();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0D9488),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          elevation: 0,
-                        ),
-                        child: const Text('Verify & Open Till', style: TextStyle(fontWeight: FontWeight.w700)),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   Future<void> _verifyPin() async {
+    final phone = _phoneController.text.trim();
+    if (phone.replaceAll(RegExp(r'\D'), '').length < 9 || _pin.length < 4) {
+      setState(() => _errorMsg = 'Enter your phone number and 4–6 digit PIN.');
+      return;
+    }
     setState(() => _isLoading = true);
-    await Future.delayed(const Duration(milliseconds: 300));
-
+    final user = await widget.state.authenticateShopUser(phone, _pin);
     if (!mounted) return;
-
-    if (_pin == _user.pin) {
-      unawaited(widget.state.connectToShopApi(_user.phone, _pin));
-      widget.state.currentLoggedInUser = _user;
-      widget.state.activeCashierName = _user.fullName;
+    if (user != null) {
       widget.onAuthenticated();
     } else {
       _shakeKey.currentState?.shake();
       setState(() {
         _isLoading = false;
         _pin = '';
-        _errorMsg = 'Incorrect PIN. Try again or switch account.';
+        _errorMsg = widget.state.catalogueSyncMessage ?? 'Phone number or PIN is incorrect.';
       });
     }
   }
@@ -326,6 +235,7 @@ class _LoginViewState extends State<LoginView> {
                     onTap: () {
                       setState(() {
                         _selectedUserIdx = idx;
+                        _phoneController.text = u.phone;
                         _pin = '';
                         _errorMsg = null;
                       });
@@ -391,7 +301,7 @@ class _LoginViewState extends State<LoginView> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'Default PIN: ${u.pin} • ${u.rolePermissions}',
+                                  '${u.phone} • ${u.rolePermissions}',
                                   style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
@@ -756,7 +666,7 @@ class _LoginViewState extends State<LoginView> {
 
               // 2. Heading
               const Text(
-                'Enter Your PIN',
+                'Staff sign in',
                 style: TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w800,
@@ -769,7 +679,7 @@ class _LoginViewState extends State<LoginView> {
 
               // 3. Supporting Text
               const Text(
-                'Please enter your 4-digit PIN to continue\nto your POS session.',
+                'Use the phone number and PIN assigned to your staff account.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12.5,
@@ -779,8 +689,21 @@ class _LoginViewState extends State<LoginView> {
               ),
 
               const SizedBox(height: 14),
+              TextField(
+                controller: _phoneController,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.next,
+                decoration: InputDecoration(
+                  labelText: 'Phone number',
+                  hintText: '07xx xxx xxx',
+                  prefixIcon: const Icon(Icons.phone_outlined),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onChanged: (_) => setState(() => _errorMsg = null),
+              ),
+              const SizedBox(height: 12),
 
-              // 4. Four Elegant PIN Indicators inside a soft pill
+              // 4. PIN indicators inside a soft pill
               _ShakeController(
                 shakeKey: _shakeKey,
                 child: Container(
@@ -791,7 +714,7 @@ class _LoginViewState extends State<LoginView> {
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
-                    children: List.generate(4, (index) {
+                    children: List.generate(6, (index) {
                       final isFilled = index < _pin.length;
                       final isError = _errorMsg != null;
 
@@ -846,6 +769,22 @@ class _LoginViewState extends State<LoginView> {
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 340),
                 child: _buildKeypad(),
+              ),
+
+              const SizedBox(height: 12),
+              SizedBox(
+                width: 340,
+                height: 48,
+                child: FilledButton.icon(
+                  onPressed: _isLoading ? null : _verifyPin,
+                  icon: const Icon(Icons.lock_open_rounded),
+                  label: const Text('Sign in securely'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: const Color(0xFF0D9488),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                ),
               ),
 
               const SizedBox(height: 16),
@@ -904,7 +843,7 @@ class _LoginViewState extends State<LoginView> {
         const SizedBox(height: 8),
         _buildKeypadRow(['7', '8', '9']),
         const SizedBox(height: 8),
-        _buildKeypadRow(['BIO', '0', '⌫']),
+        _buildKeypadRow(['CLR', '0', '⌫']),
       ],
     );
   }
@@ -925,7 +864,7 @@ class _LoginViewState extends State<LoginView> {
 
   Widget _buildKeyButton(String label) {
     final isBackspace = label == '⌫';
-    final isBio = label == 'BIO';
+    final isBio = label == 'CLR';
 
     final bgColor = isBio ? const Color(0xFFE8F8F2) : const Color(0xFFFFFFFF);
     final borderColor = isBio ? const Color(0xFFD1FAE5) : const Color(0xFFE2E8F0);
@@ -959,11 +898,7 @@ class _LoginViewState extends State<LoginView> {
                     size: 20,
                   )
                 : isBio
-                    ? const Icon(
-                        Icons.fingerprint,
-                        color: Color(0xFF0D9488),
-                        size: 24,
-                      )
+                    ? const Text('CLR', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF0D9488)))
                     : Text(
                         label,
                         style: const TextStyle(

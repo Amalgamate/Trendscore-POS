@@ -8,7 +8,7 @@ import type { SaleStatus, PaymentMethod } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { parseBody, parseQuery, send200, send201, sendError } from '../../lib/http';
-import { requireAuth } from '../../lib/auth.middleware';
+import { requireAuth, requireRole } from '../../lib/auth.middleware';
 import { SaleValidationError } from './pricing';
 import { createSale, DuplicateSaleError } from './create-sale';
 
@@ -45,7 +45,7 @@ export function salesRouter(businessId: string): Router {
   const router = ExpressRouter();
 
   // GET /sales
-  router.get('/', requireAuth, async (req, res) => {
+  router.get('/', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     const query = parseQuery(ListSalesQuerySchema, req, res);
     if (!query) return;
 
@@ -95,7 +95,7 @@ export function salesRouter(businessId: string): Router {
   });
 
   // GET /sales/summary
-  router.get('/summary', requireAuth, async (req, res) => {
+  router.get('/summary', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
     const tomorrow = new Date(today);
@@ -144,7 +144,7 @@ export function salesRouter(businessId: string): Router {
   });
 
   // GET /sales/:id
-  router.get('/:id', requireAuth, async (req, res) => {
+  router.get('/:id', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     try {
       const sale = await prisma.sale.findFirst({
         where: { id: req.params.id, businessId },
@@ -164,7 +164,7 @@ export function salesRouter(businessId: string): Router {
   });
 
   // POST /sales
-  router.post('/', requireAuth, async (req, res) => {
+  router.post('/', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     const body = parseBody(CreateSaleBodySchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;
@@ -195,7 +195,7 @@ export function salesRouter(businessId: string): Router {
   });
 
   // POST /sales/:id/reverse
-  router.post('/:id/reverse', requireAuth, async (req, res) => {
+  router.post('/:id/reverse', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
     const body = parseBody(ReversalBodySchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;

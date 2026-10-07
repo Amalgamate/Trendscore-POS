@@ -5,6 +5,7 @@
 import type { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { sendError } from './http';
+import { prisma } from './prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-production';
 
@@ -14,22 +15,49 @@ export interface AuthLocals {
   name: string;
 }
 
-export function requireAuth(req: Request, res: Response, next: NextFunction) {
+export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
   if (!header?.startsWith('Bearer ')) {
     return sendError(res, 401, 'NO_TOKEN', 'Authorization header missing or malformed.');
   }
 
   const token = header.slice(7);
+  let payload: jwt.JwtPayload;
   try {
-    const payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
-    res.locals.auth = {
-      userId: payload['sub'] as string,
-      role: payload['role'] as string,
-      name: payload['name'] as string,
-    } satisfies AuthLocals;
-    return next();
+    payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;
   } catch {
     return sendError(res, 401, 'INVALID_TOKEN', 'Token is invalid or has expired. Please log in again.');
   }
+  const userId = payload['sub'];
+  if (typeof userId !== 'string') {
+    return sendError(res, 401, 'INVALID_TOKEN', 'Token is invalid or has expired. Please log in again.');
+  }
+
+  try {
+    // Refresh role and active status from the database on every request, so a
+    // demotion or deactivation takes effect immediately despite an old JWT.
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, fullName: true, role: true, active: true },
+    });
+    if (!user || !user.active) {
+      return sendError(res, 401, 'INVALID_TOKEN', 'This staff account is inactive or no longer exists.');
+    }
+    res.locals.auth = { userId: user.id, role: user.role, name: user.fullName } satisfies AuthLocals;
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/** Restrict an authenticated route to the listed server-side roles. */
+export function requireRole(...roles: string[]) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    const auth = res.locals.auth as AuthLocals | undefined;
+    if (!auth) return sendError(res, 401, 'NO_TOKEN', 'Authentication is required.');
+    if (!roles.includes(auth.role)) {
+      return sendError(res, 403, 'FORBIDDEN', 'Your account does not have permission to do this.');
+    }
+    return next();
+  };
 }
