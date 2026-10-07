@@ -507,7 +507,7 @@ class PosState extends ChangeNotifier {
 
   static const bool _includeDemoProducts = bool.fromEnvironment(
     'POS_DEMO_DATA',
-    defaultValue: true,
+    defaultValue: false,
   );
 
   final Cart cart = Cart();

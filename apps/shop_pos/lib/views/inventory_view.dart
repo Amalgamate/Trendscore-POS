@@ -485,7 +485,7 @@ class _InventoryViewState extends State<InventoryView> {
           final category = cell(row, 'category');
           final stock = int.parse(cell(row, 'stock'));
           final price = Money.parse(cell(row, 'price'));
-          if (name.isEmpty || sku.isEmpty || category.isEmpty || stock < 0 || price.isZero) {
+          if (name.isEmpty || sku.isEmpty || category.isEmpty || stock < 0 || price.isZero || price.minorUnits < 0) {
             throw const FormatException('Required value is empty or invalid.');
           }
           if (!seenSkus.add(sku.toLowerCase())) {
