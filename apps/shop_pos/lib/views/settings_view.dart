@@ -967,7 +967,6 @@ class _SettingsViewState extends State<SettingsView> {
             const SizedBox(height: 20),
           ],
         ),
-      ),
     );
     return Scaffold(
       backgroundColor: AppColors.bg_canvas,

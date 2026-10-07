@@ -19,5 +19,5 @@ void updateFavicon(String? imageSource) {
   } else {
     link.removeAttribute('type');
   }
-  if (link.parentNode == null) html.document.head?.appendChild(link);
+  if (link.parentNode == null) html.document.head?.append(link);
 }
