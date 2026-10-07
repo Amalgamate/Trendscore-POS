@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'cart.dart';
 import 'pos_state.dart';
@@ -734,6 +735,13 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
         return matchesCategory && (query.isEmpty || p.name.toLowerCase().contains(query) || p.sku.toLowerCase().contains(query));
       }).toList();
 
+  int _qtyInCart(String productId) {
+    for (final line in widget.state.cart.lines) {
+      if (line.productId == productId) return line.quantity;
+    }
+    return 0;
+  }
+
   void _onProductTap(PosProduct product) {
     widget.state.addToCart(
       product,
@@ -947,6 +955,7 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                 onBarcodeSubmit: _handleQuickBarcode,
                 onProductTap: _onProductTap,
                 onScan: _onScanBarcodeModal,
+                cartQty: _qtyInCart,
               );
 
               final cartPanel = _CartPanel(
@@ -1186,6 +1195,7 @@ class _Catalog extends StatelessWidget {
     required this.onBarcodeSubmit,
     required this.onProductTap,
     required this.onScan,
+    required this.cartQty,
   });
 
   final TextEditingController search;
@@ -1199,6 +1209,9 @@ class _Catalog extends StatelessWidget {
   final ValueChanged<String> onBarcodeSubmit;
   final ValueChanged<PosProduct> onProductTap;
   final VoidCallback onScan;
+
+  /// Units of a product currently in the basket (0 if none).
+  final int Function(String productId) cartQty;
 
   @override
   Widget build(BuildContext context) {
@@ -1359,17 +1372,21 @@ class _Catalog extends StatelessWidget {
                 ? const Center(child: Text('No products match your filter.'))
                 : GridView.builder(
                     gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 200,
-                      mainAxisExtent: 175,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
+                      maxCrossAxisExtent: 230,
+                      childAspectRatio: 0.78,
+                      crossAxisSpacing: 14,
+                      mainAxisSpacing: 14,
                     ),
                     itemCount: products.length,
                     itemBuilder: (context, index) {
                       final p = products[index];
                       return _StaggeredFadeIn(
                         delay: Duration(milliseconds: (index * 28).clamp(0, 400)),
-                        child: _ProductCard(product: p, onTap: () => onProductTap(p)),
+                        child: _ProductTile(
+                          product: p,
+                          cartQty: cartQty(p.id),
+                          onTap: () => onProductTap(p),
+                        ),
                       );
                     },
                   ),
@@ -1423,6 +1440,375 @@ class _StaggeredFadeInState extends State<_StaggeredFadeIn>
         opacity: _opacity,
         child: SlideTransition(position: _slide, child: widget.child),
       );
+}
+
+/// Large, photo-first product tile for the POS grid.
+///
+/// - Big image fills the top of the card (category icon if no photo).
+/// - Hover (desktop) or tap the (i) / long-press (touch) to see SKU, barcode,
+///   category, stock level and VAT. Cost price and margin are deliberately NOT
+///   shown on the till.
+/// - Shows how many units are already in the basket.
+class _ProductTile extends StatefulWidget {
+  const _ProductTile({
+    required this.product,
+    required this.cartQty,
+    required this.onTap,
+  });
+
+  final PosProduct product;
+  final int cartQty;
+  final VoidCallback onTap;
+
+  @override
+  State<_ProductTile> createState() => _ProductTileState();
+}
+
+class _ProductTileState extends State<_ProductTile> {
+  bool _hovered = false;
+  bool _pressed = false;
+  bool _pinnedInfo = false;
+
+  // Decode the base64 image once, not on every hover rebuild.
+  Uint8List? _bytes;
+  String? _bytesSource;
+
+  Uint8List? _photoBytes(PosProduct p) {
+    final src = p.imageBase64;
+    if (src == null || src.isEmpty) return null;
+    if (!identical(src, _bytesSource) && src != _bytesSource) {
+      try {
+        _bytes = base64Decode(src.split(',').last.replaceAll(RegExp(r'\s+'), ''));
+      } catch (_) {
+        _bytes = null;
+      }
+      _bytesSource = src;
+    }
+    return _bytes;
+  }
+
+  Widget _photo(PosProduct p) {
+    final bytes = _photoBytes(p);
+    if (bytes != null) {
+      return Image.memory(
+        bytes,
+        fit: BoxFit.cover,
+        width: double.infinity,
+        height: double.infinity,
+        gaplessPlayback: true,
+        filterQuality: FilterQuality.medium,
+        errorBuilder: (_, __, ___) => _placeholder(p),
+      );
+    }
+    return _placeholder(p);
+  }
+
+  Widget _placeholder(PosProduct p) {
+    return Container(
+      color: p.tint,
+      alignment: Alignment.center,
+      child: Icon(p.icon, size: 56, color: AppColors.text_primary.withAlpha(90)),
+    );
+  }
+
+  Widget _infoRow(String label, String value, {Color? valueColor}) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 3),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.baseline,
+        textBaseline: TextBaseline.alphabetic,
+        children: [
+          SizedBox(
+            width: 62,
+            child: Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFFCBD5E1))),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w700,
+              color: valueColor ?? Colors.white,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _infoOverlay(PosProduct p) {
+    final stockColor = p.isOutOfStock
+        ? const Color(0xFFFCA5A5)
+        : (p.isLowStock ? const Color(0xFFFCD34D) : const Color(0xFF86EFAC));
+    final stockText = p.isOutOfStock
+        ? 'Out of stock'
+        : '${p.stock} units${p.isLowStock ? ' (low)' : ''}';
+
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [Color(0xCC0F172A), Color(0xF20F172A)],
+        ),
+      ),
+      padding: const EdgeInsets.fromLTRB(12, 40, 12, 12),
+      alignment: Alignment.bottomLeft,
+      child: FittedBox(
+        fit: BoxFit.scaleDown,
+        alignment: Alignment.bottomLeft,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _infoRow('Category', p.category),
+            _infoRow('SKU', p.sku),
+            if (p.barcode != null && p.barcode!.isNotEmpty) _infoRow('Barcode', p.barcode!),
+            _infoRow('In stock', stockText, valueColor: stockColor),
+            _infoRow('Price', 'incl. ${(p.taxRateBasisPoints / 100).toStringAsFixed(0)}% VAT'),
+            if (p.notes != null && p.notes!.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 170),
+                child: Text(
+                  p.notes!,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: Color(0xFFCBD5E1), fontStyle: FontStyle.italic),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.product;
+    final out = p.isOutOfStock;
+    final qty = widget.cartQty;
+    final showInfo = _hovered || _pinnedInfo;
+
+    final stockColor = out
+        ? AppColors.status_danger
+        : (p.isLowStock ? const Color(0xFFD97706) : AppColors.status_success);
+
+    Widget photo = _photo(p);
+    if (out) {
+      photo = ColorFiltered(
+        colorFilter: const ColorFilter.matrix(<double>[
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0.2126, 0.7152, 0.0722, 0, 0,
+          0, 0, 0, 1, 0,
+        ]),
+        child: photo,
+      );
+    }
+
+    final selected = qty > 0;
+
+    return MouseRegion(
+      cursor: out ? SystemMouseCursors.forbidden : SystemMouseCursors.click,
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() {
+        _hovered = false;
+        _pressed = false;
+      }),
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapDown: (_) => setState(() => _pressed = true),
+        onTapUp: (_) => setState(() => _pressed = false),
+        onTapCancel: () => setState(() => _pressed = false),
+        onTap: out ? null : widget.onTap,
+        onLongPress: () => setState(() => _pinnedInfo = !_pinnedInfo),
+        child: AnimatedScale(
+          scale: _pressed ? 0.97 : 1.0,
+          duration: const Duration(milliseconds: 110),
+          curve: Curves.easeOutCubic,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 160),
+            clipBehavior: Clip.antiAlias,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(
+                color: selected
+                    ? AppColors.accent_primary
+                    : (_hovered && !out ? AppColors.accent_primary.withAlpha(150) : AppColors.border_subtle),
+                width: selected ? 2 : 1,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: _hovered && !out ? AppColors.accent_primary.withAlpha(30) : const Color(0x0A000000),
+                  blurRadius: _hovered && !out ? 14 : 5,
+                  offset: Offset(0, _hovered && !out ? 6 : 2),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── Big photo ──
+                Expanded(
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      photo,
+
+                      // Hover / pinned info
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: AnimatedOpacity(
+                            opacity: showInfo ? 1 : 0,
+                            duration: const Duration(milliseconds: 150),
+                            child: _infoOverlay(p),
+                          ),
+                        ),
+                      ),
+
+                      // Out of stock banner
+                      if (out)
+                        Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: Container(
+                            color: AppColors.status_danger.withAlpha(220),
+                            padding: const EdgeInsets.symmetric(vertical: 4),
+                            alignment: Alignment.center,
+                            child: const Text(
+                              'OUT OF STOCK',
+                              style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                            ),
+                          ),
+                        ),
+
+                      // Stock pill (top-left)
+                      Positioned(
+                        top: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withAlpha(238),
+                            borderRadius: BorderRadius.circular(20),
+                            boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 4)],
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: BoxDecoration(color: stockColor, shape: BoxShape.circle),
+                              ),
+                              const SizedBox(width: 5),
+                              Text(
+                                out ? '0 left' : '${p.stock} left',
+                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: stockColor),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Info button (top-right) — tap to pin details, works on touch
+                      Positioned(
+                        top: 6,
+                        right: 6,
+                        child: Tooltip(
+                          message: 'Product details',
+                          child: GestureDetector(
+                            onTap: () => setState(() => _pinnedInfo = !_pinnedInfo),
+                            child: Container(
+                              width: 26,
+                              height: 26,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: _pinnedInfo ? AppColors.accent_primary : Colors.white.withAlpha(238),
+                                shape: BoxShape.circle,
+                                boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 4)],
+                              ),
+                              child: Icon(
+                                Icons.info_outline,
+                                size: 16,
+                                color: _pinnedInfo ? Colors.white : AppColors.text_secondary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // ── Name + price + add ──
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        height: 34,
+                        child: Text(
+                          p.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, height: 1.25),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'KES ${p.unitPrice.formatted}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.accent_primary),
+                            ),
+                          ),
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            height: 30,
+                            constraints: const BoxConstraints(minWidth: 30),
+                            padding: EdgeInsets.symmetric(horizontal: selected ? 9 : 0),
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: out
+                                  ? AppColors.border_subtle
+                                  : (selected || _hovered ? AppColors.accent_primary : AppColors.accent_light),
+                              borderRadius: BorderRadius.circular(15),
+                            ),
+                            child: selected
+                                ? Text(
+                                    '×$qty',
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                                  )
+                                : Icon(
+                                    Icons.add,
+                                    size: 18,
+                                    color: out
+                                        ? AppColors.text_tertiary
+                                        : (_hovered ? Colors.white : AppColors.accent_primary),
+                                  ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _ProductCard extends StatefulWidget {

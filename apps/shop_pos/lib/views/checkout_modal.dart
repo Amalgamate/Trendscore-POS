@@ -188,9 +188,11 @@ class _CheckoutModalState extends State<CheckoutModal> {
             ),
             const SizedBox(height: 20),
 
-            // Method Selector Tabs
-            Row(
-              children: [
+            // Method Selector Tabs (equal height, icons share one baseline)
+            IntrinsicHeight(
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
                 _MethodTab(
                   label: 'M-Pesa Express',
                   icon: Icons.phone_android,
@@ -214,7 +216,8 @@ class _CheckoutModalState extends State<CheckoutModal> {
                   isSelected: _method == SalePaymentMethod.credit,
                   onTap: () => setState(() => _method = SalePaymentMethod.credit),
                 ),
-              ],
+                ],
+              ),
             ),
             const SizedBox(height: 20),
 
@@ -262,6 +265,7 @@ class _CheckoutModalState extends State<CheckoutModal> {
               Container(
                 width: 32,
                 height: 32,
+                alignment: Alignment.center,
                 decoration: const BoxDecoration(color: Color(0xFF16A34A), shape: BoxShape.circle),
                 child: const Icon(Icons.check, color: Colors.white, size: 18),
               ),
@@ -422,6 +426,7 @@ class _CheckoutModalState extends State<CheckoutModal> {
               Container(
                 width: 32,
                 height: 32,
+                alignment: Alignment.center,
                 decoration: const BoxDecoration(color: Color(0xFFD97706), shape: BoxShape.circle),
                 child: const Icon(Icons.book_outlined, color: Colors.white, size: 18),
               ),
@@ -509,7 +514,8 @@ class _MethodTab extends StatelessWidget {
         onTap: onTap,
         borderRadius: BorderRadius.circular(8),
         child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12),
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
+          alignment: Alignment.topCenter,
           decoration: BoxDecoration(
             color: isSelected ? activeColor.withAlpha(20) : AppColors.bg_surface,
             borderRadius: BorderRadius.circular(8),
@@ -519,13 +525,26 @@ class _MethodTab extends StatelessWidget {
             ),
           ),
           child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Icon(icon, color: isSelected ? activeColor : AppColors.text_tertiary, size: 22),
-              const SizedBox(height: 4),
+              // Fixed 24x24 slot, glyph centred, so every tab's icon sits on the same line.
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: Center(
+                  child: Icon(icon, color: isSelected ? activeColor : AppColors.text_tertiary, size: 22),
+                ),
+              ),
+              const SizedBox(height: 6),
               Text(
                 label,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontSize: 11,
+                  height: 1.2,
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                   color: isSelected ? activeColor : AppColors.text_secondary,
                 ),

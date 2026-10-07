@@ -5,7 +5,78 @@ import 'package:flutter/material.dart';
 import 'cart.dart';
 import 'theme/tokens.dart';
 
+/// Error with a message that is safe to show to the cashier as-is.
+class PosException implements Exception {
+  PosException(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
+/// Icons a shop owner can pick for a category.
+const Map<String, IconData> kCategoryIcons = {
+  'box': Icons.inventory_2_outlined,
+  'dairy': Icons.egg_outlined,
+  'bakery': Icons.bakery_dining,
+  'drink': Icons.local_drink_outlined,
+  'produce': Icons.eco_outlined,
+  'snack': Icons.fastfood_outlined,
+  'home': Icons.home_outlined,
+  'grain': Icons.grass_outlined,
+  'health': Icons.health_and_safety_outlined,
+  'clean': Icons.cleaning_services_outlined,
+  'meat': Icons.set_meal_outlined,
+  'basket': Icons.shopping_basket_outlined,
+  'baby': Icons.child_care_outlined,
+  'pet': Icons.pets_outlined,
+  'tool': Icons.build_outlined,
+  'beauty': Icons.spa_outlined,
+};
+
+/// Soft tint colours a shop owner can pick for a category.
+const List<int> kCategoryColors = [
+  0xFFEFF6FF, 0xFFFFFBEB, 0xFFF0FDF4, 0xFFFFF7ED, 0xFFF5F3FF, 0xFFFEFCE8,
+  0xFFFFEFF2, 0xFFEEF2FF, 0xFFECFEFF, 0xFFFDF2F8, 0xFFF7FEE7, 0xFFF8FAFC,
+];
+
+/// A shop-defined product category.
+class PosCategory {
+  PosCategory({
+    required this.id,
+    required this.name,
+    required this.colorValue,
+    this.iconKey = 'box',
+  });
+
+  final String id;
+  String name;
+  int colorValue;
+  String iconKey;
+
+  Color get color => Color(colorValue);
+  IconData get icon => kCategoryIcons[iconKey] ?? Icons.inventory_2_outlined;
+
+  Map<String, dynamic> toJson() => {
+        'id': id,
+        'name': name,
+        'color': colorValue,
+        'icon': iconKey,
+      };
+
+  factory PosCategory.fromJson(Map<String, dynamic> json) => PosCategory(
+        id: json['id'] as String,
+        name: json['name'] as String,
+        colorValue: json['color'] as int? ?? 0xFFF8FAFC,
+        iconKey: json['icon'] as String? ?? 'box',
+      );
+}
+
 /// A product in the shop catalog.
+///
+/// A product with variants (e.g. milk in 500ml / 1L / 5L) is stored as several
+/// PosProduct rows that share a [groupId]. Every variant is a real, separately
+/// sellable item with its own SKU, barcode, price and stock, so the cart, sales
+/// ledger, receipts and reports keep working per productId.
 class PosProduct {
   PosProduct({
     required this.id,
@@ -23,6 +94,8 @@ class PosProduct {
     this.isActive = true,
     this.notes,
     this.imageBase64,
+    this.groupId,
+    this.variantLabel,
   });
 
   final String id;
@@ -41,6 +114,16 @@ class PosProduct {
   String? notes;
   /// Base64-encoded 1:1 JPEG product image (data URI), or null if none.
   String? imageBase64;
+
+  /// Shared by all variants of one product; null for a standalone product.
+  String? groupId;
+
+  /// e.g. "500ml", "Strawberry", "6-pack". Null for a standalone product.
+  String? variantLabel;
+
+  /// Name shown on receipts and in the basket, e.g. "Fresh milk · 500ml".
+  String get displayName =>
+      (variantLabel == null || variantLabel!.isEmpty) ? name : '$name · $variantLabel';
 
   bool get isOutOfStock => stock <= 0;
   bool get isLowStock => stock > 0 && stock <= lowStockThreshold;
@@ -65,6 +148,8 @@ class PosProduct {
     bool? isActive,
     String? notes,
     Object? imageBase64 = _sentinel,
+    Object? groupId = _sentinel,
+    Object? variantLabel = _sentinel,
   }) {
     return PosProduct(
       id: id,
@@ -82,6 +167,8 @@ class PosProduct {
       isActive: isActive ?? this.isActive,
       notes: notes ?? this.notes,
       imageBase64: imageBase64 == _sentinel ? this.imageBase64 : (imageBase64 as String?),
+      groupId: groupId == _sentinel ? this.groupId : (groupId as String?),
+      variantLabel: variantLabel == _sentinel ? this.variantLabel : (variantLabel as String?),
     );
   }
 
@@ -104,6 +191,8 @@ class PosProduct {
     'isActive': isActive,
     'notes': notes,
     'imageBase64': imageBase64,
+    'groupId': groupId,
+    'variantLabel': variantLabel,
   };
 
   factory PosProduct.fromJson(Map<String, dynamic> json) => PosProduct(
@@ -122,10 +211,15 @@ class PosProduct {
     isActive: json['isActive'] as bool? ?? true,
     notes: json['notes'] as String?,
     imageBase64: json['imageBase64'] as String?,
+    groupId: json['groupId'] as String?,
+    variantLabel: json['variantLabel'] as String?,
   );
 
   static IconData _iconFromCode(int? code) {
     if (code == null) return Icons.inventory_2_outlined;
+    for (final icon in kCategoryIcons.values) {
+      if (icon.codePoint == code) return icon;
+    }
     switch (code) {
       case 0xe6e8: return Icons.water_drop_outlined;
       case 0xe0d6: return Icons.bakery_dining_outlined;
@@ -479,6 +573,7 @@ class PosState extends ChangeNotifier {
   }
 
   late List<PosProduct> products;
+  late List<PosCategory> categories;
   late List<PosCustomer> customers;
   late List<SaleRecord> sales;
   List<SaleRecord> get salesLedger => sales;
@@ -501,10 +596,255 @@ class PosState extends ChangeNotifier {
     }
   }
 
+  /// Persist a product image and its product record before reporting success.
+  /// Unlike the general background save, this surfaces browser quota/storage
+  /// errors so the editor can remain open and tell the user what happened.
+  Future<void> saveProduct(PosProduct product, {required bool isNew}) async {
+    final index = products.indexWhere((item) => item.id == product.id);
+    final previous = index == -1 ? null : products[index];
+    if (isNew) {
+      products.insert(0, product);
+    } else if (index != -1) {
+      products[index] = product;
+    } else {
+      throw StateError('This product is no longer in the catalogue. Refresh and try again.');
+    }
+    notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = await prefs.setString(
+        'products_json',
+        jsonEncode(products.map((item) => item.toJson()).toList()),
+      );
+      if (!saved) throw StateError('The browser declined to save the product.');
+    } catch (error) {
+      if (isNew) {
+        products.removeWhere((item) => item.id == product.id);
+      } else if (previous != null) {
+        products[products.indexWhere((item) => item.id == product.id)] = previous;
+      }
+      notifyListeners();
+      rethrow;
+    }
+  }
+
   void deleteProduct(String productId) {
     products.removeWhere((p) => p.id == productId);
     notifyListeners();
     _persistAll();
+  }
+
+  // ─── Variants ──────────────────────────────────────────────────────────────────────
+
+  /// [p] plus its sibling variants (catalogue order). A standalone product
+  /// returns just itself.
+  List<PosProduct> variantsOf(PosProduct p) {
+    final gid = p.groupId;
+    if (gid == null) return [p];
+    final list = products.where((x) => x.groupId == gid).toList();
+    return list.isEmpty ? [p] : list;
+  }
+
+  /// One entry per catalogue item: standalone products as-is, and the first
+  /// variant of each variant group.
+  List<PosProduct> get catalogueRepresentatives {
+    final seen = <String>{};
+    final out = <PosProduct>[];
+    for (final p in products) {
+      final gid = p.groupId;
+      if (gid == null) {
+        out.add(p);
+      } else if (seen.add(gid)) {
+        out.add(p);
+      }
+    }
+    return out;
+  }
+
+  /// Saves all variants of one product in a single step.
+  ///
+  /// [variants] is the desired final set (existing ids are updated in place,
+  /// unknown ids are added). Variants in [originalIds] that are no longer in
+  /// [variants] are deactivated, not deleted, so past sales, receipts and
+  /// reversals that point at them keep working. Rolls back and rethrows if the
+  /// browser refuses to store the data.
+  Future<void> saveVariantGroup({
+    required String groupId,
+    required List<PosProduct> variants,
+    required Set<String> originalIds,
+  }) async {
+    final backup = List<PosProduct>.from(products);
+    final keepIds = variants.map((v) => v.id).toSet();
+
+    final fresh = <PosProduct>[];
+    for (final v in variants) {
+      final idx = products.indexWhere((p) => p.id == v.id);
+      if (idx == -1) {
+        fresh.add(v);
+      } else {
+        products[idx] = v;
+      }
+    }
+
+    for (var i = 0; i < products.length; i++) {
+      final p = products[i];
+      if (originalIds.contains(p.id) && !keepIds.contains(p.id) && p.isActive) {
+        products[i] = p.copyWith(isActive: false);
+      }
+    }
+
+    if (fresh.isNotEmpty) {
+      final lastSibling = products.lastIndexWhere((p) => p.groupId == groupId);
+      products.insertAll(lastSibling == -1 ? 0 : lastSibling + 1, fresh);
+    }
+
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = await prefs.setString(
+        'products_json',
+        jsonEncode(products.map((item) => item.toJson()).toList()),
+      );
+      if (!saved) throw StateError('The browser declined to save the product.');
+    } catch (_) {
+      products
+        ..clear()
+        ..addAll(backup);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  // ─── Categories ───────────────────────────────────────────────────────────────────
+
+  PosCategory? categoryByName(String name) {
+    final key = name.trim().toLowerCase();
+    for (final c in categories) {
+      if (c.name.toLowerCase() == key) return c;
+    }
+    return null;
+  }
+
+  Color categoryColor(String name) =>
+      categoryByName(name)?.color ?? const Color(0xFFF8FAFC);
+
+  IconData categoryIcon(String name) =>
+      categoryByName(name)?.icon ?? Icons.inventory_2_outlined;
+
+  /// Number of sellable items (each variant counts) in a category.
+  int productCountIn(String categoryName) =>
+      products.where((p) => p.category == categoryName).length;
+
+  Future<PosCategory> addCategory(
+    String name, {
+    int? colorValue,
+    String iconKey = 'box',
+  }) async {
+    final clean = name.trim();
+    if (clean.isEmpty) throw PosException('Category name is required.');
+    if (categoryByName(clean) != null) {
+      throw PosException('A category called "$clean" already exists.');
+    }
+    final cat = PosCategory(
+      id: 'cat_${DateTime.now().millisecondsSinceEpoch}',
+      name: clean,
+      colorValue: colorValue ?? kCategoryColors[categories.length % kCategoryColors.length],
+      iconKey: iconKey,
+    );
+    categories.add(cat);
+    notifyListeners();
+    await _persistAll();
+    return cat;
+  }
+
+  /// Renames / recolours a category. Products in it follow the rename.
+  Future<void> updateCategory(
+    String id, {
+    String? name,
+    int? colorValue,
+    String? iconKey,
+  }) async {
+    final cat = categories.firstWhere((c) => c.id == id);
+    final oldName = cat.name;
+
+    if (name != null) {
+      final clean = name.trim();
+      if (clean.isEmpty) throw PosException('Category name is required.');
+      final clash = categoryByName(clean);
+      if (clash != null && clash.id != id) {
+        throw PosException('A category called "$clean" already exists.');
+      }
+      cat.name = clean;
+    }
+    if (colorValue != null) cat.colorValue = colorValue;
+    if (iconKey != null) cat.iconKey = iconKey;
+
+    for (var i = 0; i < products.length; i++) {
+      final p = products[i];
+      if (p.category == oldName) {
+        p.category = cat.name;
+        products[i] = p.copyWith(icon: cat.icon, tint: cat.color);
+      }
+    }
+    notifyListeners();
+    await _persistAll();
+  }
+
+  /// Deletes a category. If products use it, [moveProductsTo] (another
+  /// category's name) is required and they are moved there.
+  Future<void> deleteCategory(String id, {String? moveProductsTo}) async {
+    final cat = categories.firstWhere((c) => c.id == id);
+    final inUse = productCountIn(cat.name);
+    if (categories.length <= 1) {
+      throw PosException('Keep at least one category.');
+    }
+    if (inUse > 0) {
+      final target = moveProductsTo == null ? null : categoryByName(moveProductsTo);
+      if (target == null || target.id == id) {
+        throw PosException('Choose a category to move its $inUse products to.');
+      }
+      for (var i = 0; i < products.length; i++) {
+        final p = products[i];
+        if (p.category == cat.name) {
+          p.category = target.name;
+          products[i] = p.copyWith(icon: target.icon, tint: target.color);
+        }
+      }
+    }
+    categories.removeWhere((c) => c.id == id);
+    notifyListeners();
+    await _persistAll();
+  }
+
+  void _initDefaultCategories() {
+    categories = [
+      PosCategory(id: 'cat_dairy', name: 'Dairy', colorValue: 0xFFEFF6FF, iconKey: 'dairy'),
+      PosCategory(id: 'cat_bakery', name: 'Bakery', colorValue: 0xFFFFFBEB, iconKey: 'bakery'),
+      PosCategory(id: 'cat_beverages', name: 'Beverages', colorValue: 0xFFF0FDF4, iconKey: 'drink'),
+      PosCategory(id: 'cat_produce', name: 'Produce', colorValue: 0xFFF7FEE7, iconKey: 'produce'),
+      PosCategory(id: 'cat_groceries', name: 'Groceries', colorValue: 0xFFFEFCE8, iconKey: 'grain'),
+      PosCategory(id: 'cat_snacks', name: 'Snacks', colorValue: 0xFFFFF7ED, iconKey: 'snack'),
+      PosCategory(id: 'cat_household', name: 'Household', colorValue: 0xFFF5F3FF, iconKey: 'home'),
+      PosCategory(id: 'cat_health', name: 'Health', colorValue: 0xFFFFEFF2, iconKey: 'health'),
+      PosCategory(id: 'cat_cleaning', name: 'Cleaning', colorValue: 0xFFEEF2FF, iconKey: 'clean'),
+      PosCategory(id: 'cat_other', name: 'Other', colorValue: 0xFFF8FAFC, iconKey: 'box'),
+    ];
+  }
+
+  /// Any category name used by a product but missing from [categories]
+  /// (older saved data, or the sample "Groceries") is added automatically.
+  void _syncCategoriesWithProducts() {
+    for (final p in products) {
+      if (categoryByName(p.category) == null) {
+        categories.add(PosCategory(
+          id: 'cat_${DateTime.now().microsecondsSinceEpoch}_${categories.length}',
+          name: p.category,
+          colorValue: p.tint.toARGB32(),
+          iconKey: 'box',
+        ));
+      }
+    }
   }
 
   void addCustomer(PosCustomer c) {
@@ -580,6 +920,18 @@ class PosState extends ChangeNotifier {
           debugPrint('Error parsing products_json: $e');
         }
       }
+
+      final categoriesJson = prefs.getString('categories_json');
+      if (categoriesJson != null) {
+        try {
+          final list = jsonDecode(categoriesJson) as List;
+          final loaded = list.map((item) => PosCategory.fromJson(item as Map<String, dynamic>)).toList();
+          if (loaded.isNotEmpty) categories = loaded;
+        } catch (e) {
+          debugPrint('Error parsing categories_json: $e');
+        }
+      }
+      _syncCategoriesWithProducts();
 
       // Check session validity (1 hour unattended threshold)
       final lastActiveMs = prefs.getInt('session_last_active');
@@ -662,6 +1014,7 @@ class PosState extends ChangeNotifier {
 
       final productsList = products.map((p) => p.toJson()).toList();
       await prefs.setString('products_json', jsonEncode(productsList));
+      await prefs.setString('categories_json', jsonEncode(categories.map((c) => c.toJson()).toList()));
 
       // Persist session if active
       if (currentLoggedInUser != null) {
@@ -734,6 +1087,7 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> resetCatalogueToDefaults() async {
+    _initDefaultCategories();
     _initDefaultProducts();
     notifyListeners();
     await _persistAll();
@@ -911,6 +1265,7 @@ class PosState extends ChangeNotifier {
 
   void _initSampleData() {
     _initDefaultUsers();
+    _initDefaultCategories();
     _initDefaultProducts();
     customers = [
       PosCustomer(
@@ -1055,7 +1410,7 @@ class PosState extends ChangeNotifier {
   bool addToCart(PosProduct product, {void Function(String reason)? onRefused}) {
     final line = CartLine(
       productId: product.id,
-      name: product.name,
+      name: product.displayName,
       unitPrice: product.unitPrice,
       stock: product.stock,
     );

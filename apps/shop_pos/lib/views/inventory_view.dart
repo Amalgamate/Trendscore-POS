@@ -82,6 +82,8 @@ class _InventoryViewState extends State<InventoryView> {
     final notesCtrl = TextEditingController(text: product?.notes ?? '');
     String category = product?.category ?? 'Dairy';
     String? imageBase64 = product?.imageBase64;
+    bool savingProduct = false;
+    String? imageError;
 
     showDialog<void>(
       context: context,
@@ -155,6 +157,7 @@ class _InventoryViewState extends State<InventoryView> {
                                       borderRadius: 10,
                                       onImagePicked: (b64) => setModal(() => imageBase64 = b64),
                                       onImageCleared: () => setModal(() => imageBase64 = null),
+                                      onError: (msg) => setModal(() => imageError = msg.isEmpty ? null : msg),
                                     ),
                                     const SizedBox(height: 6),
                                     const Text(
@@ -201,6 +204,22 @@ class _InventoryViewState extends State<InventoryView> {
                                 ),
                               ],
                             ),
+                            if (imageError != null) ...[
+                              const SizedBox(height: 10),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  const Icon(Icons.error_outline, size: 16, color: AppColors.status_danger),
+                                  const SizedBox(width: 6),
+                                  Expanded(
+                                    child: Text(
+                                      imageError!,
+                                      style: const TextStyle(fontSize: 12, color: AppColors.status_danger),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 16),
 
                             // SKU + Barcode
@@ -302,7 +321,7 @@ class _InventoryViewState extends State<InventoryView> {
                                   padding: const EdgeInsets.symmetric(
                                       horizontal: 24, vertical: 12),
                                 ),
-                                onPressed: () {
+                                onPressed: savingProduct ? null : () async {
                                   final name = nameCtrl.text.trim();
                                   Money? parsedPrice;
                                   try {
@@ -338,8 +357,8 @@ class _InventoryViewState extends State<InventoryView> {
                                       int.tryParse(stockCtrl.text.trim()) ?? 0;
                                   final threshold =
                                       int.tryParse(lowStockCtrl.text.trim()) ?? 10;
-                                  if (isEdit) {
-                                    final updated = product.copyWith(
+                                  final savedProduct = isEdit
+                                      ? product.copyWith(
                                       name: name,
                                       sku: sku,
                                       barcode: barcodeCtrl.text.trim().isNotEmpty
@@ -354,13 +373,8 @@ class _InventoryViewState extends State<InventoryView> {
                                           ? notesCtrl.text.trim()
                                           : null,
                                       imageBase64: imageBase64,
-                                    );
-                                    widget.state.updateProduct(updated);
-                                    if (_selectedProduct?.id == product.id) {
-                                      setState(() => _selectedProduct = updated);
-                                    }
-                                  } else {
-                                    widget.state.addProduct(PosProduct(
+                                    )
+                                      : PosProduct(
                                       id: 'prod_${DateTime.now().millisecondsSinceEpoch}',
                                       name: name,
                                       sku: sku,
@@ -378,7 +392,23 @@ class _InventoryViewState extends State<InventoryView> {
                                           ? notesCtrl.text.trim()
                                           : null,
                                       imageBase64: imageBase64,
+                                    );
+                                  setModal(() => savingProduct = true);
+                                  try {
+                                    await widget.state.saveProduct(savedProduct, isNew: !isEdit);
+                                  } catch (error) {
+                                    if (!mounted || !ctx.mounted) return;
+                                    setModal(() => savingProduct = false);
+                                    final detail = error.toString().replaceFirst(RegExp(r'^Exception: '), '');
+                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                                      content: Text('Product was not saved: $detail'),
+                                      duration: const Duration(seconds: 6),
                                     ));
+                                    return;
+                                  }
+                                  if (!mounted || !ctx.mounted) return;
+                                  if (isEdit && _selectedProduct?.id == product.id) {
+                                    setState(() => _selectedProduct = savedProduct);
                                   }
                                   setState(() {});
                                   Navigator.pop(ctx);
@@ -387,7 +417,13 @@ class _InventoryViewState extends State<InventoryView> {
                                           ? '"$name" updated.'
                                           : '"$name" added to catalog.')));
                                 },
-                                child: Text(isEdit ? 'Save Changes' : 'Add Product'),
+                                child: savingProduct
+                                    ? const SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
+                                    : Text(isEdit ? 'Save Changes' : 'Add Product'),
                               ),
                             ],
                           ),

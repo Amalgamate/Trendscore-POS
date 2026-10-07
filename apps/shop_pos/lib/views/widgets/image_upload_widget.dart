@@ -13,6 +13,7 @@ class ImageUploadWidget extends StatefulWidget {
     this.currentBase64,
     required this.onImagePicked,
     this.onImageCleared,
+    this.onError,
     this.size = 120.0,
     this.label = 'Upload Image',
     this.borderRadius = 12.0,
@@ -27,6 +28,11 @@ class ImageUploadWidget extends StatefulWidget {
 
   /// Called when user taps the clear button.
   final VoidCallback? onImageCleared;
+
+  /// Called with a readable message when picking/processing fails (and with an
+  /// empty string when a new attempt starts, so callers can clear the message).
+  /// If null, a SnackBar is shown instead.
+  final ValueChanged<String>? onError;
 
   /// Widget size (square).
   final double size;
@@ -56,7 +62,7 @@ class _ImageUploadWidgetState extends State<ImageUploadWidget>
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 900),
-    )..repeat(reverse: true);
+    );
     _pulse = Tween<double>(begin: 0.88, end: 1.0).animate(
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
@@ -70,24 +76,38 @@ class _ImageUploadWidgetState extends State<ImageUploadWidget>
 
   Future<void> _pick() async {
     if (_loading) return;
+    widget.onError?.call('');
     try {
+      // Must be invoked synchronously from the tap so the browser allows the
+      // file chooser to open.
       final pickFuture = ImageService.pickAndProcess(
         maxEdgePx: widget.isLogo ? ImageService.logoMaxPx : ImageService.productMaxPx,
       );
-      if (mounted) setState(() => _loading = true);
+      if (mounted) {
+        setState(() => _loading = true);
+        _pulseCtrl.repeat(reverse: true);
+      }
       final result = await pickFuture;
       if (result != null && mounted) {
         widget.onImagePicked(result.base64Jpeg);
       }
-    } catch (error) {
+    } catch (error, stack) {
+      debugPrint('[ImageUploadWidget] upload failed: $error\n$stack');
       if (mounted) {
-        final message = error.toString().replaceFirst(RegExp(r'^Exception: '), '');
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not upload image: $message')),
-        );
+        final message = error.toString().replaceFirst(RegExp(r'^(Exception|StateError|FormatException): ?'), '');
+        if (widget.onError != null) {
+          widget.onError!('Could not upload image: $message');
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Could not upload image: $message')),
+          );
+        }
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) {
+        _pulseCtrl.stop();
+        setState(() => _loading = false);
+      }
     }
   }
 

@@ -8,7 +8,7 @@ COPY pubspec.yaml pubspec.lock ./
 RUN flutter pub get --enforce-lockfile
 
 COPY . .
-RUN flutter build web --release
+RUN flutter build web --release --no-tree-shake-icons
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
