@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'cart.dart';
 import 'pos_state.dart';
+import 'services/api_service.dart';
 import 'theme/tokens.dart';
 import 'views/cash_drawer_view.dart';
 import 'views/checkout_modal.dart';
@@ -19,6 +20,10 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final state = PosState();
   await state.loadInitialState();
+  ApiService.instance.configure(state.serverUrl);
+  if (state.currentLoggedInUser != null) {
+    state.catalogueSyncMessage = 'Local-only mode: lock the till and re-enter your PIN to sync the shop catalogue.';
+  }
   runApp(RetailPosApp(state: state));
 }
 

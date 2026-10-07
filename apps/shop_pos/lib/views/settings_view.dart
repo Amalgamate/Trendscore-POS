@@ -88,7 +88,7 @@ class _SettingsViewState extends State<SettingsView> {
     );
     _clearLogo = false;
 
-    ApiService.instance.baseUrl = _serverUrlController.text.trim();
+    ApiService.instance.configure(_serverUrlController.text);
 
     setState(() => _isSaving = false);
 
@@ -115,7 +115,7 @@ class _SettingsViewState extends State<SettingsView> {
       _connectionResult = null;
     });
 
-    ApiService.instance.baseUrl = _serverUrlController.text.trim();
+    ApiService.instance.configure(_serverUrlController.text);
     final ok = await ApiService.instance.checkHealth();
 
     setState(() {

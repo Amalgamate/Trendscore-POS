@@ -11,7 +11,12 @@ class ApiService {
   String baseUrl = 'http://localhost:4000';
   String? _authToken;
   bool isConnected = false;
+  String? lastError;
   bool get hasToken => _authToken != null && _authToken!.isNotEmpty;
+
+  void configure(String url) {
+    baseUrl = url.trim().replaceFirst(RegExp(r'/+$'), '');
+  }
 
   void setToken(String? token) {
     _authToken = token;
@@ -36,11 +41,13 @@ class ApiService {
 
   /// Cashier login with PIN
   Future<Map<String, dynamic>?> login(String phone, String pin) async {
+    lastError = null;
+    _authToken = null;
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/auth/login'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'phone': phone, 'pin': pin}),
+        body: jsonEncode({'phone': phone.replaceAll(RegExp(r'\s+'), ''), 'pin': pin}),
       ).timeout(const Duration(seconds: 5));
 
       if (res.statusCode == 200) {
@@ -49,8 +56,12 @@ class ApiService {
         isConnected = true;
         return data;
       }
+      isConnected = true;
+      lastError = _messageFromResponse(res.body) ?? 'Shop API login failed (${res.statusCode}).';
       return null;
     } catch (e) {
+      isConnected = false;
+      lastError = 'Could not reach the shop API at $baseUrl.';
       debugPrint('API login failed: $e');
       return null;
     }
@@ -59,20 +70,56 @@ class ApiService {
   /// Fetch products catalog
   Future<List<Map<String, dynamic>>?> getProducts() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/products?limit=200'), headers: _headers)
+      final res = await http.get(Uri.parse('$baseUrl/products?limit=200&active=all'), headers: _headers)
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         final json = jsonDecode(res.body);
+        lastError = null;
         return List<Map<String, dynamic>>.from(json['data'] ?? []);
       }
+      lastError = _messageFromResponse(res.body) ?? 'Could not fetch products (${res.statusCode}).';
     } catch (e) {
+      lastError = 'Could not fetch products from the shop API.';
       debugPrint('API getProducts error: $e');
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>?> getCategories() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/categories'), headers: _headers)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        lastError = null;
+        return List<Map<String, dynamic>>.from(jsonDecode(res.body));
+      }
+      lastError = _messageFromResponse(res.body) ?? 'Could not fetch categories (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not fetch shop categories.';
+      debugPrint('API getCategories error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> createCategory(String name) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/categories'),
+        headers: _headers,
+        body: jsonEncode({'name': name}),
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 201) return Map<String, dynamic>.from(jsonDecode(res.body));
+      lastError = _messageFromResponse(res.body) ?? 'Could not create category "$name" (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not create category "$name".';
+      debugPrint('API createCategory error: $e');
     }
     return null;
   }
 
   /// Create new product
   Future<Map<String, dynamic>?> createProduct(Map<String, dynamic> payload) async {
+    lastError = null;
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/products'),
@@ -83,25 +130,65 @@ class ApiService {
       if (res.statusCode == 201) {
         return jsonDecode(res.body);
       }
+      lastError = _messageFromResponse(res.body) ?? 'Product creation failed (${res.statusCode}).';
     } catch (e) {
+      lastError = 'Could not create the product on the shop API.';
       debugPrint('API createProduct error: $e');
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>?> importProducts(List<Map<String, dynamic>> products) async {
+    lastError = null;
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/products/import'),
+        headers: _headers,
+        body: jsonEncode({'products': products}),
+      ).timeout(const Duration(seconds: 15));
+      if (res.statusCode == 201) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic> && decoded['data'] is List) {
+          return List<Map<String, dynamic>>.from(decoded['data']);
+        }
+      }
+      lastError = _messageFromResponse(res.body) ?? 'CSV import failed (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not import products on the shop API.';
+      debugPrint('API importProducts error: $e');
     }
     return null;
   }
 
   /// Adjust product stock
   Future<bool> adjustStock(String productId, int delta, String type, String reason) async {
+    lastError = null;
     try {
       final res = await http.post(
         Uri.parse('$baseUrl/products/$productId/adjust-stock'),
         headers: _headers,
         body: jsonEncode({'delta': delta, 'type': type, 'reason': reason}),
       ).timeout(const Duration(seconds: 5));
-      return res.statusCode == 200;
+      if (res.statusCode == 200) return true;
+      lastError = _messageFromResponse(res.body) ?? 'Stock adjustment failed (${res.statusCode}).';
+      return false;
     } catch (e) {
+      lastError = 'Could not adjust product stock on the shop API.';
       debugPrint('API adjustStock error: $e');
       return false;
     }
+  }
+
+  String? _messageFromResponse(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map<String, dynamic>) {
+        final error = decoded['error'];
+        if (error is Map<String, dynamic>) return error['message'] as String?;
+        return decoded['message'] as String?;
+      }
+    } catch (_) {}
+    return null;
   }
 
   /// Fetch customers
@@ -206,22 +293,44 @@ class ApiService {
   /// Soft-delete a product (sets active=false on the API).
   /// Returns true if the server responded 200.
   Future<bool> deactivateProduct(String productId) async {
+    lastError = null;
     try {
       final res = await http.delete(
         Uri.parse('$baseUrl/products/$productId'),
         headers: _headers,
       ).timeout(const Duration(seconds: 5));
-      return res.statusCode == 200;
+      if (res.statusCode == 200) return true;
+      lastError = _messageFromResponse(res.body) ?? 'Product deactivation failed (${res.statusCode}).';
+      return false;
     } catch (e) {
+      lastError = 'Could not deactivate the product on the shop API.';
       debugPrint('API deactivateProduct error: $e');
       return false;
     }
+  }
+
+  Future<bool> setProductActive(String productId, bool active) async {
+    lastError = null;
+    try {
+      final res = await http.patch(
+        Uri.parse('$baseUrl/products/$productId'),
+        headers: _headers,
+        body: jsonEncode({'active': active}),
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return true;
+      lastError = _messageFromResponse(res.body) ?? 'Could not update product status (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not update product status on the shop API.';
+      debugPrint('API setProductActive error: $e');
+    }
+    return false;
   }
 
   /// Update an existing product (PATCH).
   /// Returns the decoded response map on success, or null on failure.
   Future<Map<String, dynamic>?> updateProduct(
       String productId, Map<String, dynamic> payload) async {
+    lastError = null;
     try {
       final res = await http.patch(
         Uri.parse('$baseUrl/products/$productId'),
@@ -231,7 +340,9 @@ class ApiService {
       if (res.statusCode == 200) {
         return jsonDecode(res.body) as Map<String, dynamic>;
       }
+      lastError = _messageFromResponse(res.body) ?? 'Product update failed (${res.statusCode}).';
     } catch (e) {
+      lastError = 'Could not update the product on the shop API.';
       debugPrint('API updateProduct error: $e');
     }
     return null;

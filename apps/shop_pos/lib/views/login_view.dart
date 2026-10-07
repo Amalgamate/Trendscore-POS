@@ -230,6 +230,7 @@ class _LoginViewState extends State<LoginView> {
                       child: ElevatedButton(
                         onPressed: () {
                           Navigator.pop(ctx);
+                          unawaited(widget.state.connectToShopApi(_user.phone, _pin));
                           widget.state.currentLoggedInUser = _user;
                           widget.state.activeCashierName = _user.fullName;
                           widget.onAuthenticated();
@@ -261,6 +262,7 @@ class _LoginViewState extends State<LoginView> {
     if (!mounted) return;
 
     if (_pin == _user.pin) {
+      unawaited(widget.state.connectToShopApi(_user.phone, _pin));
       widget.state.currentLoggedInUser = _user;
       widget.state.activeCashierName = _user.fullName;
       widget.onAuthenticated();

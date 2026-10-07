@@ -786,13 +786,20 @@ class _InventoryViewState extends State<InventoryView> {
         SnackBar(content: Text('Duplicated "${p.name}" \u2014 update the copy.')));
   }
 
-  void _toggleActive(PosProduct p) {
-    final updated = p.copyWith(isActive: !p.isActive);
-    widget.state.updateProduct(updated);
-    if (_selectedProduct?.id == p.id) setState(() => _selectedProduct = updated);
-    else setState(() {});
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
-        updated.isActive ? '"${p.name}" activated.' : '"${p.name}" deactivated.')));
+  Future<void> _toggleActive(PosProduct p) async {
+    final active = !p.isActive;
+    try {
+      await widget.state.setProductActive(p.id, active);
+      final updated = p.copyWith(isActive: active);
+      if (_selectedProduct?.id == p.id) setState(() => _selectedProduct = updated);
+      else setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(
+          active ? '"${p.name}" activated.' : '"${p.name}" deactivated.')));
+    } catch (error) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not update product status: $error')),
+      );
+    }
   }
 
   @override
@@ -855,6 +862,35 @@ class _InventoryViewState extends State<InventoryView> {
                       ),
                     ),
                   ]),
+                  if (widget.state.catalogueSyncMessage != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                      decoration: BoxDecoration(
+                        color: widget.state.catalogueSyncMessage!.startsWith('Local-only') ||
+                                widget.state.catalogueSyncMessage!.startsWith('Catalogue sync failed')
+                            ? const Color(0xFFFFF7ED)
+                            : const Color(0xFFF0FDF4),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(children: [
+                        if (widget.state.catalogueSyncing)
+                          const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
+                        else
+                          Icon(
+                            widget.state.catalogueSyncMessage!.startsWith('Local-only') ||
+                                    widget.state.catalogueSyncMessage!.startsWith('Catalogue sync failed')
+                                ? Icons.cloud_off_outlined
+                                : Icons.cloud_done_outlined,
+                            size: 16,
+                            color: AppColors.text_secondary,
+                          ),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(widget.state.catalogueSyncMessage!,
+                            style: const TextStyle(fontSize: 12, color: AppColors.text_secondary))),
+                      ]),
+                    ),
+                  ],
                   const SizedBox(height: 16),
 
                   // KPI cards

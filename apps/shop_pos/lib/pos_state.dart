@@ -135,6 +135,7 @@ class PosProduct {
   }
 
   PosProduct copyWith({
+    String? id,
     String? name,
     String? sku,
     String? barcode,
@@ -153,7 +154,7 @@ class PosProduct {
     Object? variantLabel = _sentinel,
   }) {
     return PosProduct(
-      id: id,
+      id: id ?? this.id,
       name: name ?? this.name,
       sku: sku ?? this.sku,
       barcode: barcode ?? this.barcode,
@@ -501,14 +502,16 @@ class PosUser {
 
 /// Global reactive state for the Retail OS POS.
 class PosState extends ChangeNotifier {
-  PosState() {
+  PosState({bool? includeDemoProducts})
+      : _includeDemoProducts = includeDemoProducts ?? _defaultIncludeDemoProducts {
     _initSampleData(includeProducts: _includeDemoProducts);
   }
 
-  static const bool _includeDemoProducts = bool.fromEnvironment(
+  static const bool _defaultIncludeDemoProducts = bool.fromEnvironment(
     'POS_DEMO_DATA',
     defaultValue: false,
   );
+  final bool _includeDemoProducts;
 
   final Cart cart = Cart();
   String activeCashier = 'John Mwangi';
@@ -533,7 +536,7 @@ class PosState extends ChangeNotifier {
   bool cashDrawerKick = true;
   bool requirePinForReversal = true;
   String printerPaperSize = '80mm';
-  String serverUrl = 'http://localhost:3000';
+  String serverUrl = 'http://localhost:4000';
 
   late List<PosUser> users;
   PosUser? currentLoggedInUser;
@@ -579,6 +582,8 @@ class PosState extends ChangeNotifier {
 
   late List<PosProduct> products;
   late List<PosCategory> categories;
+  String? catalogueSyncMessage;
+  bool catalogueSyncing = false;
   late List<PosCustomer> customers;
   late List<SaleRecord> sales;
   List<SaleRecord> get salesLedger => sales;
@@ -607,12 +612,24 @@ class PosState extends ChangeNotifier {
   Future<void> saveProduct(PosProduct product, {required bool isNew}) async {
     final index = products.indexWhere((item) => item.id == product.id);
     final previous = index == -1 ? null : products[index];
-    if (isNew) {
-      products.insert(0, product);
-    } else if (index != -1) {
-      products[index] = product;
-    } else {
+    if (!isNew && index == -1) {
       throw StateError('This product is no longer in the catalogue. Refresh and try again.');
+    }
+    if (!isNew && _isRemoteProductId(product.id) && !ApiService.instance.hasToken) {
+      throw PosException('Sign in to the shop API before editing a server product.');
+    }
+
+    var savedProduct = product;
+    if (ApiService.instance.hasToken) {
+      final remote = isNew || !_isRemoteProductId(product.id)
+          ? await _createRemoteProduct(product)
+          : await _updateRemoteProduct(product, previous!);
+      savedProduct = _productFromApi(remote, fallback: product);
+    }
+    if (isNew) {
+      products.insert(0, savedProduct);
+    } else {
+      products[index] = savedProduct;
     }
     notifyListeners();
 
@@ -625,9 +642,10 @@ class PosState extends ChangeNotifier {
       if (!saved) throw StateError('The browser declined to save the product.');
     } catch (error) {
       if (isNew) {
-        products.removeWhere((item) => item.id == product.id);
+        products.removeWhere((item) => item.id == savedProduct.id);
       } else if (previous != null) {
-        products[products.indexWhere((item) => item.id == product.id)] = previous;
+        final savedIndex = products.indexWhere((item) => item.id == savedProduct.id);
+        if (savedIndex != -1) products[savedIndex] = previous;
       }
       notifyListeners();
       rethrow;
@@ -635,9 +653,9 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> deleteProduct(String productId) async {
-    products.removeWhere((p) => p.id == productId);
-    notifyListeners();
-    _persistAll();
+    // Keep the older delete entry point safe too: product history is retained
+    // by the API, and local-only products are hidden rather than erased.
+    await deactivateProduct(productId);
   }
 
   Future<void> deactivateProduct(String productId) async {
@@ -647,9 +665,12 @@ class PosState extends ChangeNotifier {
     final isApiProduct = RegExp(
       r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
     ).hasMatch(productId);
+    if (isApiProduct && !ApiService.instance.hasToken) {
+      throw PosException('Sign in to the shop API before deactivating a server product.');
+    }
     if (ApiService.instance.hasToken && isApiProduct) {
       final ok = await ApiService.instance.deactivateProduct(productId);
-      if (!ok) throw PosException('The shop API could not deactivate this product.');
+      if (!ok) throw PosException(ApiService.instance.lastError ?? 'The shop API could not deactivate this product.');
     }
     products[index] = previous.copyWith(isActive: false);
     notifyListeners();
@@ -657,7 +678,6 @@ class PosState extends ChangeNotifier {
   }
 
   Future<int> importProducts(List<PosProduct> imported) async {
-    final backup = List<PosProduct>.from(products);
     final existingSkus = products.map((product) => product.sku.toLowerCase()).toSet();
     final rows = <PosProduct>[];
     for (final product in imported) {
@@ -665,6 +685,16 @@ class PosState extends ChangeNotifier {
       existingSkus.add(product.sku.toLowerCase());
       rows.add(product);
     }
+    if (ApiService.instance.hasToken && rows.isNotEmpty) {
+      final remoteRows = await ApiService.instance.importProducts(rows.map(_productPayload).toList());
+      if (remoteRows == null) {
+        throw PosException(ApiService.instance.lastError ?? 'The shop API could not import these products.');
+      }
+      rows
+        ..clear()
+        ..addAll(remoteRows.map((remote) => _productFromApi(remote)));
+    }
+    final backup = List<PosProduct>.from(products);
     products.insertAll(0, rows);
     _syncCategoriesWithProducts();
     notifyListeners();
@@ -685,6 +715,229 @@ class PosState extends ChangeNotifier {
       rethrow;
     }
   }
+
+  Future<void> setProductActive(String productId, bool active) async {
+    final index = products.indexWhere((product) => product.id == productId);
+    if (index == -1) return;
+    final product = products[index];
+    if (_isRemoteProductId(productId)) {
+      if (!ApiService.instance.hasToken) {
+        throw PosException('Sign in to the shop API before changing a server product.');
+      }
+      final ok = await ApiService.instance.setProductActive(productId, active);
+      if (!ok) throw PosException(ApiService.instance.lastError ?? 'The shop API could not update this product.');
+    }
+    products[index] = product.copyWith(isActive: active);
+    notifyListeners();
+    await _persistAll();
+  }
+
+  Future<void> connectToShopApi(String phone, String pin) async {
+    ApiService.instance.configure(serverUrl);
+    catalogueSyncMessage = 'Connecting to shop API…';
+    notifyListeners();
+    final auth = await ApiService.instance.login(phone, pin);
+    if (auth == null) {
+      catalogueSyncMessage = 'Local-only mode: ${ApiService.instance.lastError ?? 'API login failed.'}';
+      notifyListeners();
+      return;
+    }
+    await syncCatalogueFromApi();
+  }
+
+  Future<void> syncCatalogueFromApi() async {
+    if (!ApiService.instance.hasToken) return;
+    catalogueSyncing = true;
+    catalogueSyncMessage = 'Refreshing shop catalogue…';
+    notifyListeners();
+    try {
+      final remoteCategories = await ApiService.instance.getCategories();
+      if (remoteCategories == null) {
+        throw PosException(ApiService.instance.lastError ?? 'Could not refresh shop categories.');
+      }
+      final remoteProducts = await ApiService.instance.getProducts();
+      if (remoteProducts == null) {
+        throw PosException(ApiService.instance.lastError ?? 'Could not refresh shop products.');
+      }
+
+      final oldById = {for (final product in products) product.id: product};
+      final syncedCategories = <PosCategory>[];
+      for (final remote in remoteCategories) {
+        final name = remote['name'] as String? ?? 'Other';
+        final existing = categories.where((item) => item.name.toLowerCase() == name.toLowerCase()).firstOrNull;
+        syncedCategories.add(PosCategory(
+          id: remote['id'] as String,
+          name: name,
+          colorValue: _colorFromHex(remote['colorHex'] as String?) ?? existing?.colorValue ?? 0xFFF8FAFC,
+          iconKey: existing?.iconKey ?? _iconKeyForCategory(name),
+        ));
+      }
+      // Make remote category IDs available while uploading local-only products.
+      // Otherwise an existing category may be needlessly POSTed before the
+      // final category list is assigned below.
+      final remoteNames = syncedCategories.map((item) => item.name.toLowerCase()).toSet();
+      final localCategories = categories.where((item) => !remoteNames.contains(item.name.toLowerCase()));
+      categories = [...syncedCategories, ...localCategories];
+
+      final syncedProducts = remoteProducts.map((remote) {
+        final id = remote['id'] as String;
+        return _productFromApi(remote, fallback: oldById[id]);
+      }).toList();
+      final serverSkus = syncedProducts.map((product) => product.sku.toLowerCase()).toSet();
+      final localOnly = products.where((product) => !_isRemoteProductId(product.id)).toList();
+      final remainingLocal = <PosProduct>[];
+      for (final local in localOnly) {
+        if (!local.isActive || _isBundledDemoProduct(local.id)) continue;
+        if (serverSkus.contains(local.sku.toLowerCase())) continue;
+        try {
+          final created = await _createRemoteProduct(local);
+          final synced = _productFromApi(created, fallback: local);
+          syncedProducts.add(synced);
+          serverSkus.add(synced.sku.toLowerCase());
+        } catch (error) {
+          debugPrint('Could not sync local product ${local.sku}: $error');
+          remainingLocal.add(local);
+        }
+      }
+
+      products = [...syncedProducts, ...remainingLocal];
+      _syncCategoriesWithProducts();
+      await _persistAll();
+      catalogueSyncMessage = remainingLocal.isEmpty
+          ? 'Catalogue is up to date.'
+          : '${remainingLocal.length} local product(s) could not sync. Check the shop API connection.';
+    } catch (error) {
+      catalogueSyncMessage = 'Catalogue sync failed: $error';
+    } finally {
+      catalogueSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, dynamic>> _createRemoteProduct(PosProduct product) async {
+    if (!ApiService.instance.hasToken) throw PosException('Sign in to the shop API first.');
+    final categoryId = await _ensureRemoteCategory(product.category);
+    final response = await ApiService.instance.createProduct({
+      ..._productPayload(product),
+      'categoryId': categoryId,
+    });
+    if (response == null) throw PosException(ApiService.instance.lastError ?? 'The shop API did not create the product.');
+    return response;
+  }
+
+  Future<Map<String, dynamic>> _updateRemoteProduct(PosProduct product, PosProduct previous) async {
+    final categoryId = await _ensureRemoteCategory(product.category);
+    final payload = _productPayload(product)
+      ..remove('category')
+      ..remove('initialStock')
+      ..['categoryId'] = categoryId;
+    final response = await ApiService.instance.updateProduct(product.id, payload);
+    if (response == null) throw PosException(ApiService.instance.lastError ?? 'The shop API did not update the product.');
+    if (product.stock != previous.stock) {
+      final changed = await ApiService.instance.adjustStock(
+        product.id,
+        product.stock - previous.stock,
+        product.stock >= previous.stock ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
+        'POS product edit',
+      );
+      if (!changed) throw PosException(ApiService.instance.lastError ?? 'Product details saved, but stock adjustment failed. Refresh before retrying.');
+      response['stock'] = product.stock;
+    }
+    return response;
+  }
+
+  Future<String?> _ensureRemoteCategory(String name) async {
+    final existing = categories.where((item) => item.name.toLowerCase() == name.toLowerCase()).firstOrNull;
+    if (existing != null && _isRemoteProductId(existing.id)) return existing.id;
+    final created = await ApiService.instance.createCategory(name);
+    if (created != null && created['id'] is String) {
+      final category = PosCategory(
+        id: created['id'] as String,
+        name: created['name'] as String? ?? name,
+        colorValue: existing?.colorValue ?? 0xFFF8FAFC,
+        iconKey: existing?.iconKey ?? _iconKeyForCategory(name),
+      );
+      categories.removeWhere((item) => item.name.toLowerCase() == name.toLowerCase());
+      categories.add(category);
+      return category.id;
+    }
+    final remoteCategories = await ApiService.instance.getCategories();
+    final match = remoteCategories?.where((item) => (item['name'] as String?)?.toLowerCase() == name.toLowerCase()).firstOrNull;
+    if (match?['id'] is String) return match!['id'] as String;
+    throw PosException(ApiService.instance.lastError ?? 'Could not prepare category "$name" on the shop API.');
+  }
+
+  Map<String, dynamic> _productPayload(PosProduct product) => {
+        'name': product.name,
+        'sku': product.sku,
+        if (product.barcode != null && product.barcode!.isNotEmpty) 'barcode': product.barcode,
+        'category': product.category,
+        'salePrice': product.unitPrice.minorUnits / 100,
+        'costPrice': (product.costPrice ?? const Money(0)).minorUnits / 100,
+        'vatRate': product.taxRateBasisPoints / 10000,
+        'unit': 'pc',
+        'initialStock': product.stock,
+        'lowStockThreshold': product.lowStockThreshold,
+      };
+
+  PosProduct _productFromApi(Map<String, dynamic> remote, {PosProduct? fallback}) {
+    final categoryValue = remote['category'];
+    final categoryName = categoryValue is Map<String, dynamic>
+        ? (categoryValue['name'] as String? ?? fallback?.category ?? 'Other')
+        : (categoryValue as String? ?? fallback?.category ?? 'Other');
+    final categoryColor = categoryValue is Map<String, dynamic>
+        ? _colorFromHex(categoryValue['colorHex'] as String?)
+        : null;
+    final localCategory = categories.where((item) => item.name.toLowerCase() == categoryName.toLowerCase()).firstOrNull;
+    final price = remote['salePrice'] as num;
+    final cost = remote['costPrice'] as num?;
+    final vat = remote['vatRate'] as num?;
+    return PosProduct(
+      id: remote['id'] as String,
+      name: remote['name'] as String? ?? fallback?.name ?? '',
+      sku: remote['sku'] as String? ?? fallback?.sku ?? '',
+      barcode: remote['barcode'] as String? ?? fallback?.barcode,
+      category: categoryName,
+      unitPrice: Money.parse(price.toString()),
+      costPrice: cost == null || cost == 0 ? null : Money.parse(cost.toString()),
+      stock: (remote['stock'] as num? ?? fallback?.stock ?? 0).toInt(),
+      lowStockThreshold: (remote['lowStockThreshold'] as num? ?? fallback?.lowStockThreshold ?? 10).toInt(),
+      icon: localCategory?.icon ?? fallback?.icon ?? Icons.inventory_2_outlined,
+      tint: categoryColor != null ? Color(categoryColor) : localCategory?.color ?? fallback?.tint ?? const Color(0xFFF8FAFC),
+      taxRateBasisPoints: vat == null ? (fallback?.taxRateBasisPoints ?? defaultVatRateBasisPoints) : (vat * 10000).round(),
+      isActive: remote['active'] as bool? ?? fallback?.isActive ?? true,
+      notes: fallback?.notes,
+      imageBase64: fallback?.imageBase64,
+      groupId: fallback?.groupId,
+      variantLabel: fallback?.variantLabel,
+    );
+  }
+
+  int? _colorFromHex(String? value) {
+    if (value == null) return null;
+    final hex = value.replaceFirst('#', '');
+    if (hex.length != 6) return null;
+    final color = int.tryParse(hex, radix: 16);
+    return color == null ? null : 0xFF000000 | color;
+  }
+
+  String _iconKeyForCategory(String name) {
+    final normalized = name.toLowerCase();
+    if (normalized.contains('dairy')) return 'dairy';
+    if (normalized.contains('bakery')) return 'bakery';
+    if (normalized.contains('drink') || normalized.contains('beverage')) return 'drink';
+    if (normalized.contains('produce')) return 'produce';
+    if (normalized.contains('snack')) return 'snack';
+    if (normalized.contains('health') || normalized.contains('personal care')) return 'health';
+    if (normalized.contains('clean')) return 'clean';
+    if (normalized.contains('house')) return 'home';
+    if (normalized.contains('grain') || normalized.contains('food')) return 'grain';
+    return 'box';
+  }
+
+  bool _isRemoteProductId(String id) => RegExp(
+        r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+      ).hasMatch(id);
 
   // ─── Variants ──────────────────────────────────────────────────────────────────────
 
@@ -951,6 +1204,9 @@ class PosState extends ChangeNotifier {
       requirePinForReversal = prefs.getBool('require_pin_reversal') ?? requirePinForReversal;
       printerPaperSize = prefs.getString('printer_paper_size') ?? printerPaperSize;
       serverUrl = prefs.getString('server_url') ?? serverUrl;
+      if (serverUrl == 'http://localhost:3000') {
+        serverUrl = 'http://localhost:4000';
+      }
 
       final usersJson = prefs.getString('users_json');
       if (usersJson != null) {

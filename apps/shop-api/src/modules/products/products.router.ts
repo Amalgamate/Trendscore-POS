@@ -14,7 +14,7 @@ const ListProductsQuerySchema = z.object({
   category: z.string().optional(),
   search: z.string().optional(),
   lowStock: z.enum(['true', 'false']).optional(),
-  active: z.enum(['true', 'false']).optional().default('true'),
+  active: z.enum(['true', 'false', 'all']).optional().default('true'),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(100),
 });
@@ -32,7 +32,24 @@ const CreateProductSchema = z.object({
   lowStockThreshold: z.number().nonnegative().default(5),
 });
 
-const UpdateProductSchema = CreateProductSchema.partial().omit({ initialStock: true });
+const UpdateProductSchema = CreateProductSchema.partial()
+  .omit({ initialStock: true })
+  .extend({ active: z.boolean().optional() });
+
+const ImportProductsSchema = z.object({
+  products: z.array(z.object({
+    name: z.string().min(1).max(200),
+    sku: z.string().min(1).max(100),
+    barcode: z.string().max(100).optional(),
+    category: z.string().min(1).max(100),
+    salePrice: z.number().positive(),
+    costPrice: z.number().nonnegative().default(0),
+    vatRate: z.number().min(0).max(1).default(0.16),
+    unit: z.string().default('pc'),
+    initialStock: z.number().nonnegative().default(0),
+    lowStockThreshold: z.number().nonnegative().default(5),
+  })).min(1).max(500),
+});
 
 const StockAdjustSchema = z.object({
   delta: z.number().int(),
@@ -53,7 +70,7 @@ export function productsRouter(businessId: string): Router {
 
     const where: Prisma.ProductWhereInput = {
       businessId,
-      active: query.active === 'true',
+      ...(query.active === 'all' ? {} : { active: query.active === 'true' }),
       ...(query.category ? { category: { name: { equals: query.category, mode: 'insensitive' as const } } } : {}),
       ...(query.search
         ? {
@@ -173,6 +190,70 @@ export function productsRouter(businessId: string): Router {
       }
       console.error('products/create error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Failed to create product.');
+    }
+  });
+
+  // POST /products/import — create CSV rows and their opening stock in one
+  // business-scoped transaction, so a failed batch cannot leave half an import.
+  router.post('/import', requireAuth, async (req, res) => {
+    const body = parseBody(ImportProductsSchema, req, res);
+    if (!body) return;
+    const auth = res.locals.auth;
+
+    try {
+      const products = await prisma.$transaction(async (tx) => {
+        const created = [];
+        for (const row of body.products) {
+          const initialStock = row.initialStock ?? 0;
+          const costPrice = row.costPrice ?? 0;
+          const vatRate = row.vatRate ?? 0.16;
+          const unit = row.unit ?? 'pc';
+          const lowStockThreshold = row.lowStockThreshold ?? 5;
+          const category = await tx.category.upsert({
+            where: { businessId_name: { businessId, name: row.category } },
+            update: {},
+            create: { businessId, name: row.category },
+          });
+          const product = await tx.product.create({
+            data: {
+              businessId,
+              categoryId: category.id,
+              name: row.name,
+              sku: row.sku,
+              barcode: row.barcode,
+              salePrice: row.salePrice,
+              costPrice,
+              vatRate,
+              unit,
+              stock: initialStock,
+              lowStockThreshold,
+            },
+            include: { category: { select: { id: true, name: true, colorHex: true } } },
+          });
+          if (initialStock > 0) {
+            await tx.stockMovement.create({
+              data: {
+                businessId,
+                productId: product.id,
+                createdById: auth.userId,
+                type: 'PURCHASE',
+                quantity: initialStock,
+                balanceAfter: initialStock,
+                note: 'Opening stock from CSV import',
+              },
+            });
+          }
+          created.push(mapProduct(product));
+        }
+        return created;
+      });
+      return send201(res, { data: products });
+    } catch (err: unknown) {
+      if (isUniqueConstraintError(err)) {
+        return sendError(res, 409, 'DUPLICATE_SKU', 'A product with that SKU or barcode already exists. No products were imported.');
+      }
+      console.error('products/import error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to import products. No products were imported.');
     }
   });
 
