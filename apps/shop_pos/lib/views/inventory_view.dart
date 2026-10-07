@@ -1,5 +1,7 @@
 import 'dart:convert';
 import 'dart:math' as math;
+import 'package:file_picker/file_picker.dart';
+import 'package:file_picker_web/file_picker_web.dart' show FilePickerWebOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../cart.dart';
@@ -449,6 +451,149 @@ class _InventoryViewState extends State<InventoryView> {
     );
   }
 
+  Future<void> _importProductsCsv() async {
+    try {
+      final file = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['csv'],
+        webOptions: const FilePickerWebOptions(cancelUploadOnWindowBlur: false),
+      );
+      if (file == null) return;
+      final bytes = await file.readAsBytes();
+      final text = utf8.decode(bytes, allowMalformed: false).replaceFirst('\uFEFF', '');
+      final table = _parseCsv(text);
+      if (table.length < 2) throw const FormatException('The CSV has no product rows.');
+      final headers = table.first.map((header) => header.trim().toLowerCase()).toList();
+      final required = ['name', 'sku', 'category', 'price', 'stock'];
+      final missing = required.where((header) => !headers.contains(header)).toList();
+      if (missing.isNotEmpty) {
+        throw FormatException('Missing required columns: ${missing.join(', ')}.');
+      }
+      String cell(List<String> row, String header) {
+        final i = headers.indexOf(header);
+        return i < 0 || i >= row.length ? '' : row[i].trim();
+      }
+
+      final seenSkus = widget.state.products.map((p) => p.sku.toLowerCase()).toSet();
+      final products = <PosProduct>[];
+      var skipped = 0;
+      for (final row in table.skip(1)) {
+        if (row.every((value) => value.trim().isEmpty)) continue;
+        try {
+          final name = cell(row, 'name');
+          final sku = cell(row, 'sku');
+          final category = cell(row, 'category');
+          final stock = int.parse(cell(row, 'stock'));
+          final price = Money.parse(cell(row, 'price'));
+          if (name.isEmpty || sku.isEmpty || category.isEmpty || stock < 0 || price.isZero) {
+            throw const FormatException('Required value is empty or invalid.');
+          }
+          if (!seenSkus.add(sku.toLowerCase())) {
+            skipped++;
+            continue;
+          }
+          final costText = cell(row, 'cost');
+          final thresholdText = cell(row, 'low_stock_threshold');
+          products.add(PosProduct(
+            id: 'prod_${DateTime.now().microsecondsSinceEpoch}_${products.length}',
+            name: name,
+            sku: sku,
+            barcode: cell(row, 'barcode').isEmpty ? null : cell(row, 'barcode'),
+            category: category,
+            unitPrice: price,
+            costPrice: costText.isEmpty ? null : Money.parse(costText),
+            stock: stock,
+            lowStockThreshold: thresholdText.isEmpty ? 10 : int.parse(thresholdText),
+            icon: Icons.inventory_2_outlined,
+            tint: const Color(0xFFF8FAFC),
+          ));
+        } on FormatException {
+          skipped++;
+        }
+      }
+      if (products.isEmpty) {
+        throw FormatException('No valid new products found. $skipped rows were skipped.');
+      }
+      if (!mounted) return;
+      final approved = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Preview CSV import'),
+          content: SizedBox(
+            width: 520,
+            child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text('${products.length} products ready; $skipped rows skipped (invalid or duplicate SKU).'),
+              const SizedBox(height: 12),
+              Flexible(child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: math.min(products.length, 6),
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (_, index) {
+                  final product = products[index];
+                  return ListTile(dense: true, title: Text(product.name),
+                    subtitle: Text('${product.sku} · ${product.category} · ${product.stock} units'),
+                    trailing: Text('KES ${product.unitPrice.formatted}'));
+                },
+              )),
+              const SizedBox(height: 8),
+              const Text('Columns: name, sku, category, price, stock; optional: barcode, cost, low_stock_threshold.'),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dialogContext, false), child: const Text('Cancel')),
+            FilledButton(onPressed: () => Navigator.pop(dialogContext, true), child: Text('Import ${products.length}')),
+          ],
+        ),
+      );
+      if (approved != true || !mounted) return;
+      final added = await widget.state.importProducts(products);
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$added products imported; $skipped rows skipped.')));
+    } catch (error) {
+      if (!mounted) return;
+      final message = error.toString().replaceFirst(RegExp(r'^(FormatException|Exception|StateError): ?'), '');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('CSV import failed: $message')));
+    }
+  }
+
+  List<List<String>> _parseCsv(String input) {
+    final rows = <List<String>>[];
+    var row = <String>[];
+    var field = StringBuffer();
+    var quoted = false;
+    for (var i = 0; i < input.length; i++) {
+      final char = input[i];
+      if (quoted) {
+        if (char == '"' && i + 1 < input.length && input[i + 1] == '"') {
+          field.write('"');
+          i++;
+        } else if (char == '"') {
+          quoted = false;
+        } else {
+          field.write(char);
+        }
+      } else if (char == '"' && field.isEmpty) {
+        quoted = true;
+      } else if (char == ',') {
+        row.add(field.toString());
+        field = StringBuffer();
+      } else if (char == '\n' || char == '\r') {
+        if (char == '\r' && i + 1 < input.length && input[i + 1] == '\n') i++;
+        row.add(field.toString());
+        if (row.any((value) => value.trim().isNotEmpty)) rows.add(row);
+        row = <String>[];
+        field = StringBuffer();
+      } else {
+        field.write(char);
+      }
+    }
+    if (quoted) throw const FormatException('CSV contains an unclosed quoted field.');
+    row.add(field.toString());
+    if (row.any((value) => value.trim().isNotEmpty)) rows.add(row);
+    return rows;
+  }
+
   void _showStockAdjustDialog(PosProduct product) {
     int delta = 5;
     String reason = 'Stock delivery / Purchase';
@@ -567,7 +712,7 @@ class _InventoryViewState extends State<InventoryView> {
         title: const Row(children: [
           Icon(Icons.warning_amber_rounded, color: AppColors.status_danger),
           SizedBox(width: 8),
-          Text('Delete Product?'),
+          Text('Deactivate Product?'),
         ]),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -577,7 +722,7 @@ class _InventoryViewState extends State<InventoryView> {
               text: TextSpan(
                 style: const TextStyle(fontSize: 14, color: AppColors.text_secondary),
                 children: [
-                  const TextSpan(text: 'You are about to permanently delete '),
+                  const TextSpan(text: 'You are about to deactivate '),
                   TextSpan(text: product.name,
                       style: const TextStyle(fontWeight: FontWeight.bold, color: AppColors.text_primary)),
                   const TextSpan(text: ' from the catalog.'),
@@ -593,7 +738,7 @@ class _InventoryViewState extends State<InventoryView> {
                 border: Border.all(color: AppColors.status_danger.withAlpha(60)),
               ),
               child: const Text(
-                'This action cannot be undone. Consider deactivating instead.',
+                'The product will be hidden from active stock and checkout. Its history is retained.',
                 style: TextStyle(fontSize: 12, color: AppColors.status_danger),
               ),
             ),
@@ -603,7 +748,7 @@ class _InventoryViewState extends State<InventoryView> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton.icon(
             icon: const Icon(Icons.delete_forever, size: 16),
-            label: const Text('Delete'),
+            label: const Text('Deactivate'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.status_danger),
             onPressed: () => Navigator.pop(ctx, true),
           ),
@@ -611,11 +756,19 @@ class _InventoryViewState extends State<InventoryView> {
       ),
     );
     if (confirmed == true && mounted) {
-      widget.state.deleteProduct(product.id);
-      if (_selectedProduct?.id == product.id) setState(() => _selectedProduct = null);
-      else setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('"${product.name}" deleted.')));
+      try {
+        await widget.state.deactivateProduct(product.id);
+        if (!mounted) return;
+        if (_selectedProduct?.id == product.id) setState(() => _selectedProduct = null);
+        else setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('"${product.name}" deactivated.')));
+      } catch (error) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not deactivate product: $error')),
+        );
+      }
     }
   }
 
@@ -675,6 +828,16 @@ class _InventoryViewState extends State<InventoryView> {
                       icon: const Icon(Icons.file_download_outlined, size: 17),
                       label: const Text('Export'),
                       onPressed: () {},
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.file_upload_outlined, size: 17),
+                      label: const Text('Import CSV'),
+                      onPressed: _importProductsCsv,
                       style: OutlinedButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),

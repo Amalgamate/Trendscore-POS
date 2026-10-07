@@ -195,6 +195,29 @@ export function productsRouter(businessId: string): Router {
     }
   });
 
+  // DELETE /products/:id — deactivate, preserving references from receipts,
+  // stock movements, and historical reports.
+  router.delete('/:id', requireAuth, async (req, res) => {
+    try {
+      const existing = await prisma.product.findFirst({
+        where: { id: req.params.id, businessId },
+        select: { id: true, active: true },
+      });
+      if (!existing) return sendError(res, 404, 'NOT_FOUND', 'Product not found.');
+      if (!existing.active) return send200(res, { id: existing.id, active: false });
+
+      const product = await prisma.product.update({
+        where: { id: existing.id },
+        data: { active: false },
+        select: { id: true, active: true },
+      });
+      return send200(res, product);
+    } catch (err) {
+      console.error('products/deactivate error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to deactivate product.');
+    }
+  });
+
   // POST /products/:id/adjust-stock
   router.post('/:id/adjust-stock', requireAuth, async (req, res) => {
     const body = parseBody(StockAdjustSchema, req, res);

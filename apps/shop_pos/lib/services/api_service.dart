@@ -11,6 +11,7 @@ class ApiService {
   String baseUrl = 'http://localhost:4000';
   String? _authToken;
   bool isConnected = false;
+  bool get hasToken => _authToken != null && _authToken!.isNotEmpty;
 
   void setToken(String? token) {
     _authToken = token;
@@ -200,6 +201,25 @@ class ApiService {
       debugPrint('API reverseSale error: $e');
       return false;
     }
+  }
+
+  /// Update an existing product (PATCH).
+  /// Returns the decoded response map on success, or null on failure.
+  Future<Map<String, dynamic>?> updateProduct(
+      String productId, Map<String, dynamic> payload) async {
+    try {
+      final res = await http.patch(
+        Uri.parse('$baseUrl/products/$productId'),
+        headers: _headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+    } catch (e) {
+      debugPrint('API updateProduct error: $e');
+    }
+    return null;
   }
 
   /// Fetch analytics / dashboard summary

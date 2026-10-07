@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'services/api_service.dart';
 import 'cart.dart';
 import 'theme/tokens.dart';
 
@@ -501,9 +502,13 @@ class PosUser {
 /// Global reactive state for the Retail OS POS.
 class PosState extends ChangeNotifier {
   PosState() {
-    _initSampleData();
-    _loadFromStorage();
+    _initSampleData(includeProducts: _includeDemoProducts);
   }
+
+  static const bool _includeDemoProducts = bool.fromEnvironment(
+    'POS_DEMO_DATA',
+    defaultValue: true,
+  );
 
   final Cart cart = Cart();
   String activeCashier = 'John Mwangi';
@@ -629,10 +634,56 @@ class PosState extends ChangeNotifier {
     }
   }
 
-  void deleteProduct(String productId) {
+  Future<void> deleteProduct(String productId) async {
     products.removeWhere((p) => p.id == productId);
     notifyListeners();
     _persistAll();
+  }
+
+  Future<void> deactivateProduct(String productId) async {
+    final index = products.indexWhere((product) => product.id == productId);
+    if (index == -1) return;
+    final previous = products[index];
+    final isApiProduct = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+    ).hasMatch(productId);
+    if (ApiService.instance.hasToken && isApiProduct) {
+      final ok = await ApiService.instance.deactivateProduct(productId);
+      if (!ok) throw PosException('The shop API could not deactivate this product.');
+    }
+    products[index] = previous.copyWith(isActive: false);
+    notifyListeners();
+    await _persistAll();
+  }
+
+  Future<int> importProducts(List<PosProduct> imported) async {
+    final backup = List<PosProduct>.from(products);
+    final existingSkus = products.map((product) => product.sku.toLowerCase()).toSet();
+    final rows = <PosProduct>[];
+    for (final product in imported) {
+      if (existingSkus.contains(product.sku.toLowerCase())) continue;
+      existingSkus.add(product.sku.toLowerCase());
+      rows.add(product);
+    }
+    products.insertAll(0, rows);
+    _syncCategoriesWithProducts();
+    notifyListeners();
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final saved = await prefs.setString(
+        'products_json',
+        jsonEncode(products.map((item) => item.toJson()).toList()),
+      );
+      if (!saved) throw PosException('The browser declined to save imported products.');
+      await prefs.setString('categories_json', jsonEncode(categories.map((item) => item.toJson()).toList()));
+      return rows.length;
+    } catch (_) {
+      products
+        ..clear()
+        ..addAll(backup);
+      notifyListeners();
+      rethrow;
+    }
   }
 
   // ─── Variants ──────────────────────────────────────────────────────────────────────
@@ -920,6 +971,9 @@ class PosState extends ChangeNotifier {
           debugPrint('Error parsing products_json: $e');
         }
       }
+      if (!_includeDemoProducts) {
+        products.removeWhere((product) => _isBundledDemoProduct(product.id));
+      }
 
       final categoriesJson = prefs.getString('categories_json');
       if (categoriesJson != null) {
@@ -932,6 +986,11 @@ class PosState extends ChangeNotifier {
         }
       }
       _syncCategoriesWithProducts();
+      if (!_includeDemoProducts && productsJson == null) {
+        await prefs.setString('products_json', jsonEncode(<dynamic>[]));
+      } else if (!_includeDemoProducts && productsJson != null) {
+        await prefs.setString('products_json', jsonEncode(products.map((item) => item.toJson()).toList()));
+      }
 
       // Check session validity (1 hour unattended threshold)
       final lastActiveMs = prefs.getInt('session_last_active');
@@ -986,7 +1045,8 @@ class PosState extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadFromStorage() => loadInitialState();
+  static bool _isBundledDemoProduct(String id) =>
+      RegExp(r'^prod_(?:[1-9]|10)$').hasMatch(id);
 
   Future<void> _persistAll() async {
     try {
@@ -1263,10 +1323,14 @@ class PosState extends ChangeNotifier {
 
   }
 
-  void _initSampleData() {
+  void _initSampleData({required bool includeProducts}) {
     _initDefaultUsers();
     _initDefaultCategories();
-    _initDefaultProducts();
+    if (includeProducts) {
+      _initDefaultProducts();
+    } else {
+      products = <PosProduct>[];
+    }
     customers = [
       PosCustomer(
         id: 'cust_1',
