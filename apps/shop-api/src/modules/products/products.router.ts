@@ -182,8 +182,15 @@ export function productsRouter(businessId: string): Router {
     if (!body) return;
 
     try {
+      // Ownership check — ensure this product belongs to the routed business.
+      const existing = await prisma.product.findFirst({
+        where: { id: req.params.id, businessId },
+        select: { id: true },
+      });
+      if (!existing) return sendError(res, 404, 'NOT_FOUND', 'Product not found.');
+
       const product = await prisma.product.update({
-        where: { id: req.params.id },
+        where: { id: existing.id },
         data: body,
         include: { category: { select: { id: true, name: true, colorHex: true } } },
       });

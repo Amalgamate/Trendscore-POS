@@ -203,6 +203,35 @@ class ApiService {
     }
   }
 
+  /// Soft-delete a product (sets active=false on the API).
+  /// Returns true if the server responded 200.
+  Future<bool> deactivateProduct(String productId) async {
+    try {
+      final res = await http.delete(
+        Uri.parse('$baseUrl/products/$productId'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 5));
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('API deactivateProduct error: $e');
+      return false;
+    }
+  }
+
+  /// Soft-delete a product by marking it inactive on the shop API.
+  Future<bool> deactivateProduct(String productId) async {
+    try {
+      final res = await http.delete(
+        Uri.parse('$baseUrl/products/$productId'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 5));
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('API deactivateProduct error: $e');
+      return false;
+    }
+  }
+
   /// Update an existing product (PATCH).
   /// Returns the decoded response map on success, or null on failure.
   Future<Map<String, dynamic>?> updateProduct(

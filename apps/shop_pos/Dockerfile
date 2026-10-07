@@ -8,7 +8,7 @@ COPY pubspec.yaml pubspec.lock ./
 RUN flutter pub get --enforce-lockfile
 
 COPY . .
-RUN flutter build web --release --no-tree-shake-icons
+RUN flutter build web --release --no-tree-shake-icons --dart-define=POS_DEMO_DATA=false
 
 FROM node:20-alpine AS runtime
 WORKDIR /app
