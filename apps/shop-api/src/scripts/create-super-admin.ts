@@ -1,7 +1,8 @@
 /**
  * Ensure the platform administrator exists in this shop database.
  * Re-runs always reset the PIN hash so stale hashes from previous seeds
- * are never left in place.
+ * are never left in place. mustChangePin is always set to true on every
+ * run so the admin is forced to change the initial PIN before use.
  */
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -46,7 +47,7 @@ async function main(): Promise<void> {
     // Always reset PIN hash so stale hashes from previous seeds never block login.
     await prisma.user.update({
       where: { id: existing.id },
-      data: { fullName: 'Retail OS Super Admin', pinHash, role: 'SUPER_ADMIN', active: true, mustChangePin: false },
+      data: { fullName: 'Retail OS Super Admin', pinHash, role: 'SUPER_ADMIN', active: true, mustChangePin: true },
     });
     console.log(JSON.stringify({ ok: true, created: false, role: 'SUPER_ADMIN' }));
     return;
@@ -59,7 +60,7 @@ async function main(): Promise<void> {
       pinHash,
       role: 'SUPER_ADMIN',
       active: true,
-      mustChangePin: false,
+      mustChangePin: true,
       isPlatformSuperAdmin: true,
     },
     create: {
@@ -68,7 +69,7 @@ async function main(): Promise<void> {
       pinHash,
       role: 'SUPER_ADMIN',
       active: true,
-      mustChangePin: false,
+      mustChangePin: true,
       isPlatformSuperAdmin: true,
     },
   });
