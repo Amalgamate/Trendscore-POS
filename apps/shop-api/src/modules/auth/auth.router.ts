@@ -26,14 +26,14 @@ const StaffCreateSchema = z.object({
   fullName: z.string().trim().min(1).max(120),
   phone: z.string().min(9).max(24),
   pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits'),
-  role: z.enum(['OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK']),
+  role: z.enum(['SUPER_ADMIN', 'OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK']),
 });
 
 const StaffUpdateSchema = z.object({
   fullName: z.string().trim().min(1).max(120).optional(),
   phone: z.string().min(9).max(24).optional(),
   pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits').optional(),
-  role: z.enum(['OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK']).optional(),
+  role: z.enum(['SUPER_ADMIN', 'OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK']).optional(),
   active: z.boolean().optional(),
 }).refine((data) => Object.keys(data).length > 0, 'At least one field is required.');
 
@@ -129,8 +129,8 @@ export function authRouter(): Router {
     }
   });
 
-  // Staff management is owner-only; PIN hashes are never returned.
-  router.get('/users', requireAuth, requireRole('OWNER'), async (_req, res) => {
+  // Staff management is owner/super-admin only; PIN hashes are never returned.
+  router.get('/users', requireAuth, requireRole('OWNER', 'SUPER_ADMIN'), async (_req, res) => {
     try {
       const users = await prisma.user.findMany({
         select: { id: true, fullName: true, phone: true, role: true, active: true },
@@ -143,7 +143,7 @@ export function authRouter(): Router {
     }
   });
 
-  router.post('/users', requireAuth, requireRole('OWNER'), async (req, res) => {
+  router.post('/users', requireAuth, requireRole('OWNER', 'SUPER_ADMIN'), async (req, res) => {
     const body = parseBody(StaffCreateSchema, req, res);
     if (!body) return;
     try {
@@ -166,7 +166,7 @@ export function authRouter(): Router {
     }
   });
 
-  router.patch('/users/:id', requireAuth, requireRole('OWNER'), async (req, res) => {
+  router.patch('/users/:id', requireAuth, requireRole('OWNER', 'SUPER_ADMIN'), async (req, res) => {
     const body = parseBody(StaffUpdateSchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;
@@ -176,10 +176,11 @@ export function authRouter(): Router {
 
       const nextRole = body.role ?? current.role;
       const nextActive = body.active ?? current.active;
-      if (current.id === auth.userId && (nextRole !== 'OWNER' || !nextActive)) {
-        return sendError(res, 409, 'LAST_OWNER', 'You cannot deactivate or demote your own owner account.');
+      const isAdminRole = (r: string) => r === 'OWNER' || r === 'SUPER_ADMIN';
+      if (current.id === auth.userId && (!isAdminRole(nextRole) || !nextActive)) {
+        return sendError(res, 409, 'LAST_OWNER', 'You cannot deactivate or demote your own account.');
       }
-      if (current.role === 'OWNER' && current.active && (nextRole !== 'OWNER' || !nextActive)) {
+      if (current.role === 'OWNER' && current.active && (!isAdminRole(nextRole) || !nextActive)) {
         const activeOwners = await prisma.user.count({ where: { role: 'OWNER', active: true } });
         if (activeOwners <= 1) {
           return sendError(res, 409, 'LAST_OWNER', 'Create another active owner before demoting this account.');

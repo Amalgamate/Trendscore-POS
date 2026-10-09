@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../pos_state.dart';
+import '../shared/icons.dart';
 
 // ─── Double-Leaf Brand Logo Painter ──────────────────────────────────────────
 
@@ -312,7 +313,7 @@ class _LoginViewState extends State<LoginView> {
                       ],
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close, color: Color(0xFF64748B)),
+                      icon: const Icon(AppIcons.close, color: Color(0xFF64748B)),
                       onPressed: () => Navigator.pop(ctx),
                     ),
                   ],
@@ -400,7 +401,7 @@ class _LoginViewState extends State<LoginView> {
                             ),
                           ),
                           if (isSelected)
-                            const Icon(Icons.check_circle, color: Color(0xFF10B981), size: 20),
+                            const Icon(AppIcons.checkCircle, color: Color(0xFF10B981), size: 20),
                         ],
                       ),
                     ),
@@ -416,6 +417,8 @@ class _LoginViewState extends State<LoginView> {
 
   Color _roleBadgeColor(PosUserRole role) {
     switch (role) {
+      case PosUserRole.superAdmin:
+        return const Color(0xFFDC2626);
       case PosUserRole.owner:
         return const Color(0xFFD97706);
       case PosUserRole.manager:
@@ -677,7 +680,7 @@ class _LoginViewState extends State<LoginView> {
                               ),
                             ),
                             const SizedBox(width: 4),
-                            const Icon(Icons.swap_horiz, color: Color(0xFF34D399), size: 13),
+                            const Icon(AppIcons.swapHoriz, color: Color(0xFF34D399), size: 13),
                           ],
                         ),
                       ),
@@ -745,7 +748,7 @@ class _LoginViewState extends State<LoginView> {
                 ),
                 child: const Center(
                   child: Icon(
-                    Icons.lock_outline_rounded,
+                    AppIcons.lock,
                     color: Color(0xFF0D9488),
                     size: 22,
                   ),
@@ -786,7 +789,7 @@ class _LoginViewState extends State<LoginView> {
                 decoration: InputDecoration(
                   labelText: 'Phone number',
                   hintText: '07xx xxx xxx',
-                  prefixIcon: const Icon(Icons.phone_outlined),
+                  prefixIcon: const Icon(AppIcons.phone),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onChanged: (_) => setState(() => _errorMsg = null),
@@ -867,7 +870,7 @@ class _LoginViewState extends State<LoginView> {
                 height: 48,
                 child: FilledButton.icon(
                   onPressed: _isLoading ? null : _verifyPin,
-                  icon: const Icon(Icons.lock_open_rounded),
+                  icon: const Icon(AppIcons.lockOpen),
                   label: const Text('Sign in securely'),
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF0D9488),
@@ -884,7 +887,7 @@ class _LoginViewState extends State<LoginView> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 mainAxisSize: MainAxisSize.min,
                 children: const [
-                  Icon(Icons.shield_outlined, size: 14, color: Color(0xFF64748B)),
+                  Icon(AppIcons.shield, size: 14, color: Color(0xFF64748B)),
                   SizedBox(width: 6),
                   Flexible(
                     child: Text(
@@ -983,7 +986,7 @@ class _LoginViewState extends State<LoginView> {
           child: Center(
             child: isBackspace
                 ? const Icon(
-                    Icons.backspace_outlined,
+                    AppIcons.backspace,
                     color: Color(0xFF0F172A),
                     size: 20,
                   )
@@ -1109,13 +1112,13 @@ class _LoginViewState extends State<LoginView> {
                 ),
               ),
               const SizedBox(height: 36),
-              _buildDesktopFeature(Icons.shopping_cart_outlined, 'Fast & easy sales'),
+              _buildDesktopFeature(AppIcons.cart, 'Fast & easy sales'),
               const SizedBox(height: 16),
-              _buildDesktopFeature(Icons.inventory_2_outlined, 'Live inventory tracking'),
+              _buildDesktopFeature(AppIcons.inventory, 'Live inventory tracking'),
               const SizedBox(height: 16),
-              _buildDesktopFeature(Icons.people_outline, 'Customer credit book'),
+              _buildDesktopFeature(AppIcons.people, 'Customer credit book'),
               const SizedBox(height: 16),
-              _buildDesktopFeature(Icons.trending_up, 'Actionable analytics & reports'),
+              _buildDesktopFeature(AppIcons.trendingUp, 'Actionable analytics & reports'),
               const Spacer(flex: 3),
               const Text(
                 'Simple tools. Real growth.',

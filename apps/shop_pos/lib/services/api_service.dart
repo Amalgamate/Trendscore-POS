@@ -315,6 +315,25 @@ class ApiService {
     }
   }
 
+  /// Delete a customer (only succeeds if balance is zero)
+  Future<({bool ok, String? error})> deleteCustomer(String customerId) async {
+    try {
+      final res = await http.delete(
+        Uri.parse('$baseUrl/customers/$customerId'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return (ok: true, error: null);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final msg = (body['error'] as Map?)?.containsKey('message') == true
+          ? body['error']['message'] as String
+          : 'Could not delete customer.';
+      return (ok: false, error: msg);
+    } catch (e) {
+      debugPrint('API deleteCustomer error: $e');
+      return (ok: false, error: 'Could not reach the server.');
+    }
+  }
+
   /// Fetch sales
   Future<List<Map<String, dynamic>>?> getSales() async {
     try {

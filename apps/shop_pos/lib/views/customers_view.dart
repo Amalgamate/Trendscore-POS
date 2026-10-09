@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../cart.dart';
 import '../pos_state.dart';
 import '../theme/tokens.dart';
+import '../shared/icons.dart';
 
 class CustomersView extends StatefulWidget {
   const CustomersView({super.key, required this.state});
@@ -75,7 +76,7 @@ class _CustomersViewState extends State<CustomersView> {
                     color: const Color(0xFFF0FDF4),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.payments_outlined, color: AppColors.status_success, size: 22),
+                  child: const Icon(AppIcons.payments, color: AppColors.status_success, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -195,7 +196,7 @@ class _CustomersViewState extends State<CustomersView> {
                       keyboardType: TextInputType.number,
                       decoration: InputDecoration(
                         labelText: 'Payment Amount (KES) *',
-                        prefixIcon: const Icon(Icons.attach_money, size: 20),
+                        prefixIcon: const Icon(AppIcons.money, size: 20),
                         filled: true,
                         fillColor: AppColors.bg_canvas,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
@@ -243,7 +244,7 @@ class _CustomersViewState extends State<CustomersView> {
                       controller: refController,
                       decoration: InputDecoration(
                         labelText: 'Transaction Reference *',
-                        prefixIcon: const Icon(Icons.tag, size: 20),
+                        prefixIcon: const Icon(AppIcons.tag, size: 20),
                         filled: true,
                         fillColor: AppColors.bg_canvas,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
@@ -256,7 +257,7 @@ class _CustomersViewState extends State<CustomersView> {
                       controller: notesController,
                       decoration: InputDecoration(
                         labelText: 'Receipt Memo / Notes (Optional)',
-                        prefixIcon: const Icon(Icons.notes, size: 20),
+                        prefixIcon: const Icon(AppIcons.notes, size: 20),
                         filled: true,
                         fillColor: AppColors.bg_canvas,
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
@@ -272,7 +273,7 @@ class _CustomersViewState extends State<CustomersView> {
                 child: const Text('Cancel', style: TextStyle(color: AppColors.text_secondary)),
               ),
               FilledButton.icon(
-                icon: const Icon(Icons.check_circle_outline, size: 18),
+                icon: const Icon(AppIcons.checkCircle, size: 18),
                 label: const Text('Confirm Payment'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.status_success,
@@ -321,7 +322,7 @@ class _CustomersViewState extends State<CustomersView> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: const [
-            Icon(Icons.person_add_alt_1, color: AppColors.accent_primary),
+            Icon(AppIcons.personAdd, color: AppColors.accent_primary),
             SizedBox(width: 10),
             Text('Open Customer Credit Facility', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
           ],
@@ -335,7 +336,7 @@ class _CustomersViewState extends State<CustomersView> {
                 controller: nameCtrl,
                 decoration: InputDecoration(
                   labelText: 'Customer Full Name *',
-                  prefixIcon: const Icon(Icons.person_outline),
+                  prefixIcon: const Icon(AppIcons.person),
                   filled: true,
                   fillColor: AppColors.bg_canvas,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -347,7 +348,7 @@ class _CustomersViewState extends State<CustomersView> {
                 keyboardType: TextInputType.phone,
                 decoration: InputDecoration(
                   labelText: 'Mobile Phone (+254...) *',
-                  prefixIcon: const Icon(Icons.phone_outlined),
+                  prefixIcon: const Icon(AppIcons.phone),
                   filled: true,
                   fillColor: AppColors.bg_canvas,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -359,7 +360,7 @@ class _CustomersViewState extends State<CustomersView> {
                 keyboardType: TextInputType.number,
                 decoration: InputDecoration(
                   labelText: 'Approved Credit Limit (KES)',
-                  prefixIcon: const Icon(Icons.credit_card_outlined),
+                  prefixIcon: const Icon(AppIcons.creditCard),
                   filled: true,
                   fillColor: AppColors.bg_canvas,
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -407,6 +408,70 @@ class _CustomersViewState extends State<CustomersView> {
     );
   }
 
+  Future<void> _confirmDeleteCustomer(PosCustomer customer) async {
+    final hasBalance = customer.currentBalance.minorUnits > 0;
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.bg_surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(AppIcons.delete, color: AppColors.status_danger, size: 22),
+            SizedBox(width: 10),
+            Text('Delete Customer', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: hasBalance
+            ? Text(
+                '${customer.name} still has an outstanding balance of KES ${customer.currentBalance.formatted}.\n\nClear the debt before deleting this account.',
+                style: const TextStyle(fontSize: 14),
+              )
+            : Text(
+                'Are you sure you want to permanently delete ${customer.name}? This cannot be undone.',
+                style: const TextStyle(fontSize: 14),
+              ),
+        actions: hasBalance
+            ? [
+                FilledButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('OK'),
+                ),
+              ]
+            : [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  style: FilledButton.styleFrom(backgroundColor: AppColors.status_danger),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Delete'),
+                ),
+              ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    final error = await widget.state.deleteCustomer(customer.id);
+    if (!mounted) return;
+
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error), backgroundColor: AppColors.status_danger),
+      );
+    } else {
+      setState(() {
+        _selectedCustomer = widget.state.customers.isNotEmpty ? widget.state.customers.first : null;
+        _mobileShowDetails = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('${customer.name} has been deleted.'), backgroundColor: AppColors.status_success),
+      );
+    }
+  }
+
   void _showPrintStatementDialog(PosCustomer customer) {
     showDialog<void>(
       context: context,
@@ -417,7 +482,7 @@ class _CustomersViewState extends State<CustomersView> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text('Account Statement Preview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(ctx)),
+            IconButton(icon: const Icon(AppIcons.close, size: 20), onPressed: () => Navigator.pop(ctx)),
           ],
         ),
         content: SizedBox(
@@ -546,7 +611,7 @@ class _CustomersViewState extends State<CustomersView> {
         ),
         actions: [
           OutlinedButton.icon(
-            icon: const Icon(Icons.share_outlined, size: 16),
+            icon: const Icon(AppIcons.share, size: 16),
             label: const Text('Share SMS / WhatsApp'),
             onPressed: () {
               Navigator.pop(ctx);
@@ -556,7 +621,7 @@ class _CustomersViewState extends State<CustomersView> {
             },
           ),
           FilledButton.icon(
-            icon: const Icon(Icons.print_outlined, size: 16),
+            icon: const Icon(AppIcons.print, size: 16),
             label: const Text('Print Statement'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.accent_primary),
             onPressed: () {
@@ -612,7 +677,7 @@ class _CustomersViewState extends State<CustomersView> {
                       ),
                     ),
                     FilledButton.icon(
-                      icon: const Icon(Icons.person_add_outlined, size: 16),
+                      icon: const Icon(AppIcons.personAdd, size: 16),
                       label: Text(isMobile ? 'Add' : 'New Account'),
                       onPressed: _showNewCustomerModal,
                       style: FilledButton.styleFrom(
@@ -702,7 +767,7 @@ class _CustomersViewState extends State<CustomersView> {
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 hintText: 'Search customer name or phone...',
-                prefixIcon: const Icon(Icons.search, size: 18),
+                prefixIcon: const Icon(AppIcons.search, size: 18),
                 filled: true,
                 fillColor: AppColors.bg_canvas,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -805,7 +870,7 @@ class _CustomersViewState extends State<CustomersView> {
             children: [
               if (isMobile)
                 IconButton(
-                  icon: const Icon(Icons.arrow_back),
+                  icon: const Icon(AppIcons.arrowBack),
                   onPressed: () => setState(() => _mobileShowDetails = false),
                 ),
               Expanded(
@@ -818,7 +883,7 @@ class _CustomersViewState extends State<CustomersView> {
                 ),
               ),
               OutlinedButton.icon(
-                icon: const Icon(Icons.receipt_long, size: 16),
+                icon: const Icon(AppIcons.receiptLong, size: 16),
                 label: const Text('Statement'),
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -828,7 +893,7 @@ class _CustomersViewState extends State<CustomersView> {
               ),
               const SizedBox(width: 8),
               FilledButton.icon(
-                icon: const Icon(Icons.payments_outlined, size: 16),
+                icon: const Icon(AppIcons.payments, size: 16),
                 label: const Text('Pay Debt'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.status_success,
@@ -836,6 +901,16 @@ class _CustomersViewState extends State<CustomersView> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () => _showRecordPaymentModal(customer),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                tooltip: 'Delete customer',
+                icon: const Icon(AppIcons.delete, size: 20, color: AppColors.status_danger),
+                style: IconButton.styleFrom(
+                  backgroundColor: const Color(0xFFFEF2F2),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => _confirmDeleteCustomer(customer),
               ),
             ],
           ),
@@ -907,7 +982,7 @@ class _CustomersViewState extends State<CustomersView> {
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
-                            isDebit ? Icons.arrow_upward : Icons.arrow_downward,
+                            isDebit ? AppIcons.arrowUp : AppIcons.arrowDown,
                             size: 18,
                             color: isDebit ? AppColors.status_danger : AppColors.status_success,
                           ),

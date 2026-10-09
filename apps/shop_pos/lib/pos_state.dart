@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'services/api_service.dart';
 import 'cart.dart';
 import 'theme/tokens.dart';
+import 'shared/icons.dart';
 
 /// Error with a message that is safe to show to the cashier as-is.
 class PosException implements Exception {
@@ -17,22 +18,22 @@ class PosException implements Exception {
 
 /// Icons a shop owner can pick for a category.
 const Map<String, IconData> kCategoryIcons = {
-  'box': Icons.inventory_2_outlined,
-  'dairy': Icons.egg_outlined,
-  'bakery': Icons.bakery_dining,
-  'drink': Icons.local_drink_outlined,
-  'produce': Icons.eco_outlined,
-  'snack': Icons.fastfood_outlined,
-  'home': Icons.home_outlined,
-  'grain': Icons.grass_outlined,
-  'health': Icons.health_and_safety_outlined,
-  'clean': Icons.cleaning_services_outlined,
-  'meat': Icons.set_meal_outlined,
-  'basket': Icons.shopping_basket_outlined,
-  'baby': Icons.child_care_outlined,
-  'pet': Icons.pets_outlined,
-  'tool': Icons.build_outlined,
-  'beauty': Icons.spa_outlined,
+  'box': AppIcons.inventory,
+  'dairy': AppIcons.egg,
+  'bakery': AppIcons.bakery,
+  'drink': AppIcons.drink,
+  'produce': AppIcons.produce,
+  'snack': AppIcons.snack,
+  'home': AppIcons.home,
+  'grain': AppIcons.grain,
+  'health': AppIcons.health,
+  'clean': AppIcons.clean,
+  'meat': AppIcons.meat,
+  'basket': AppIcons.basket,
+  'baby': AppIcons.baby,
+  'pet': AppIcons.pet,
+  'tool': AppIcons.tool,
+  'beauty': AppIcons.beauty,
 };
 
 /// Soft tint colours a shop owner can pick for a category.
@@ -56,7 +57,7 @@ class PosCategory {
   String iconKey;
 
   Color get color => Color(colorValue);
-  IconData get icon => kCategoryIcons[iconKey] ?? Icons.inventory_2_outlined;
+  IconData get icon => kCategoryIcons[iconKey] ?? AppIcons.inventory;
 
   Map<String, dynamic> toJson() => {
         'id': id,
@@ -219,22 +220,22 @@ class PosProduct {
   );
 
   static IconData _iconFromCode(int? code) {
-    if (code == null) return Icons.inventory_2_outlined;
+    if (code == null) return AppIcons.inventory;
     for (final icon in kCategoryIcons.values) {
       if (icon.codePoint == code) return icon;
     }
     switch (code) {
-      case 0xe6e8: return Icons.water_drop_outlined;
-      case 0xe0d6: return Icons.bakery_dining_outlined;
-      case 0xe21a: return Icons.egg_alt_outlined;
-      case 0xe2e6: return Icons.grain;
-      case 0xe5d2: return Icons.spa_outlined;
-      case 0xe333: return Icons.icecream_outlined;
-      case 0xe463: return Icons.oil_barrel_outlined;
-      case 0xe206: return Icons.eco_outlined;
-      case 0xe3a7: return Icons.local_drink_outlined;
-      case 0xe532: return Icons.rice_bowl_outlined;
-      default: return Icons.inventory_2_outlined;
+      case 0xe6e8: return AppIcons.waterDrop;
+      case 0xe0d6: return AppIcons.bakery;
+      case 0xe21a: return AppIcons.egg;
+      case 0xe2e6: return AppIcons.grain;
+      case 0xe5d2: return AppIcons.beauty;
+      case 0xe333: return AppIcons.iceCream;
+      case 0xe463: return AppIcons.oil;
+      case 0xe206: return AppIcons.produce;
+      case 0xe3a7: return AppIcons.drink;
+      case 0xe532: return AppIcons.rice;
+      default: return AppIcons.inventory;
     }
   }
 }
@@ -300,6 +301,64 @@ class SaleRecord {
 
   int get totalUnits => items.fold(0, (sum, i) => sum + i.quantity);
   bool get isReversed => status == SaleStatus.reversed;
+
+  static SaleRecord fromApi(Map<String, dynamic> json, {Map<String, PosCustomer>? customersMap}) {
+    final itemsRaw = json['items'] as List<dynamic>? ?? [];
+    final items = itemsRaw.map((raw) {
+      final item = raw as Map<String, dynamic>;
+      return SaleRecordItem(
+        productId: item['productId'] as String? ?? '',
+        productName: item['productName'] as String? ?? '',
+        unitPrice: Money(((item['unitPrice'] as num) * 100).round()),
+        quantity: (item['quantity'] as num).toInt(),
+        lineTotal: Money(((item['lineTotal'] as num) * 100).round()),
+      );
+    }).toList();
+
+    final paymentsRaw = json['payments'] as List<dynamic>? ?? [];
+    SalePaymentMethod paymentMethod = SalePaymentMethod.cash;
+    String paymentReference = '';
+    if (paymentsRaw.isNotEmpty) {
+      final firstPayment = paymentsRaw.first as Map<String, dynamic>;
+      final methodStr = firstPayment['method'] as String? ?? 'CASH';
+      paymentMethod = switch (methodStr) {
+        'MPESA' => SalePaymentMethod.mpesa,
+        'CREDIT' => SalePaymentMethod.credit,
+        _ => SalePaymentMethod.cash,
+      };
+      paymentReference = firstPayment['reference'] as String? ?? '';
+    }
+
+    final statusStr = json['status'] as String? ?? 'COMPLETED';
+    final status = (statusStr == 'REFUNDED' || statusStr == 'VOIDED')
+        ? SaleStatus.reversed
+        : SaleStatus.completed;
+
+    final cashierMap = json['cashier'] as Map<String, dynamic>?;
+    final cashierName = cashierMap?['fullName'] as String? ?? '';
+
+    PosCustomer? customer;
+    final customerMap = json['customer'] as Map<String, dynamic>?;
+    if (customerMap != null && customersMap != null) {
+      final fullName = customerMap['fullName'] as String? ?? '';
+      customer = customersMap[fullName.toLowerCase()];
+    }
+
+    return SaleRecord(
+      receiptNumber: json['receiptNumber'] as String? ?? '',
+      timestamp: DateTime.parse(json['createdAt'] as String),
+      cashier: cashierName,
+      items: items,
+      subtotal: Money(((json['subtotal'] as num) * 100).round()),
+      vatAmount: Money(((json['vatAmount'] as num) * 100).round()),
+      paymentMethod: paymentMethod,
+      paymentReference: paymentReference,
+      customer: customer,
+      status: status,
+      cashTendered: null,
+      changeDue: null,
+    );
+  }
 }
 
 enum LedgerEntryType {
@@ -351,6 +410,35 @@ class PosCustomer {
 
   Money get availableCredit =>
       creditLimit > currentBalance ? Money(creditLimit.minorUnits - currentBalance.minorUnits) : const Money(0);
+
+  factory PosCustomer.fromApi(Map<String, dynamic> json) {
+    final ledgerRaw = json['ledger'] as List<dynamic>?;
+    final history = <CustomerLedgerEntry>[];
+    if (ledgerRaw != null) {
+      for (final raw in ledgerRaw) {
+        final entry = raw as Map<String, dynamic>;
+        final entryType = entry['entryType'] as String? ?? 'DEBIT';
+        history.add(CustomerLedgerEntry(
+          id: entry['id'] as String? ?? 'led_${history.length}',
+          timestamp: DateTime.parse(entry['createdAt'] as String),
+          type: entryType == 'CREDIT'
+              ? LedgerEntryType.paymentCredit
+              : LedgerEntryType.saleDebit,
+          amount: Money(((entry['amount'] as num) * 100).round()),
+          reference: entry['reference'] as String? ?? '',
+          runningBalance: Money(((entry['balance'] as num) * 100).round()),
+        ));
+      }
+    }
+    return PosCustomer(
+      id: json['id'] as String,
+      name: json['fullName'] as String? ?? '',
+      phone: json['phone'] as String? ?? '',
+      creditLimit: Money(((json['creditLimit'] as num) * 100).round()),
+      currentBalance: Money(((json['balance'] as num) * 100).round()),
+      history: history,
+    );
+  }
 }
 
 enum CashMovementType {
@@ -421,10 +509,21 @@ class CashShift {
 }
 
 enum PosUserRole {
+  superAdmin,
   owner,
   manager,
   cashier,
   stockClerk,
+}
+
+extension PosUserRoleLabel on PosUserRole {
+  String get roleLabel => switch (this) {
+    PosUserRole.superAdmin => 'Super Admin',
+    PosUserRole.owner      => 'Owner',
+    PosUserRole.manager    => 'Manager',
+    PosUserRole.cashier    => 'Cashier',
+    PosUserRole.stockClerk => 'Stock Clerk',
+  };
 }
 
 class PosUser {
@@ -450,6 +549,8 @@ class PosUser {
 
   String get roleDisplay {
     switch (role) {
+      case PosUserRole.superAdmin:
+        return 'Super Admin';
       case PosUserRole.owner:
         return 'Owner';
       case PosUserRole.manager:
@@ -463,6 +564,8 @@ class PosUser {
 
   String get rolePermissions {
     switch (role) {
+      case PosUserRole.superAdmin:
+        return 'Platform Super Admin: Full system access';
       case PosUserRole.owner:
         return 'Full System & Business Owner Access';
       case PosUserRole.manager:
@@ -495,6 +598,7 @@ class PosUser {
     'fullName': fullName,
     'phone': phone,
     'role': switch (role) {
+      PosUserRole.superAdmin => 'SUPER_ADMIN',
       PosUserRole.owner => 'OWNER',
       PosUserRole.manager => 'MANAGER',
       PosUserRole.cashier => 'CASHIER',
@@ -506,12 +610,14 @@ class PosUser {
 
   factory PosUser.fromApi(Map<String, dynamic> json) {
     final role = switch (json['role'] as String? ?? 'CASHIER') {
+      'SUPER_ADMIN' => PosUserRole.superAdmin,
       'OWNER' => PosUserRole.owner,
       'MANAGER' => PosUserRole.manager,
       'STOCK_CLERK' => PosUserRole.stockClerk,
       _ => PosUserRole.cashier,
     };
     final color = switch (role) {
+      PosUserRole.superAdmin => const Color(0xFFDC2626),
       PosUserRole.owner => const Color(0xFFD97706),
       PosUserRole.manager => const Color(0xFF7C3AED),
       PosUserRole.cashier => const Color(0xFF10B981),
@@ -576,7 +682,7 @@ class PosState extends ChangeNotifier {
   bool cashDrawerKick = true;
   bool requirePinForReversal = true;
   String printerPaperSize = '80mm';
-  String serverUrl = kIsWeb ? '${Uri.base.origin}/api' : 'http://localhost:4000';
+  String serverUrl = kIsWeb ? 'http://localhost:4001' : 'http://localhost:4001';
 
   late List<PosUser> users;
   PosUser? currentLoggedInUser;
@@ -587,7 +693,7 @@ class PosState extends ChangeNotifier {
   List<PosUser> get activeUsers => users.where((u) => u.active).toList();
 
   Future<void> addUser(PosUser user) async {
-    if (!ApiService.instance.hasToken || currentLoggedInUser?.role != PosUserRole.owner) {
+    if (!ApiService.instance.hasToken || (currentLoggedInUser?.role != PosUserRole.owner && currentLoggedInUser?.role != PosUserRole.superAdmin)) {
       throw PosException('Only an online owner can create a staff account.');
     }
     final response = await ApiService.instance.createStaffUser(user.toApiJson(includePin: true));
@@ -601,7 +707,7 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> updateUser(PosUser updated) async {
-    if (!ApiService.instance.hasToken || currentLoggedInUser?.role != PosUserRole.owner) {
+    if (!ApiService.instance.hasToken || (currentLoggedInUser?.role != PosUserRole.owner && currentLoggedInUser?.role != PosUserRole.superAdmin)) {
       throw PosException('Only an online owner can update staff accounts.');
     }
     final payload = updated.toApiJson(includePin: true)..remove('active');
@@ -624,7 +730,7 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> deleteUser(String id) async {
-    if (!ApiService.instance.hasToken || currentLoggedInUser?.role != PosUserRole.owner) {
+    if (!ApiService.instance.hasToken || (currentLoggedInUser?.role != PosUserRole.owner && currentLoggedInUser?.role != PosUserRole.superAdmin)) {
       throw PosException('Only an online owner can deactivate staff accounts.');
     }
     if (currentLoggedInUser?.id == id) {
@@ -675,7 +781,7 @@ class PosState extends ChangeNotifier {
 
   Future<void> _finishAuthenticatedLogin(PosUser user) async {
     catalogueSyncMessage = 'Signed in as ${user.roleDisplay}. Refreshing shop data…';
-    if (user.role == PosUserRole.owner) {
+    if (user.role == PosUserRole.owner || user.role == PosUserRole.superAdmin) {
       final remoteUsers = await ApiService.instance.getStaffUsers();
       if (remoteUsers != null) {
         users = remoteUsers.map(PosUser.fromApi).toList();
@@ -683,6 +789,31 @@ class PosState extends ChangeNotifier {
     }
     notifyListeners();
     await syncCatalogueFromApi();
+
+    // Load customers from API
+    try {
+      final remoteCustomers = await ApiService.instance.getCustomers();
+      if (remoteCustomers != null) {
+        customers = remoteCustomers.map(PosCustomer.fromApi).toList();
+      }
+    } catch (e) {
+      debugPrint('Could not load customers from API: $e');
+      // keep existing list (empty or cached)
+    }
+
+    // Load recent sales from API
+    try {
+      final remoteSales = await ApiService.instance.getSales();
+      if (remoteSales != null) {
+        final customersMap = {for (final c in customers) c.name.toLowerCase(): c};
+        sales = remoteSales.map((json) => SaleRecord.fromApi(json, customersMap: customersMap)).toList();
+      }
+    } catch (e) {
+      debugPrint('Could not load sales from API: $e');
+      // keep existing list (empty or cached)
+    }
+
+    notifyListeners();
     await persistSession(user);
   }
 
@@ -1010,7 +1141,7 @@ class PosState extends ChangeNotifier {
       costPrice: cost == null || cost == 0 ? null : Money.parse(cost.toString()),
       stock: (remote['stock'] as num? ?? fallback?.stock ?? 0).toInt(),
       lowStockThreshold: (remote['lowStockThreshold'] as num? ?? fallback?.lowStockThreshold ?? 10).toInt(),
-      icon: localCategory?.icon ?? fallback?.icon ?? Icons.inventory_2_outlined,
+      icon: localCategory?.icon ?? fallback?.icon ?? AppIcons.inventory,
       tint: categoryColor != null ? Color(categoryColor) : localCategory?.color ?? fallback?.tint ?? const Color(0xFFF8FAFC),
       taxRateBasisPoints: vat == null ? (fallback?.taxRateBasisPoints ?? defaultVatRateBasisPoints) : (vat * 10000).round(),
       isActive: remote['active'] as bool? ?? fallback?.isActive ?? true,
@@ -1142,7 +1273,7 @@ class PosState extends ChangeNotifier {
       categoryByName(name)?.color ?? const Color(0xFFF8FAFC);
 
   IconData categoryIcon(String name) =>
-      categoryByName(name)?.icon ?? Icons.inventory_2_outlined;
+      categoryByName(name)?.icon ?? AppIcons.inventory;
 
   /// Number of sellable items (each variant counts) in a category.
   int productCountIn(String categoryName) =>
@@ -1264,6 +1395,20 @@ class PosState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Deletes a customer via the API. Returns null on success, or an error
+  /// message string if it failed. Removes the customer locally only if the
+  /// API call succeeds.
+  Future<String?> deleteCustomer(String customerId) async {
+    if (!ApiService.instance.hasToken) {
+      return 'You must be online to delete a customer.';
+    }
+    final result = await ApiService.instance.deleteCustomer(customerId);
+    if (!result.ok) return result.error ?? 'Could not delete customer.';
+    customers.removeWhere((c) => c.id == customerId);
+    notifyListeners();
+    return null;
+  }
+
 
   int savedTabIndex = 0;
   static const int sessionTimeoutMinutes = 60; // 1 hour unattended session threshold
@@ -1312,8 +1457,8 @@ class PosState extends ChangeNotifier {
       requirePinForReversal = prefs.getBool('require_pin_reversal') ?? requirePinForReversal;
       printerPaperSize = prefs.getString('printer_paper_size') ?? printerPaperSize;
       serverUrl = prefs.getString('server_url') ?? serverUrl;
-      if (serverUrl == 'http://localhost:3000') {
-        serverUrl = 'http://localhost:4000';
+      if (serverUrl == 'http://localhost:3000' || serverUrl == 'http://localhost:4000') {
+        serverUrl = 'http://localhost:4001';
       }
 
       final usersJson = prefs.getString('users_json');
@@ -1549,7 +1694,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(65),
         stock: 24,
         lowStockThreshold: 10,
-        icon: Icons.water_drop_outlined,
+        icon: AppIcons.waterDrop,
         tint: const Color(0xFFE9F2FF),
       ),
       PosProduct(
@@ -1560,7 +1705,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(75),
         stock: 18,
         lowStockThreshold: 8,
-        icon: Icons.bakery_dining_outlined,
+        icon: AppIcons.bakery,
         tint: const Color(0xFFFFF3DF),
       ),
       PosProduct(
@@ -1571,7 +1716,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(480),
         stock: 8,
         lowStockThreshold: 10,
-        icon: Icons.egg_alt_outlined,
+        icon: AppIcons.egg,
         tint: const Color(0xFFFFF1D6),
       ),
       PosProduct(
@@ -1582,7 +1727,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(185),
         stock: 31,
         lowStockThreshold: 12,
-        icon: Icons.grain,
+        icon: AppIcons.grain,
         tint: const Color(0xFFEAF5E9),
       ),
       PosProduct(
@@ -1593,7 +1738,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(120),
         stock: 14,
         lowStockThreshold: 6,
-        icon: Icons.spa_outlined,
+        icon: AppIcons.beauty,
         tint: const Color(0xFFFFE9E5),
       ),
       PosProduct(
@@ -1604,7 +1749,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(55),
         stock: 16,
         lowStockThreshold: 10,
-        icon: Icons.icecream_outlined,
+        icon: AppIcons.iceCream,
         tint: const Color(0xFFF3EAFE),
       ),
       PosProduct(
@@ -1615,7 +1760,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(320),
         stock: 5,
         lowStockThreshold: 10,
-        icon: Icons.oil_barrel_outlined,
+        icon: AppIcons.oil,
         tint: const Color(0xFFFFF5D9),
       ),
       PosProduct(
@@ -1626,7 +1771,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(90),
         stock: 20,
         lowStockThreshold: 8,
-        icon: Icons.eco_outlined,
+        icon: AppIcons.produce,
         tint: const Color(0xFFF4F5D9),
       ),
       PosProduct(
@@ -1637,7 +1782,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(260),
         stock: 12,
         lowStockThreshold: 6,
-        icon: Icons.local_drink_outlined,
+        icon: AppIcons.drink,
         tint: const Color(0xFFE5F7ED),
       ),
       PosProduct(
@@ -1648,7 +1793,7 @@ class PosState extends ChangeNotifier {
         unitPrice: const Money.shillings(390),
         stock: 19,
         lowStockThreshold: 8,
-        icon: Icons.rice_bowl_outlined,
+        icon: AppIcons.rice,
         tint: const Color(0xFFF0FDF4),
       ),
     ];
@@ -1667,141 +1812,15 @@ class PosState extends ChangeNotifier {
     } else {
       products = <PosProduct>[];
     }
-    customers = [
-      PosCustomer(
-        id: 'cust_1',
-        name: 'Mama Oliech Kitchen',
-        phone: '+254 722 102 304',
-        creditLimit: const Money.shillings(25000),
-        currentBalance: const Money.shillings(4200),
-        history: [
-          CustomerLedgerEntry(
-            id: 'led_1',
-            timestamp: DateTime.now().subtract(const Duration(days: 2)),
-            type: LedgerEntryType.saleDebit,
-            amount: const Money.shillings(5200),
-            reference: 'RCP-2026-1039',
-            runningBalance: const Money.shillings(5200),
-          ),
-          CustomerLedgerEntry(
-            id: 'led_2',
-            timestamp: DateTime.now().subtract(const Duration(days: 1)),
-            type: LedgerEntryType.paymentCredit,
-            amount: const Money.shillings(1000),
-            reference: 'MPESA: QCG928A81K',
-            runningBalance: const Money.shillings(4200),
-          ),
-        ],
-      ),
-      PosCustomer(
-        id: 'cust_2',
-        name: 'Kariuki Hardware Supplies',
-        phone: '+254 733 456 789',
-        creditLimit: const Money.shillings(40000),
-        currentBalance: const Money.shillings(12500),
-        history: [
-          CustomerLedgerEntry(
-            id: 'led_3',
-            timestamp: DateTime.now().subtract(const Duration(days: 3)),
-            type: LedgerEntryType.saleDebit,
-            amount: const Money.shillings(12500),
-            reference: 'RCP-2026-1025',
-            runningBalance: const Money.shillings(12500),
-          ),
-        ],
-      ),
-      PosCustomer(
-        id: 'cust_3',
-        name: 'Teacher Wanjiku',
-        phone: '+254 710 987 654',
-        creditLimit: const Money.shillings(10000),
-        currentBalance: const Money.shillings(850),
-        history: [
-          CustomerLedgerEntry(
-            id: 'led_4',
-            timestamp: DateTime.now().subtract(const Duration(hours: 18)),
-            type: LedgerEntryType.saleDebit,
-            amount: const Money.shillings(850),
-            reference: 'RCP-2026-1040',
-            runningBalance: const Money.shillings(850),
-          ),
-        ],
-      ),
-    ];
+    customers = [];
 
-    sales = [
-      SaleRecord(
-        receiptNumber: 'RCP-2026-1040',
-        timestamp: DateTime.now().subtract(const Duration(hours: 1, minutes: 24)),
-        cashier: activeCashier,
-        items: [
-          SaleRecordItem(
-            productId: 'prod_1',
-            productName: 'Fresh milk 500ml',
-            unitPrice: const Money.shillings(65),
-            quantity: 2,
-            lineTotal: const Money.shillings(130),
-          ),
-          SaleRecordItem(
-            productId: 'prod_4',
-            productName: 'Supa maize flour 2kg',
-            unitPrice: const Money.shillings(185),
-            quantity: 1,
-            lineTotal: const Money.shillings(185),
-          ),
-        ],
-        subtotal: const Money.shillings(315),
-        vatAmount: const Money.shillings(315).vatIncludedAt(defaultVatRateBasisPoints),
-        paymentMethod: SalePaymentMethod.mpesa,
-        paymentReference: 'MPESA: QDH189XP01',
-      ),
-      SaleRecord(
-        receiptNumber: 'RCP-2026-1041',
-        timestamp: DateTime.now().subtract(const Duration(minutes: 42)),
-        cashier: activeCashier,
-        items: [
-          SaleRecordItem(
-            productId: 'prod_7',
-            productName: 'Cooking oil 1L bottle',
-            unitPrice: const Money.shillings(320),
-            quantity: 1,
-            lineTotal: const Money.shillings(320),
-          ),
-          SaleRecordItem(
-            productId: 'prod_2',
-            productName: 'White bread 400g',
-            unitPrice: const Money.shillings(75),
-            quantity: 2,
-            lineTotal: const Money.shillings(150),
-          ),
-        ],
-        subtotal: const Money.shillings(470),
-        vatAmount: const Money.shillings(470).vatIncludedAt(defaultVatRateBasisPoints),
-        paymentMethod: SalePaymentMethod.cash,
-        paymentReference: 'CASH',
-        cashTendered: const Money.shillings(500),
-        changeDue: const Money.shillings(30),
-      ),
-    ];
+    sales = [];
 
     shift = CashShift(
       shiftId: 'SHIFT-20261006-01',
       openedAt: DateTime.now().subtract(const Duration(hours: 4)),
       openingFloat: const Money.shillings(5000),
       cashier: activeCashier,
-    );
-
-    // Record the past cash sale in the shift
-    shift.cashSales = shift.cashSales + const Money.shillings(470);
-    shift.movements.add(
-      CashMovement(
-        id: 'mov_sale_1041',
-        timestamp: DateTime.now().subtract(const Duration(minutes: 42)),
-        type: CashMovementType.saleCash,
-        amount: const Money.shillings(470),
-        reason: 'Sale RCP-2026-1041',
-        cashier: activeCashier,
-      ),
     );
   }
 
