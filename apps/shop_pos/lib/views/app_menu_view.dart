@@ -13,14 +13,35 @@ class AppMenuView extends StatelessWidget {
   final ValueChanged<int> onSelectTab;
 
   static const _apps = <_WorkspaceApp>[
-    _WorkspaceApp(0, 'Point of Sale', Icons.point_of_sale_rounded, Color(0xFF0D9488)),
+    _WorkspaceApp(
+      0,
+      'Point of Sale',
+      Icons.point_of_sale_rounded,
+      Color(0xFF0D9488),
+    ),
     _WorkspaceApp(1, 'Sales', Icons.receipt_long_rounded, Color(0xFF2563EB)),
     _WorkspaceApp(2, 'Inventory', Icons.inventory_2_rounded, Color(0xFFEA8A24)),
-    _WorkspaceApp(3, 'Customers & Credit', Icons.people_alt_rounded, Color(0xFF7C3AED)),
-    _WorkspaceApp(4, 'Cash Drawer', Icons.account_balance_wallet_rounded, Color(0xFF16A34A)),
+    _WorkspaceApp(
+      3,
+      'Customers & Credit',
+      Icons.people_alt_rounded,
+      Color(0xFF7C3AED),
+    ),
+    _WorkspaceApp(
+      4,
+      'Cash Drawer',
+      Icons.account_balance_wallet_rounded,
+      Color(0xFF16A34A),
+    ),
     _WorkspaceApp(5, 'Reports', Icons.bar_chart_rounded, Color(0xFF4F46E5)),
     _WorkspaceApp(6, 'Settings', Icons.settings_rounded, Color(0xFF475569)),
     _WorkspaceApp(7, 'Orders', Icons.local_shipping_rounded, Color(0xFFEA580C)),
+    _WorkspaceApp(
+      8,
+      'Staff Management',
+      Icons.manage_accounts_rounded,
+      Color(0xFF0D9488),
+    ),
   ];
 
   @override
@@ -123,7 +144,11 @@ class _AppLauncherTile extends StatelessWidget {
                     ],
                   ),
                   child: Center(
-                    child: Icon(app.icon, size: iconSize * 0.52, color: app.color),
+                    child: Icon(
+                      app.icon,
+                      size: iconSize * 0.52,
+                      color: app.color,
+                    ),
                   ),
                 ),
                 const SizedBox(height: 10),

@@ -16,6 +16,7 @@ import 'views/login_view.dart';
 import 'views/reports_view.dart';
 import 'views/settings_view.dart';
 import 'views/purchase_orders_view.dart';
+import 'views/staff_management_view.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +29,8 @@ void main() async {
   );
   ApiService.instance.configure(state.serverUrl);
   if (state.currentLoggedInUser != null) {
-    state.catalogueSyncMessage = 'Local-only mode: lock the till and re-enter your PIN to sync the shop catalogue.';
+    state.catalogueSyncMessage =
+        'Local-only mode: lock the till and re-enter your PIN to sync the shop catalogue.';
   }
   runApp(RetailPosApp(state: state));
 }
@@ -68,7 +70,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isLocked = widget.state.currentLoggedInUser == null;
-    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 7);
+    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 8);
     _startInactivityTimer();
   }
 
@@ -82,11 +84,14 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   void _startInactivityTimer() {
     _inactivityTimer?.cancel();
     if (!_isLocked) {
-      _inactivityTimer = Timer(const Duration(minutes: PosState.sessionTimeoutMinutes), () {
-        if (mounted && !_isLocked) {
-          _lockTill();
-        }
-      });
+      _inactivityTimer = Timer(
+        const Duration(minutes: PosState.sessionTimeoutMinutes),
+        () {
+          if (mounted && !_isLocked) {
+            _lockTill();
+          }
+        },
+      );
     }
   }
 
@@ -106,8 +111,9 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   Set<int> _accessibleTabs(PosUser? user) {
     if (user == null) return const <int>{};
     return switch (user.role) {
-      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7},
-      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7},
+      PosUserRole.owner ||
+      PosUserRole.systemAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7},
+      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8},
       PosUserRole.cashier => const <int>{0, 1, 4},
       PosUserRole.stockClerk => const <int>{2, 7},
     };
@@ -117,7 +123,11 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     final user = widget.state.currentLoggedInUser;
     if (!_accessibleTabs(user).contains(index)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Your staff role does not have access to that section.')),
+        const SnackBar(
+          content: Text(
+            'Your staff role does not have access to that section.',
+          ),
+        ),
       );
       return;
     }
@@ -126,7 +136,11 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     _onUserInteraction();
   }
 
-  void _showMoreSheet(BuildContext context, PosUser? currentUser, Set<int> allowedTabs) {
+  void _showMoreSheet(
+    BuildContext context,
+    PosUser? currentUser,
+    Set<int> allowedTabs,
+  ) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
@@ -156,7 +170,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                         backgroundColor: AppColors.accent_light,
                         child: Text(
                           currentUser?.initials ?? 'JM',
-                          style: const TextStyle(color: AppColors.accent_primary, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            color: AppColors.accent_primary,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -165,23 +182,48 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              currentUser?.fullName ?? widget.state.activeCashier,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: AppColors.text_primary),
+                              currentUser?.fullName ??
+                                  widget.state.activeCashier,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                                color: AppColors.text_primary,
+                              ),
                             ),
                             Text(
                               currentUser?.roleDisplay ?? 'Staff',
-                              style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                color: AppColors.text_tertiary,
+                              ),
                             ),
                           ],
                         ),
                       ),
                       OutlinedButton.icon(
-                        icon: const Icon(Icons.lock_outline, size: 14, color: AppColors.status_danger),
-                        label: const Text('Lock', style: TextStyle(color: AppColors.status_danger, fontSize: 12)),
+                        icon: const Icon(
+                          Icons.lock_outline,
+                          size: 14,
+                          color: AppColors.status_danger,
+                        ),
+                        label: const Text(
+                          'Lock',
+                          style: TextStyle(
+                            color: AppColors.status_danger,
+                            fontSize: 12,
+                          ),
+                        ),
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: AppColors.status_danger),
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          side: const BorderSide(
+                            color: AppColors.status_danger,
+                          ),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 10,
+                            vertical: 8,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
                         onPressed: () {
                           Navigator.pop(ctx);
@@ -192,12 +234,51 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text('More Operations', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.text_tertiary, letterSpacing: 0.5)),
+                const Text(
+                  'More Operations',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.text_tertiary,
+                    letterSpacing: 0.5,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                if (allowedTabs.contains(7)) _moreTile(Icons.local_shipping_outlined, 'Purchase & Supplier Orders', 7, ctx),
-                if (allowedTabs.contains(4)) _moreTile(Icons.account_balance_wallet_outlined, 'Cash Drawer & Shifts', 4, ctx),
-                if (allowedTabs.contains(5)) _moreTile(Icons.analytics_outlined, 'Reports & Analytics', 5, ctx),
-                if (allowedTabs.contains(6)) _moreTile(Icons.settings_outlined, 'Settings & Hardware', 6, ctx),
+                if (allowedTabs.contains(7))
+                  _moreTile(
+                    Icons.local_shipping_outlined,
+                    'Purchase & Supplier Orders',
+                    7,
+                    ctx,
+                  ),
+                if (allowedTabs.contains(4))
+                  _moreTile(
+                    Icons.account_balance_wallet_outlined,
+                    'Cash Drawer & Shifts',
+                    4,
+                    ctx,
+                  ),
+                if (allowedTabs.contains(5))
+                  _moreTile(
+                    Icons.analytics_outlined,
+                    'Reports & Analytics',
+                    5,
+                    ctx,
+                  ),
+                if (allowedTabs.contains(6))
+                  _moreTile(
+                    Icons.settings_outlined,
+                    'Settings & Hardware',
+                    6,
+                    ctx,
+                  ),
+                if (allowedTabs.contains(8))
+                  _moreTile(
+                    Icons.manage_accounts_outlined,
+                    'Staff Management',
+                    8,
+                    ctx,
+                  ),
               ],
             ),
           ),
@@ -206,11 +287,23 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     );
   }
 
-  Widget _moreTile(IconData icon, String title, int tabIndex, BuildContext ctx) {
+  Widget _moreTile(
+    IconData icon,
+    String title,
+    int tabIndex,
+    BuildContext ctx,
+  ) {
     return ListTile(
       leading: Icon(icon, color: AppColors.accent_primary),
-      title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-      trailing: const Icon(Icons.chevron_right, size: 18, color: AppColors.text_tertiary),
+      title: Text(
+        title,
+        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+      ),
+      trailing: const Icon(
+        Icons.chevron_right,
+        size: 18,
+        color: AppColors.text_tertiary,
+      ),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       onTap: () {
         Navigator.pop(ctx);
@@ -227,9 +320,16 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: const [
-            Icon(Icons.cloud_sync_outlined, color: AppColors.accent_primary, size: 24),
+            Icon(
+              Icons.cloud_sync_outlined,
+              color: AppColors.accent_primary,
+              size: 24,
+            ),
             SizedBox(width: 10),
-            Text('Offline & Cloud Sync Status', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+            Text(
+              'Offline & Cloud Sync Status',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: SizedBox(
@@ -247,12 +347,20 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                 ),
                 child: Row(
                   children: const [
-                    Icon(Icons.check_circle, color: AppColors.status_success, size: 20),
+                    Icon(
+                      Icons.check_circle,
+                      color: AppColors.status_success,
+                      size: 20,
+                    ),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'System Operational · Local-First Offline Mode Enabled',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF166534)),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF166534),
+                        ),
                       ),
                     ),
                   ],
@@ -261,27 +369,40 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
               const SizedBox(height: 16),
               _diagRow('Local Storage DB', 'Synchronized & Persistent (OK)'),
               _diagRow('Pending Sync Queue', '0 transactions pending upload'),
-              _diagRow('Active Till Shift', 'Shift ID: ${widget.state.shift.shiftId}'),
-              _diagRow('Total Cached Products', '${widget.state.products.length} catalog items'),
+              _diagRow(
+                'Active Till Shift',
+                'Shift ID: ${widget.state.shift.shiftId}',
+              ),
+              _diagRow(
+                'Total Cached Products',
+                '${widget.state.products.length} catalog items',
+              ),
               _diagRow('Cloud Server Host', widget.state.serverUrl),
               _diagRow('Last Heartbeat', 'Just now (0s ago)'),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Close'),
+          ),
           FilledButton.icon(
             icon: const Icon(Icons.sync, size: 16),
             label: const Text('Force Cloud Resync'),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.accent_primary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
             onPressed: () {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
                 const SnackBar(
-                  content: Text('All local transactions and shift data synchronized with cloud server!'),
+                  content: Text(
+                    'All local transactions and shift data synchronized with cloud server!',
+                  ),
                   backgroundColor: AppColors.status_success,
                 ),
               );
@@ -298,8 +419,21 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: const TextStyle(fontSize: 12, color: AppColors.text_secondary)),
-          Text(value, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.text_primary)),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: AppColors.text_secondary,
+            ),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.text_primary,
+            ),
+          ),
         ],
       ),
     );
@@ -313,7 +447,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         onAuthenticated: () {
           final user = widget.state.currentLoggedInUser;
           final allowedTabs = _accessibleTabs(user);
-          if (!allowedTabs.contains(_activeTabIndex) && allowedTabs.isNotEmpty) {
+          if (!allowedTabs.contains(_activeTabIndex) &&
+              allowedTabs.isNotEmpty) {
             _activeTabIndex = allowedTabs.first;
           }
           widget.state.persistSession(user, tabIndex: _activeTabIndex);
@@ -331,7 +466,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         builder: (context, _) {
           final currentUser = widget.state.currentLoggedInUser;
           final allowedTabs = _accessibleTabs(currentUser);
-          if (!allowedTabs.contains(_activeTabIndex) && allowedTabs.isNotEmpty) {
+          if (!allowedTabs.contains(_activeTabIndex) &&
+              allowedTabs.isNotEmpty) {
             _activeTabIndex = allowedTabs.first;
           }
           final screenWidth = MediaQuery.sizeOf(context).width;
@@ -349,16 +485,14 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             ReportsView(state: widget.state),
             SettingsView(state: widget.state),
             PurchaseOrdersView(state: widget.state),
+            StaffManagementView(state: widget.state),
           ];
 
           if (isMobile) {
             return Scaffold(
               body: SafeArea(
                 bottom: false,
-                child: IndexedStack(
-                  index: _activeTabIndex,
-                  children: views,
-                ),
+                child: IndexedStack(index: _activeTabIndex, children: views),
               ),
               bottomNavigationBar: _MobileBottomNav(
                 activeIndex: _activeTabIndex,
@@ -368,7 +502,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                   _onUserInteraction();
                   _showMoreSheet(context, currentUser, allowedTabs);
                 },
-                activeCashier: currentUser?.fullName ?? widget.state.activeCashier,
+                activeCashier:
+                    currentUser?.fullName ?? widget.state.activeCashier,
               ),
             );
           }
@@ -386,7 +521,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                     _onUserInteraction();
                     _showSyncDiagnostics(context);
                   },
-                  activeCashier: currentUser?.fullName ?? widget.state.activeCashier,
+                  activeCashier:
+                      currentUser?.fullName ?? widget.state.activeCashier,
                   roleDisplay: currentUser?.roleDisplay ?? 'Staff',
                   initials: currentUser?.initials,
                   logoBase64: widget.state.brandLogoBase64,
@@ -400,10 +536,16 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                     switchInCurve: Curves.easeOutCubic,
                     switchOutCurve: Curves.easeIn,
                     transitionBuilder: (child, animation) {
-                      final offset = Tween<Offset>(
-                        begin: const Offset(0.02, 0),
-                        end: Offset.zero,
-                      ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOutCubic));
+                      final offset =
+                          Tween<Offset>(
+                            begin: const Offset(0.02, 0),
+                            end: Offset.zero,
+                          ).animate(
+                            CurvedAnimation(
+                              parent: animation,
+                              curve: Curves.easeOutCubic,
+                            ),
+                          );
                       return FadeTransition(
                         opacity: animation,
                         child: SlideTransition(position: offset, child: child),
@@ -482,7 +624,13 @@ class _MobileBottomNav extends StatelessWidget {
                   activeIndex == tab,
                   () => onSelectTab(tab),
                 ),
-              _mobileNavItem(Icons.menu_rounded, 'More', 4, isMoreActive, onOpenMore),
+              _mobileNavItem(
+                Icons.menu_rounded,
+                'More',
+                4,
+                isMoreActive,
+                onOpenMore,
+              ),
             ],
           ),
         ),
@@ -490,7 +638,13 @@ class _MobileBottomNav extends StatelessWidget {
     );
   }
 
-  Widget _mobileNavItem(IconData icon, String label, int index, bool isSelected, VoidCallback onTap) {
+  Widget _mobileNavItem(
+    IconData icon,
+    String label,
+    int index,
+    bool isSelected,
+    VoidCallback onTap,
+  ) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -502,7 +656,9 @@ class _MobileBottomNav extends StatelessWidget {
             Icon(
               icon,
               size: 22,
-              color: isSelected ? AppColors.accent_primary : AppColors.text_tertiary,
+              color: isSelected
+                  ? AppColors.accent_primary
+                  : AppColors.text_tertiary,
             ),
             const SizedBox(height: 3),
             Text(
@@ -510,7 +666,9 @@ class _MobileBottomNav extends StatelessWidget {
               style: TextStyle(
                 fontSize: 10.5,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                color: isSelected ? AppColors.accent_primary : AppColors.text_tertiary,
+                color: isSelected
+                    ? AppColors.accent_primary
+                    : AppColors.text_tertiary,
               ),
             ),
           ],
@@ -563,7 +721,8 @@ class _NavigationSidebar extends StatelessWidget {
         fit: BoxFit.contain,
         width: 44,
         height: 44,
-        errorBuilder: (_, __, ___) => const Icon(Icons.storefront, color: Colors.white, size: 24),
+        errorBuilder: (_, __, ___) =>
+            const Icon(Icons.storefront, color: Colors.white, size: 24),
       );
     }
     return const Icon(Icons.storefront, color: Colors.white, size: 24);
@@ -600,9 +759,14 @@ class _NavigationSidebar extends StatelessWidget {
             (tab: 2, icon: Icons.inventory_2_outlined, label: 'Stock'),
             (tab: 7, icon: Icons.local_shipping_outlined, label: 'Orders'),
             (tab: 3, icon: Icons.people_outline, label: 'Credit'),
-            (tab: 4, icon: Icons.account_balance_wallet_outlined, label: 'Till'),
+            (
+              tab: 4,
+              icon: Icons.account_balance_wallet_outlined,
+              label: 'Till',
+            ),
             (tab: 5, icon: Icons.analytics_outlined, label: 'Reports'),
             (tab: 6, icon: Icons.settings_outlined, label: 'Settings'),
+            (tab: 8, icon: Icons.manage_accounts_outlined, label: 'Staff'),
           ])
             if (visibleTabs.contains(item.tab))
               _NavIcon(
@@ -630,7 +794,11 @@ class _NavigationSidebar extends StatelessWidget {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(Icons.cloud_done_outlined, color: AppColors.status_success, size: 18),
+                    child: Icon(
+                      Icons.cloud_done_outlined,
+                      color: AppColors.status_success,
+                      size: 18,
+                    ),
                   ),
                 ),
               ),
@@ -643,7 +811,11 @@ class _NavigationSidebar extends StatelessWidget {
             child: Tooltip(
               message: 'Lock Till',
               child: IconButton(
-                icon: const Icon(Icons.lock_outline, color: AppColors.text_tertiary, size: 20),
+                icon: const Icon(
+                  Icons.lock_outline,
+                  color: AppColors.text_tertiary,
+                  size: 20,
+                ),
                 onPressed: onLockTill,
               ),
             ),
@@ -653,7 +825,8 @@ class _NavigationSidebar extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.only(bottom: 18),
             child: Tooltip(
-              message: '$activeCashier • ${roleDisplay ?? 'Staff'} (Tap to lock)',
+              message:
+                  '$activeCashier • ${roleDisplay ?? 'Staff'} (Tap to lock)',
               child: InkWell(
                 onTap: onLockTill,
                 borderRadius: BorderRadius.circular(18),
@@ -661,8 +834,15 @@ class _NavigationSidebar extends StatelessWidget {
                   radius: 18,
                   backgroundColor: AppColors.accent_light,
                   child: Text(
-                    initials ?? (activeCashier.isNotEmpty ? activeCashier.substring(0, 2).toUpperCase() : 'JM'),
-                    style: const TextStyle(color: AppColors.accent_primary, fontSize: 11, fontWeight: FontWeight.bold),
+                    initials ??
+                        (activeCashier.isNotEmpty
+                            ? activeCashier.substring(0, 2).toUpperCase()
+                            : 'JM'),
+                    style: const TextStyle(
+                      color: AppColors.accent_primary,
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
@@ -702,14 +882,21 @@ class _NavIcon extends StatelessWidget {
             decoration: BoxDecoration(
               color: isSelected ? AppColors.accent_light : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
-              border: isSelected ? Border.all(color: AppColors.accent_primary.withValues(alpha: 0.3), width: 1) : null,
+              border: isSelected
+                  ? Border.all(
+                      color: AppColors.accent_primary.withValues(alpha: 0.3),
+                      width: 1,
+                    )
+                  : null,
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Icon(
                   icon,
-                  color: isSelected ? AppColors.accent_primary : AppColors.text_tertiary,
+                  color: isSelected
+                      ? AppColors.accent_primary
+                      : AppColors.text_tertiary,
                   size: 20,
                 ),
                 const SizedBox(height: 2),
@@ -718,7 +905,9 @@ class _NavIcon extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 9.5,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                    color: isSelected ? AppColors.accent_primary : AppColors.text_tertiary,
+                    color: isSelected
+                        ? AppColors.accent_primary
+                        : AppColors.text_tertiary,
                   ),
                 ),
               ],
@@ -731,10 +920,7 @@ class _NavIcon extends StatelessWidget {
 }
 
 class _PosTerminalView extends StatefulWidget {
-  const _PosTerminalView({
-    required this.state,
-    required this.onOpenSync,
-  });
+  const _PosTerminalView({required this.state, required this.onOpenSync});
 
   final PosState state;
   final VoidCallback onOpenSync;
@@ -755,13 +941,19 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
     super.dispose();
   }
 
-  List<String> get _categories => ['All items', ...{for (final p in widget.state.products) p.category}];
+  List<String> get _categories => [
+    'All items',
+    ...{for (final p in widget.state.products) p.category},
+  ];
 
   List<PosProduct> get _visibleProducts => widget.state.products.where((p) {
-        final matchesCategory = _category == 'All items' || p.category == _category;
-        final query = _search.text.trim().toLowerCase();
-        return matchesCategory && (query.isEmpty || p.name.toLowerCase().contains(query) || p.sku.toLowerCase().contains(query));
-      }).toList();
+    final matchesCategory = _category == 'All items' || p.category == _category;
+    final query = _search.text.trim().toLowerCase();
+    return matchesCategory &&
+        (query.isEmpty ||
+            p.name.toLowerCase().contains(query) ||
+            p.sku.toLowerCase().contains(query));
+  }).toList();
 
   int _qtyInCart(String productId) {
     for (final line in widget.state.cart.lines) {
@@ -787,9 +979,13 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
 
   void _onCheckout() {
     if (widget.state.cart.isEmpty) return;
-    CheckoutModal.show(context, widget.state, onSaleCompleted: () {
-      setState(() {});
-    });
+    CheckoutModal.show(
+      context,
+      widget.state,
+      onSaleCompleted: () {
+        setState(() {});
+      },
+    );
   }
 
   void _handleQuickBarcode(String query) {
@@ -797,11 +993,12 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
     if (clean.isEmpty) return;
 
     final product = widget.state.products.cast<PosProduct?>().firstWhere(
-      (p) => p != null && (
-        p.sku.toLowerCase() == clean.toLowerCase() ||
-        (p.barcode != null && p.barcode!.toLowerCase() == clean.toLowerCase()) ||
-        p.name.toLowerCase().contains(clean.toLowerCase())
-      ),
+      (p) =>
+          p != null &&
+          (p.sku.toLowerCase() == clean.toLowerCase() ||
+              (p.barcode != null &&
+                  p.barcode!.toLowerCase() == clean.toLowerCase()) ||
+              p.name.toLowerCase().contains(clean.toLowerCase())),
       orElse: () => null,
     );
 
@@ -841,7 +1038,14 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
           children: const [
             Icon(Icons.qr_code_scanner, color: AppColors.accent_primary),
             SizedBox(width: 10),
-            Text('Barcode Scanner Wedge', style: TextStyle(color: AppColors.text_primary, fontSize: 18, fontWeight: FontWeight.bold)),
+            Text(
+              'Barcode Scanner Wedge',
+              style: TextStyle(
+                color: AppColors.text_primary,
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
           ],
         ),
         content: SizedBox(
@@ -856,15 +1060,28 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                 decoration: BoxDecoration(
                   color: AppColors.accent_light,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: AppColors.accent_primary.withValues(alpha: 0.3)),
+                  border: Border.all(
+                    color: AppColors.accent_primary.withValues(alpha: 0.3),
+                  ),
                 ),
                 child: Center(
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: const [
-                      Icon(Icons.qr_code_2, size: 30, color: AppColors.accent_primary),
+                      Icon(
+                        Icons.qr_code_2,
+                        size: 30,
+                        color: AppColors.accent_primary,
+                      ),
                       SizedBox(width: 12),
-                      Text('Ready to scan • USB HID Wedge Active', style: TextStyle(color: AppColors.accent_primary, fontSize: 13, fontWeight: FontWeight.w600)),
+                      Text(
+                        'Ready to scan • USB HID Wedge Active',
+                        style: TextStyle(
+                          color: AppColors.accent_primary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -881,10 +1098,15 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                   fillColor: AppColors.bg_subtle,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
-                    borderSide: const BorderSide(color: AppColors.border_subtle),
+                    borderSide: const BorderSide(
+                      color: AppColors.border_subtle,
+                    ),
                   ),
                   suffixIcon: IconButton(
-                    icon: const Icon(Icons.arrow_forward, color: AppColors.accent_primary),
+                    icon: const Icon(
+                      Icons.arrow_forward,
+                      color: AppColors.accent_primary,
+                    ),
                     onPressed: () {
                       _handleQuickBarcode(barcodeController.text);
                       Navigator.pop(ctx);
@@ -897,7 +1119,10 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                 },
               ),
               const SizedBox(height: 16),
-              const Text('Quick Test Barcodes:', style: TextStyle(color: AppColors.text_tertiary, fontSize: 12)),
+              const Text(
+                'Quick Test Barcodes:',
+                style: TextStyle(color: AppColors.text_tertiary, fontSize: 12),
+              ),
               const SizedBox(height: 8),
               Wrap(
                 spacing: 8,
@@ -906,7 +1131,14 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                   return ActionChip(
                     backgroundColor: AppColors.bg_subtle,
                     side: const BorderSide(color: AppColors.border_subtle),
-                    label: Text('${p.sku} (${p.name})', style: const TextStyle(color: AppColors.accent_primary, fontSize: 11, fontWeight: FontWeight.w600)),
+                    label: Text(
+                      '${p.sku} (${p.name})',
+                      style: const TextStyle(
+                        color: AppColors.accent_primary,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                     onPressed: () {
                       _handleQuickBarcode(p.sku);
                       Navigator.pop(ctx);
@@ -920,7 +1152,10 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: AppColors.text_secondary)),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: AppColors.text_secondary),
+            ),
           ),
         ],
       ),
@@ -997,7 +1232,9 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                   children: [
                     Positioned.fill(
                       child: Padding(
-                        padding: EdgeInsets.only(bottom: cart.isNotEmpty ? 70 : 0),
+                        padding: EdgeInsets.only(
+                          bottom: cart.isNotEmpty ? 70 : 0,
+                        ),
                         child: catalog,
                       ),
                     ),
@@ -1069,7 +1306,11 @@ class _TopBar extends StatelessWidget {
                 Flexible(
                   child: Text(
                     branchName,
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.text_primary),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                      color: AppColors.text_primary,
+                    ),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
@@ -1079,7 +1320,10 @@ class _TopBar extends StatelessWidget {
                   onTap: onOpenSync,
                   borderRadius: BorderRadius.circular(12),
                   child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: const Color(0xFFF0FDF4),
                       borderRadius: BorderRadius.circular(12),
@@ -1088,11 +1332,19 @@ class _TopBar extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: const [
-                        CircleAvatar(radius: 3, backgroundColor: AppColors.status_success),
+                        CircleAvatar(
+                          radius: 3,
+                          backgroundColor: AppColors.status_success,
+                        ),
                         SizedBox(width: 4),
                         Text(
                           'ONLINE',
-                          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: AppColors.status_success, letterSpacing: 0.5),
+                          style: TextStyle(
+                            fontSize: 9,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.status_success,
+                            letterSpacing: 0.5,
+                          ),
                         ),
                       ],
                     ),
@@ -1109,17 +1361,35 @@ class _TopBar extends StatelessWidget {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
               decoration: BoxDecoration(
-                color: itemCount > 0 ? AppColors.accent_light : AppColors.bg_canvas,
+                color: itemCount > 0
+                    ? AppColors.accent_light
+                    : AppColors.bg_canvas,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: itemCount > 0 ? AppColors.accent_primary.withValues(alpha: 0.3) : AppColors.border_subtle),
+                border: Border.all(
+                  color: itemCount > 0
+                      ? AppColors.accent_primary.withValues(alpha: 0.3)
+                      : AppColors.border_subtle,
+                ),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.shopping_bag_outlined, size: 16, color: itemCount > 0 ? AppColors.accent_primary : AppColors.text_secondary),
+                  Icon(
+                    Icons.shopping_bag_outlined,
+                    size: 16,
+                    color: itemCount > 0
+                        ? AppColors.accent_primary
+                        : AppColors.text_secondary,
+                  ),
                   const SizedBox(width: 6),
                   Text(
                     '$itemCount units',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: itemCount > 0 ? AppColors.accent_primary : AppColors.text_primary),
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: itemCount > 0
+                          ? AppColors.accent_primary
+                          : AppColors.text_primary,
+                    ),
                   ),
                 ],
               ),
@@ -1173,7 +1443,11 @@ class _MobileCartBanner extends StatelessWidget {
                   color: AppColors.accent_primary,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 20),
+                child: const Icon(
+                  Icons.shopping_bag_outlined,
+                  color: Colors.white,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 12),
               Column(
@@ -1182,11 +1456,19 @@ class _MobileCartBanner extends StatelessWidget {
                 children: [
                   Text(
                     '${cart.itemCount} ${cart.itemCount == 1 ? "item" : "items"} in basket',
-                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontWeight: FontWeight.w500),
+                    style: const TextStyle(
+                      color: Color(0xFF94A3B8),
+                      fontSize: 11,
+                      fontWeight: FontWeight.w500,
+                    ),
                   ),
                   Text(
                     'KES ${cart.subtotal.formatted}',
-                    style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w800),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ],
               ),
@@ -1198,8 +1480,13 @@ class _MobileCartBanner extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accent_primary,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
             ],
@@ -1267,10 +1554,21 @@ class _Catalog extends StatelessWidget {
                         prefixIcon: const Icon(Icons.search, size: 18),
                         filled: true,
                         fillColor: Colors.white,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                        ),
                         suffixIcon: IconButton(
-                          icon: const Icon(Icons.qr_code_scanner, color: AppColors.accent_primary),
+                          icon: const Icon(
+                            Icons.qr_code_scanner,
+                            color: AppColors.accent_primary,
+                          ),
                           onPressed: onScan,
                         ),
                       ),
@@ -1291,8 +1589,16 @@ class _Catalog extends StatelessWidget {
                         prefixIcon: const Icon(Icons.search, size: 20),
                         filled: true,
                         fillColor: Colors.white,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1305,13 +1611,29 @@ class _Catalog extends StatelessWidget {
                       onSubmitted: onBarcodeSubmit,
                       decoration: InputDecoration(
                         hintText: 'Direct Barcode / Scan...',
-                        prefixIcon: const Icon(Icons.barcode_reader, size: 18, color: AppColors.accent_primary),
+                        prefixIcon: const Icon(
+                          Icons.barcode_reader,
+                          size: 18,
+                          color: AppColors.accent_primary,
+                        ),
                         filled: true,
                         fillColor: Colors.white,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 12,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                        ),
                         suffixIcon: IconButton(
-                          icon: const Icon(Icons.add_shopping_cart, size: 18, color: AppColors.accent_primary),
+                          icon: const Icon(
+                            Icons.add_shopping_cart,
+                            size: 18,
+                            color: AppColors.accent_primary,
+                          ),
                           onPressed: () => onBarcodeSubmit(barcodeInput.text),
                         ),
                       ),
@@ -1323,8 +1645,13 @@ class _Catalog extends StatelessWidget {
                     label: const Text('HID Wedge'),
                     onPressed: onScan,
                     style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 14,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                   ),
                 ],
@@ -1339,7 +1666,10 @@ class _Catalog extends StatelessWidget {
             child: Row(
               children: [
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFFEF3C7),
                     borderRadius: BorderRadius.circular(6),
@@ -1348,22 +1678,39 @@ class _Catalog extends StatelessWidget {
                     children: [
                       Icon(Icons.bolt, size: 14, color: Color(0xFFD97706)),
                       SizedBox(width: 4),
-                      Text('Fast Picks:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF92400E))),
+                      Text(
+                        'Fast Picks:',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: Color(0xFF92400E),
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 8),
-                ...fastMoving.map((p) => Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: ActionChip(
-                    avatar: Icon(p.icon, size: 14, color: AppColors.accent_primary),
-                    label: Text('${p.name} (KES ${p.unitPrice.formatted})'),
-                    backgroundColor: Colors.white,
-                    side: const BorderSide(color: AppColors.border_subtle),
-                    labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: AppColors.text_primary),
-                    onPressed: () => onProductTap(p),
+                ...fastMoving.map(
+                  (p) => Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: ActionChip(
+                      avatar: Icon(
+                        p.icon,
+                        size: 14,
+                        color: AppColors.accent_primary,
+                      ),
+                      label: Text('${p.name} (KES ${p.unitPrice.formatted})'),
+                      backgroundColor: Colors.white,
+                      side: const BorderSide(color: AppColors.border_subtle),
+                      labelStyle: const TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text_primary,
+                      ),
+                      onPressed: () => onProductTap(p),
+                    ),
                   ),
-                )),
+                ),
               ],
             ),
           ),
@@ -1381,11 +1728,17 @@ class _Catalog extends StatelessWidget {
                     selected: isSelected,
                     label: Text(cat),
                     onSelected: (_) => onCategory(cat),
-                    selectedColor: AppColors.accent_primary.withValues(alpha: 0.15),
+                    selectedColor: AppColors.accent_primary.withValues(
+                      alpha: 0.15,
+                    ),
                     checkmarkColor: AppColors.accent_primary,
                     labelStyle: TextStyle(
-                      fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                      color: isSelected ? AppColors.accent_primary : AppColors.text_secondary,
+                      fontWeight: isSelected
+                          ? FontWeight.bold
+                          : FontWeight.w500,
+                      color: isSelected
+                          ? AppColors.accent_primary
+                          : AppColors.text_secondary,
                     ),
                   ),
                 );
@@ -1399,17 +1752,20 @@ class _Catalog extends StatelessWidget {
             child: products.isEmpty
                 ? const Center(child: Text('No products match your filter.'))
                 : GridView.builder(
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 230,
-                      childAspectRatio: 0.78,
-                      crossAxisSpacing: 14,
-                      mainAxisSpacing: 14,
-                    ),
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 230,
+                          childAspectRatio: 0.78,
+                          crossAxisSpacing: 14,
+                          mainAxisSpacing: 14,
+                        ),
                     itemCount: products.length,
                     itemBuilder: (context, index) {
                       final p = products[index];
                       return _StaggeredFadeIn(
-                        delay: Duration(milliseconds: (index * 28).clamp(0, 400)),
+                        delay: Duration(
+                          milliseconds: (index * 28).clamp(0, 400),
+                        ),
                         child: _ProductTile(
                           product: p,
                           cartQty: cartQty(p.id),
@@ -1449,8 +1805,10 @@ class _StaggeredFadeInState extends State<_StaggeredFadeIn>
       duration: const Duration(milliseconds: 300),
     );
     _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    _slide = Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.06),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
 
     Future.delayed(widget.delay, () {
       if (mounted) _ctrl.forward();
@@ -1465,9 +1823,9 @@ class _StaggeredFadeInState extends State<_StaggeredFadeIn>
 
   @override
   Widget build(BuildContext context) => FadeTransition(
-        opacity: _opacity,
-        child: SlideTransition(position: _slide, child: widget.child),
-      );
+    opacity: _opacity,
+    child: SlideTransition(position: _slide, child: widget.child),
+  );
 }
 
 /// Large, photo-first product tile for the POS grid.
@@ -1506,7 +1864,9 @@ class _ProductTileState extends State<_ProductTile> {
     if (src == null || src.isEmpty) return null;
     if (!identical(src, _bytesSource) && src != _bytesSource) {
       try {
-        _bytes = base64Decode(src.split(',').last.replaceAll(RegExp(r'\s+'), ''));
+        _bytes = base64Decode(
+          src.split(',').last.replaceAll(RegExp(r'\s+'), ''),
+        );
       } catch (_) {
         _bytes = null;
       }
@@ -1535,7 +1895,11 @@ class _ProductTileState extends State<_ProductTile> {
     return Container(
       color: p.tint,
       alignment: Alignment.center,
-      child: Icon(p.icon, size: 56, color: AppColors.text_primary.withAlpha(90)),
+      child: Icon(
+        p.icon,
+        size: 56,
+        color: AppColors.text_primary.withAlpha(90),
+      ),
     );
   }
 
@@ -1549,7 +1913,10 @@ class _ProductTileState extends State<_ProductTile> {
         children: [
           SizedBox(
             width: 62,
-            child: Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFFCBD5E1))),
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 11, color: Color(0xFFCBD5E1)),
+            ),
           ),
           Text(
             value,
@@ -1591,9 +1958,13 @@ class _ProductTileState extends State<_ProductTile> {
           children: [
             _infoRow('Category', p.category),
             _infoRow('SKU', p.sku),
-            if (p.barcode != null && p.barcode!.isNotEmpty) _infoRow('Barcode', p.barcode!),
+            if (p.barcode != null && p.barcode!.isNotEmpty)
+              _infoRow('Barcode', p.barcode!),
             _infoRow('In stock', stockText, valueColor: stockColor),
-            _infoRow('Price', 'incl. ${(p.taxRateBasisPoints / 100).toStringAsFixed(0)}% VAT'),
+            _infoRow(
+              'Price',
+              'incl. ${(p.taxRateBasisPoints / 100).toStringAsFixed(0)}% VAT',
+            ),
             if (p.notes != null && p.notes!.isNotEmpty) ...[
               const SizedBox(height: 6),
               ConstrainedBox(
@@ -1602,7 +1973,11 @@ class _ProductTileState extends State<_ProductTile> {
                   p.notes!,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 11, color: Color(0xFFCBD5E1), fontStyle: FontStyle.italic),
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: Color(0xFFCBD5E1),
+                    fontStyle: FontStyle.italic,
+                  ),
                 ),
               ),
             ],
@@ -1627,10 +2002,26 @@ class _ProductTileState extends State<_ProductTile> {
     if (out) {
       photo = ColorFiltered(
         colorFilter: const ColorFilter.matrix(<double>[
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0.2126, 0.7152, 0.0722, 0, 0,
-          0, 0, 0, 1, 0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0.2126,
+          0.7152,
+          0.0722,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          0,
         ]),
         child: photo,
       );
@@ -1665,12 +2056,16 @@ class _ProductTileState extends State<_ProductTile> {
               border: Border.all(
                 color: selected
                     ? AppColors.accent_primary
-                    : (_hovered && !out ? AppColors.accent_primary.withAlpha(150) : AppColors.border_subtle),
+                    : (_hovered && !out
+                          ? AppColors.accent_primary.withAlpha(150)
+                          : AppColors.border_subtle),
                 width: selected ? 2 : 1,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: _hovered && !out ? AppColors.accent_primary.withAlpha(30) : const Color(0x0A000000),
+                  color: _hovered && !out
+                      ? AppColors.accent_primary.withAlpha(30)
+                      : const Color(0x0A000000),
                   blurRadius: _hovered && !out ? 14 : 5,
                   offset: Offset(0, _hovered && !out ? 6 : 2),
                 ),
@@ -1709,7 +2104,12 @@ class _ProductTileState extends State<_ProductTile> {
                             alignment: Alignment.center,
                             child: const Text(
                               'OUT OF STOCK',
-                              style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                letterSpacing: 0.8,
+                              ),
                             ),
                           ),
                         ),
@@ -1719,11 +2119,19 @@ class _ProductTileState extends State<_ProductTile> {
                         top: 8,
                         left: 8,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 3,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.white.withAlpha(238),
                             borderRadius: BorderRadius.circular(20),
-                            boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 4)],
+                            boxShadow: const [
+                              BoxShadow(
+                                color: Color(0x1A000000),
+                                blurRadius: 4,
+                              ),
+                            ],
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
@@ -1731,12 +2139,19 @@ class _ProductTileState extends State<_ProductTile> {
                               Container(
                                 width: 6,
                                 height: 6,
-                                decoration: BoxDecoration(color: stockColor, shape: BoxShape.circle),
+                                decoration: BoxDecoration(
+                                  color: stockColor,
+                                  shape: BoxShape.circle,
+                                ),
                               ),
                               const SizedBox(width: 5),
                               Text(
                                 out ? '0 left' : '${p.stock} left',
-                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: stockColor),
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: stockColor,
+                                ),
                               ),
                             ],
                           ),
@@ -1750,20 +2165,30 @@ class _ProductTileState extends State<_ProductTile> {
                         child: Tooltip(
                           message: 'Product details',
                           child: GestureDetector(
-                            onTap: () => setState(() => _pinnedInfo = !_pinnedInfo),
+                            onTap: () =>
+                                setState(() => _pinnedInfo = !_pinnedInfo),
                             child: Container(
                               width: 26,
                               height: 26,
                               alignment: Alignment.center,
                               decoration: BoxDecoration(
-                                color: _pinnedInfo ? AppColors.accent_primary : Colors.white.withAlpha(238),
+                                color: _pinnedInfo
+                                    ? AppColors.accent_primary
+                                    : Colors.white.withAlpha(238),
                                 shape: BoxShape.circle,
-                                boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 4)],
+                                boxShadow: const [
+                                  BoxShadow(
+                                    color: Color(0x1A000000),
+                                    blurRadius: 4,
+                                  ),
+                                ],
                               ),
                               child: Icon(
                                 Icons.info_outline,
                                 size: 16,
-                                color: _pinnedInfo ? Colors.white : AppColors.text_secondary,
+                                color: _pinnedInfo
+                                    ? Colors.white
+                                    : AppColors.text_secondary,
                               ),
                             ),
                           ),
@@ -1786,7 +2211,11 @@ class _ProductTileState extends State<_ProductTile> {
                           p.name,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5, height: 1.25),
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13.5,
+                            height: 1.25,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -1797,32 +2226,46 @@ class _ProductTileState extends State<_ProductTile> {
                               'KES ${p.unitPrice.formatted}',
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.accent_primary),
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                                fontSize: 16,
+                                color: AppColors.accent_primary,
+                              ),
                             ),
                           ),
                           AnimatedContainer(
                             duration: const Duration(milliseconds: 150),
                             height: 30,
                             constraints: const BoxConstraints(minWidth: 30),
-                            padding: EdgeInsets.symmetric(horizontal: selected ? 9 : 0),
+                            padding: EdgeInsets.symmetric(
+                              horizontal: selected ? 9 : 0,
+                            ),
                             alignment: Alignment.center,
                             decoration: BoxDecoration(
                               color: out
                                   ? AppColors.border_subtle
-                                  : (selected || _hovered ? AppColors.accent_primary : AppColors.accent_light),
+                                  : (selected || _hovered
+                                        ? AppColors.accent_primary
+                                        : AppColors.accent_light),
                               borderRadius: BorderRadius.circular(15),
                             ),
                             child: selected
                                 ? Text(
                                     '×$qty',
-                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13,
+                                    ),
                                   )
                                 : Icon(
                                     Icons.add,
                                     size: 18,
                                     color: out
                                         ? AppColors.text_tertiary
-                                        : (_hovered ? Colors.white : AppColors.accent_primary),
+                                        : (_hovered
+                                              ? Colors.white
+                                              : AppColors.accent_primary),
                                   ),
                           ),
                         ],
@@ -1868,7 +2311,9 @@ class _ProductCardState extends State<_ProductCard> {
         onTapCancel: () => setState(() => _pressed = false),
         onTap: product.isOutOfStock ? null : widget.onTap,
         child: AnimatedScale(
-          scale: _pressed ? 0.95 : (_hovered && !product.isOutOfStock ? 1.02 : 1.0),
+          scale: _pressed
+              ? 0.95
+              : (_hovered && !product.isOutOfStock ? 1.02 : 1.0),
           duration: const Duration(milliseconds: 130),
           curve: Curves.easeOutCubic,
           child: AnimatedContainer(
@@ -1880,7 +2325,9 @@ class _ProductCardState extends State<_ProductCard> {
               border: Border.all(
                 color: product.isOutOfStock
                     ? AppColors.status_danger.withValues(alpha: 0.3)
-                    : (_hovered ? AppColors.accent_primary.withAlpha(160) : AppColors.border_subtle),
+                    : (_hovered
+                          ? AppColors.accent_primary.withAlpha(160)
+                          : AppColors.border_subtle),
                 width: _hovered && !product.isOutOfStock ? 1.5 : 1.0,
               ),
               boxShadow: [
@@ -1907,37 +2354,56 @@ class _ProductCardState extends State<_ProductCard> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       clipBehavior: Clip.antiAlias,
-                      child: product.imageBase64 != null && product.imageBase64!.isNotEmpty
+                      child:
+                          product.imageBase64 != null &&
+                              product.imageBase64!.isNotEmpty
                           ? Image.memory(
-                              base64Decode(product.imageBase64!.split(',').last),
+                              base64Decode(
+                                product.imageBase64!.split(',').last,
+                              ),
                               width: 38,
                               height: 38,
                               fit: BoxFit.cover,
                               gaplessPlayback: true,
                             )
-                          : Icon(product.icon, color: AppColors.text_primary, size: 20),
+                          : Icon(
+                              product.icon,
+                              color: AppColors.text_primary,
+                              size: 20,
+                            ),
                     ),
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 6,
+                        vertical: 2,
+                      ),
                       decoration: BoxDecoration(
                         color: product.isOutOfStock
                             ? const Color(0xFFFEF2F2)
-                            : (product.isLowStock ? const Color(0xFFFFFBEB) : const Color(0xFFF0FDF4)),
+                            : (product.isLowStock
+                                  ? const Color(0xFFFFFBEB)
+                                  : const Color(0xFFF0FDF4)),
                         borderRadius: BorderRadius.circular(6),
                         border: Border.all(
                           color: product.isOutOfStock
                               ? const Color(0xFFFECACA)
-                              : (product.isLowStock ? const Color(0xFFFDE68A) : const Color(0xFFDCFCE7)),
+                              : (product.isLowStock
+                                    ? const Color(0xFFFDE68A)
+                                    : const Color(0xFFDCFCE7)),
                         ),
                       ),
                       child: Text(
-                        product.isOutOfStock ? '0 LEFT' : '${product.stock} left',
+                        product.isOutOfStock
+                            ? '0 LEFT'
+                            : '${product.stock} left',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                           color: product.isOutOfStock
                               ? AppColors.status_danger
-                              : (product.isLowStock ? const Color(0xFFD97706) : AppColors.status_success),
+                              : (product.isLowStock
+                                    ? const Color(0xFFD97706)
+                                    : AppColors.status_success),
                         ),
                       ),
                     ),
@@ -1948,7 +2414,11 @@ class _ProductCardState extends State<_ProductCard> {
                   product.name,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, height: 1.2),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    height: 1.2,
+                  ),
                 ),
                 const SizedBox(height: 6),
                 Row(
@@ -1956,7 +2426,11 @@ class _ProductCardState extends State<_ProductCard> {
                   children: [
                     Text(
                       'KES ${product.unitPrice.formatted}',
-                      style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: AppColors.accent_primary),
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                        color: AppColors.accent_primary,
+                      ),
                     ),
                     AnimatedContainer(
                       duration: const Duration(milliseconds: 150),
@@ -1965,14 +2439,18 @@ class _ProductCardState extends State<_ProductCard> {
                       decoration: BoxDecoration(
                         color: product.isOutOfStock
                             ? AppColors.border_subtle
-                            : (_hovered ? AppColors.accent_primary : AppColors.accent_light),
+                            : (_hovered
+                                  ? AppColors.accent_primary
+                                  : AppColors.accent_light),
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
                         Icons.add,
                         color: product.isOutOfStock
                             ? AppColors.text_tertiary
-                            : (_hovered ? Colors.white : AppColors.accent_primary),
+                            : (_hovered
+                                  ? Colors.white
+                                  : AppColors.accent_primary),
                         size: 18,
                       ),
                     ),
@@ -1999,7 +2477,10 @@ class _CartPanel extends StatelessWidget {
       builder: (context) => AlertDialog(
         backgroundColor: AppColors.bg_surface,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Attach Customer to Sale', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        title: const Text(
+          'Attach Customer to Sale',
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
         content: SizedBox(
           width: 360,
           child: ListView.separated(
@@ -2009,8 +2490,13 @@ class _CartPanel extends StatelessWidget {
             itemBuilder: (context, index) {
               final c = state.customers[index];
               return ListTile(
-                title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold)),
-                subtitle: Text('${c.phone} · Debt: KES ${c.currentBalance.formatted}'),
+                title: Text(
+                  c.name,
+                  style: const TextStyle(fontWeight: FontWeight.bold),
+                ),
+                subtitle: Text(
+                  '${c.phone} · Debt: KES ${c.currentBalance.formatted}',
+                ),
                 onTap: () {
                   state.selectCustomer(c);
                   Navigator.pop(context);
@@ -2026,9 +2512,15 @@ class _CartPanel extends StatelessWidget {
                 state.selectCustomer(null);
                 Navigator.pop(context);
               },
-              child: const Text('Clear Customer', style: TextStyle(color: AppColors.status_danger)),
+              child: const Text(
+                'Clear Customer',
+                style: TextStyle(color: AppColors.status_danger),
+              ),
             ),
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Done')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Done'),
+          ),
         ],
       ),
     );
@@ -2050,7 +2542,9 @@ class _CartPanel extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: const BoxDecoration(
-              border: Border(bottom: BorderSide(color: AppColors.border_subtle)),
+              border: Border(
+                bottom: BorderSide(color: AppColors.border_subtle),
+              ),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2058,13 +2552,29 @@ class _CartPanel extends StatelessWidget {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Current Sale', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                    Text('${cart.itemCount} items in basket', style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                    const Text(
+                      'Current Sale',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                      '${cart.itemCount} items in basket',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
                   ],
                 ),
                 if (cart.isNotEmpty)
                   IconButton(
-                    icon: const Icon(Icons.delete_sweep_outlined, size: 20, color: AppColors.status_danger),
+                    icon: const Icon(
+                      Icons.delete_sweep_outlined,
+                      size: 20,
+                      color: AppColors.status_danger,
+                    ),
                     tooltip: 'Clear Basket',
                     onPressed: state.clearCart,
                   ),
@@ -2077,27 +2587,43 @@ class _CartPanel extends StatelessWidget {
             onTap: () => _showSelectCustomerDialog(context),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-              color: state.selectedCustomer != null ? const Color(0xFFFFFBEB) : AppColors.bg_canvas,
+              color: state.selectedCustomer != null
+                  ? const Color(0xFFFFFBEB)
+                  : AppColors.bg_canvas,
               child: Row(
                 children: [
                   Icon(
-                    state.selectedCustomer != null ? Icons.person : Icons.person_add_outlined,
+                    state.selectedCustomer != null
+                        ? Icons.person
+                        : Icons.person_add_outlined,
                     size: 18,
-                    color: state.selectedCustomer != null ? const Color(0xFFD97706) : AppColors.text_tertiary,
+                    color: state.selectedCustomer != null
+                        ? const Color(0xFFD97706)
+                        : AppColors.text_tertiary,
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      state.selectedCustomer != null ? 'Customer: ${state.selectedCustomer!.name}' : 'Attach Customer Account (Optional)',
+                      state.selectedCustomer != null
+                          ? 'Customer: ${state.selectedCustomer!.name}'
+                          : 'Attach Customer Account (Optional)',
                       style: TextStyle(
                         fontSize: 12,
-                        fontWeight: state.selectedCustomer != null ? FontWeight.bold : FontWeight.normal,
-                        color: state.selectedCustomer != null ? const Color(0xFF92400E) : AppColors.text_secondary,
+                        fontWeight: state.selectedCustomer != null
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color: state.selectedCustomer != null
+                            ? const Color(0xFF92400E)
+                            : AppColors.text_secondary,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const Icon(Icons.chevron_right, size: 16, color: AppColors.text_tertiary),
+                  const Icon(
+                    Icons.chevron_right,
+                    size: 16,
+                    color: AppColors.text_tertiary,
+                  ),
                 ],
               ),
             ),
@@ -2114,11 +2640,28 @@ class _CartPanel extends StatelessWidget {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.shopping_cart_outlined, size: 48, color: AppColors.border_strong),
+                          Icon(
+                            Icons.shopping_cart_outlined,
+                            size: 48,
+                            color: AppColors.border_strong,
+                          ),
                           SizedBox(height: 12),
-                          Text('Basket is empty', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.text_secondary)),
+                          Text(
+                            'Basket is empty',
+                            style: TextStyle(
+                              fontSize: 14,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.text_secondary,
+                            ),
+                          ),
                           SizedBox(height: 4),
-                          Text('Tap catalog items to add', style: TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
+                          Text(
+                            'Tap catalog items to add',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.text_tertiary,
+                            ),
+                          ),
                         ],
                       ),
                     )
@@ -2126,40 +2669,61 @@ class _CartPanel extends StatelessWidget {
                       key: const ValueKey('cart'),
                       padding: const EdgeInsets.symmetric(vertical: 8),
                       itemCount: cart.lines.length,
-                      separatorBuilder: (context, index) => const Divider(height: 1),
+                      separatorBuilder: (context, index) =>
+                          const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final line = cart.lines.elementAt(index);
                         return _AnimatedCartItem(
                           key: ValueKey(line.productId),
                           child: ListTile(
                             dense: true,
-                            title: Text(line.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            title: Text(
+                              line.name,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
                             subtitle: Text(
                               '${line.quantity} × KES ${line.unitPrice.formatted}',
-                              style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.text_tertiary,
+                              ),
                             ),
                             trailing: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Text(
                                   'KES ${line.lineTotal.formatted}',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
                                 ),
                                 const SizedBox(width: 8),
                                 _QtyStepper(
                                   quantity: line.quantity,
                                   stock: line.stock,
-                                  onMinus: () => state.changeQuantity(line.productId, -1),
+                                  onMinus: () =>
+                                      state.changeQuantity(line.productId, -1),
                                   onPlus: () {
                                     state.changeQuantity(
                                       line.productId,
                                       1,
                                       onRefused: (reason) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
+                                        ScaffoldMessenger.of(
+                                          context,
+                                        ).showSnackBar(
                                           SnackBar(
-                                            content: Text('${line.name}: $reason'),
-                                            backgroundColor: AppColors.status_danger,
-                                            duration: const Duration(seconds: 1),
+                                            content: Text(
+                                              '${line.name}: $reason',
+                                            ),
+                                            backgroundColor:
+                                                AppColors.status_danger,
+                                            duration: const Duration(
+                                              seconds: 1,
+                                            ),
                                           ),
                                         );
                                       },
@@ -2175,7 +2739,6 @@ class _CartPanel extends StatelessWidget {
             ),
           ),
 
-
           // Financial Summary & Charge Button
           Container(
             padding: const EdgeInsets.all(20),
@@ -2189,10 +2752,19 @@ class _CartPanel extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('Subtotal (Excl. Tax)', style: TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
+                    const Text(
+                      'Subtotal (Excl. Tax)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
                     Text(
                       'KES ${Money(cart.subtotal.minorUnits - cart.vatAmount.minorUnits).formatted}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.text_secondary),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.text_secondary,
+                      ),
                     ),
                   ],
                 ),
@@ -2200,18 +2772,40 @@ class _CartPanel extends StatelessWidget {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('VAT Included (16%)', style: TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
-                    Text('KES ${cart.vatAmount.formatted}', style: const TextStyle(fontSize: 12, color: AppColors.text_secondary)),
+                    const Text(
+                      'VAT Included (16%)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
+                    Text(
+                      'KES ${cart.vatAmount.formatted}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.text_secondary,
+                      ),
+                    ),
                   ],
                 ),
                 const Divider(height: 16),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('TOTAL PAYABLE', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)),
+                    const Text(
+                      'TOTAL PAYABLE',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
                     Text(
                       'KES ${cart.subtotal.formatted}',
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppColors.accent_primary),
+                      style: const TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                        color: AppColors.accent_primary,
+                      ),
                     ),
                   ],
                 ),
@@ -2223,7 +2817,9 @@ class _CartPanel extends StatelessWidget {
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.accent_primary,
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
               ],
@@ -2261,7 +2857,9 @@ class _QtyStepper extends StatelessWidget {
         children: [
           InkWell(
             onTap: onMinus,
-            borderRadius: const BorderRadius.horizontal(left: Radius.circular(5)),
+            borderRadius: const BorderRadius.horizontal(
+              left: Radius.circular(5),
+            ),
             child: const Padding(
               padding: EdgeInsets.all(5),
               child: Icon(Icons.remove, size: 14),
@@ -2271,17 +2869,23 @@ class _QtyStepper extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 6),
             child: AnimatedSwitcher(
               duration: const Duration(milliseconds: 180),
-              transitionBuilder: (child, animation) => ScaleTransition(scale: animation, child: child),
+              transitionBuilder: (child, animation) =>
+                  ScaleTransition(scale: animation, child: child),
               child: Text(
                 '$quantity',
                 key: ValueKey<int>(quantity),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 12,
+                ),
               ),
             ),
           ),
           InkWell(
             onTap: onPlus,
-            borderRadius: const BorderRadius.horizontal(right: Radius.circular(5)),
+            borderRadius: const BorderRadius.horizontal(
+              right: Radius.circular(5),
+            ),
             child: const Padding(
               padding: EdgeInsets.all(5),
               child: Icon(Icons.add, size: 14),
@@ -2316,8 +2920,10 @@ class _AnimatedCartItemState extends State<_AnimatedCartItem>
       duration: const Duration(milliseconds: 260),
     );
     _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    _slide = Tween<Offset>(begin: const Offset(0.08, 0), end: Offset.zero)
-        .animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
+    _slide = Tween<Offset>(
+      begin: const Offset(0.08, 0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
     _ctrl.forward();
   }
 
@@ -2329,7 +2935,7 @@ class _AnimatedCartItemState extends State<_AnimatedCartItem>
 
   @override
   Widget build(BuildContext context) => FadeTransition(
-        opacity: _opacity,
-        child: SlideTransition(position: _slide, child: widget.child),
-      );
+    opacity: _opacity,
+    child: SlideTransition(position: _slide, child: widget.child),
+  );
 }

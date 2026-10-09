@@ -137,6 +137,62 @@ export function customersRouter(businessId: string): Router {
     }
   });
 
+  // Archive customer accounts without removing their append-only financial history.
+  router.delete('/:id', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
+    try {
+      const customer = await prisma.customer.findFirst({
+        where: { id: req.params.id, businessId },
+      });
+      if (!customer) return sendError(res, 404, 'NOT_FOUND', 'Customer not found.');
+      if (customer.status === 'ARCHIVED') {
+        return sendError(
+          res,
+          409,
+          'ALREADY_ARCHIVED',
+          'Customer account is already archived.',
+        );
+      }
+
+      const result = await prisma.customer.updateMany({
+        where: {
+          id: customer.id,
+          businessId,
+          status: 'ACTIVE',
+          balance: { lte: 0 },
+        },
+        data: { status: 'ARCHIVED' },
+      });
+      if (result.count === 0) {
+        const current = await prisma.customer.findFirst({
+          where: { id: customer.id, businessId },
+        });
+        if (!current) return sendError(res, 404, 'NOT_FOUND', 'Customer not found.');
+        if (current.status === 'ARCHIVED') {
+          return sendError(
+            res,
+            409,
+            'ALREADY_ARCHIVED',
+            'Customer account is already archived.',
+          );
+        }
+        return sendError(
+          res,
+          409,
+          'OUTSTANDING_BALANCE',
+          'Settle the customer balance before archiving this account.',
+        );
+      }
+
+      const archived = await prisma.customer.findFirstOrThrow({
+        where: { id: customer.id, businessId },
+      });
+      return send200(res, mapCustomer(archived));
+    } catch (err) {
+      console.error('customers/archive error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to archive customer.');
+    }
+  });
+
   // POST /customers/:id/payments
   router.post('/:id/payments', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
     const body = parseBody(RecordPaymentSchema, req, res);

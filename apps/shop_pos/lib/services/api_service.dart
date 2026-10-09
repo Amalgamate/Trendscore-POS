@@ -296,6 +296,23 @@ class ApiService {
     return null;
   }
 
+  Future<bool> archiveCustomer(String customerId) async {
+    lastError = null;
+    try {
+      final res = await http.delete(
+        Uri.parse('$baseUrl/customers/$customerId'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return true;
+      lastError = _messageFromResponse(res.body) ??
+          'Could not archive customer (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not archive the customer on the shop API.';
+      debugPrint('API archiveCustomer error: $e');
+    }
+    return false;
+  }
+
   /// Record customer debt payment
   Future<bool> recordCustomerPayment(String customerId, double amount, String method, String reference) async {
     try {

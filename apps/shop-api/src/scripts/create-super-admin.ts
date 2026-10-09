@@ -38,9 +38,9 @@ async function main(): Promise<void> {
   if (existing?.isPlatformSuperAdmin) {
     await prisma.user.update({
       where: { id: existing.id },
-      data: { fullName: 'Retail OS Super Admin', role: 'OWNER', active: true },
+      data: { fullName: 'Retail OS Super Admin', role: 'SUPER_ADMIN', active: true },
     });
-    console.log(JSON.stringify({ ok: true, created: false, role: 'OWNER' }));
+    console.log(JSON.stringify({ ok: true, created: false, role: 'SUPER_ADMIN' }));
     return;
   }
 
@@ -55,7 +55,7 @@ async function main(): Promise<void> {
     update: {
       fullName: 'Retail OS Super Admin',
       pinHash,
-      role: 'OWNER',
+      role: 'SUPER_ADMIN',
       active: true,
       mustChangePin: true,
       isPlatformSuperAdmin: true,
@@ -64,13 +64,13 @@ async function main(): Promise<void> {
       fullName: 'Retail OS Super Admin',
       phone,
       pinHash,
-      role: 'OWNER',
+      role: 'SUPER_ADMIN',
       active: true,
       mustChangePin: true,
       isPlatformSuperAdmin: true,
     },
   });
-  console.log(JSON.stringify({ ok: true, created: true, role: 'OWNER' }));
+  console.log(JSON.stringify({ ok: true, created: true, role: 'SUPER_ADMIN' }));
 }
 
 main()

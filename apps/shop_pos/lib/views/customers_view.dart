@@ -50,6 +50,58 @@ class _CustomersViewState extends State<CustomersView> {
     return customer.ledger;
   }
 
+  Future<void> _confirmDeleteCustomer(PosCustomer customer) async {
+    if (customer.currentBalance.minorUnits > 0) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Settle the customer’s outstanding balance before deleting this account.'),
+        ),
+      );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete customer account?'),
+        content: Text(
+          'Archive ${customer.name}? Their account will be removed from the active customer list, while their statement and payment history are retained.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: AppColors.status_danger),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete customer'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    try {
+      await widget.state.deleteCustomer(customer.id);
+      if (!mounted) return;
+      setState(() {
+        _selectedCustomer = widget.state.customers.isEmpty
+            ? null
+            : widget.state.customers.first;
+        if (_selectedCustomer == null) _mobileShowDetails = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Customer account archived.')),
+      );
+    } on PosException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.message)),
+      );
+    }
+  }
+
   void _showRecordPaymentModal(PosCustomer customer) {
     final amountController = TextEditingController(
       text: (customer.currentBalance.minorUnits ~/ 100).toString(),
@@ -837,6 +889,27 @@ class _CustomersViewState extends State<CustomersView> {
                 ),
                 onPressed: () => _showRecordPaymentModal(customer),
               ),
+              if (widget.state.canDeleteCustomers) ...[
+                const SizedBox(width: 4),
+                PopupMenuButton<String>(
+                  tooltip: 'Customer actions',
+                  onSelected: (action) {
+                    if (action == 'delete') _confirmDeleteCustomer(customer);
+                  },
+                  itemBuilder: (context) => const [
+                    PopupMenuItem(
+                      value: 'delete',
+                      child: Row(
+                        children: [
+                          Icon(Icons.delete_outline, color: AppColors.status_danger),
+                          SizedBox(width: 8),
+                          Text('Delete customer'),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 14),

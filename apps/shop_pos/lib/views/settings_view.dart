@@ -36,6 +36,7 @@ class _SettingsViewState extends State<SettingsView> {
   bool? _connectionResult;
   bool _isSaving = false;
   int _selectedSettingsSection = 0;
+
   /// Pending logo base64 (picked this session, not yet saved)
   String? _pendingLogoBase64;
   bool _clearLogo = false;
@@ -44,11 +45,19 @@ class _SettingsViewState extends State<SettingsView> {
   void initState() {
     super.initState();
     _shopNameController = TextEditingController(text: widget.state.shopName);
-    _storeBranchController = TextEditingController(text: widget.state.storeBranch);
+    _storeBranchController = TextEditingController(
+      text: widget.state.storeBranch,
+    );
     _tillIdController = TextEditingController(text: widget.state.tillId);
-    _brandTaglineController = TextEditingController(text: widget.state.brandTagline);
-    _brandLogoUrlController = TextEditingController(text: widget.state.brandLogoUrl);
-    _heroImageUrlController = TextEditingController(text: widget.state.heroImageUrl);
+    _brandTaglineController = TextEditingController(
+      text: widget.state.brandTagline,
+    );
+    _brandLogoUrlController = TextEditingController(
+      text: widget.state.brandLogoUrl,
+    );
+    _heroImageUrlController = TextEditingController(
+      text: widget.state.heroImageUrl,
+    );
     _serverUrlController = TextEditingController(text: widget.state.serverUrl);
 
     _autoPrintReceipt = widget.state.autoPrintReceipt;
@@ -133,10 +142,14 @@ class _SettingsViewState extends State<SettingsView> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(ok
-              ? 'Connected to Retail OS shop-api successfully!'
-              : 'Could not reach server at ${_serverUrlController.text}'),
-          backgroundColor: ok ? AppColors.accent_primary : AppColors.status_danger,
+          content: Text(
+            ok
+                ? 'Connected to Retail OS shop-api successfully!'
+                : 'Could not reach server at ${_serverUrlController.text}',
+          ),
+          backgroundColor: ok
+              ? AppColors.accent_primary
+              : AppColors.status_danger,
         ),
       );
     }
@@ -151,6 +164,8 @@ class _SettingsViewState extends State<SettingsView> {
 
     Color roleColor(PosUserRole role) {
       switch (role) {
+        case PosUserRole.systemAdmin:
+          return const Color(0xFFDC2626);
         case PosUserRole.owner:
           return const Color(0xFFD97706);
         case PosUserRole.manager:
@@ -180,14 +195,18 @@ class _SettingsViewState extends State<SettingsView> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
-                  existingUser == null ? Icons.person_add_alt_1 : Icons.manage_accounts,
+                  existingUser == null
+                      ? Icons.person_add_alt_1
+                      : Icons.manage_accounts,
                   color: AppColors.accent_primary,
                   size: 20,
                 ),
               ),
               const SizedBox(width: 12),
               Text(
-                existingUser == null ? 'Add Staff Account' : 'Edit Staff Account',
+                existingUser == null
+                    ? 'Add Staff Account'
+                    : 'Edit Staff Account',
                 style: const TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -203,7 +222,14 @@ class _SettingsViewState extends State<SettingsView> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Full Name *', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text_secondary)),
+                  const Text(
+                    'Full Name *',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: AppColors.text_secondary,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   TextField(
                     controller: nameCtrl,
@@ -211,12 +237,24 @@ class _SettingsViewState extends State<SettingsView> {
                       hintText: 'e.g. Grace Wambui',
                       filled: true,
                       fillColor: AppColors.bg_subtle,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(
+                          color: AppColors.border_subtle,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 14),
 
-                  const Text('Mobile Phone Number *', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text_secondary)),
+                  const Text(
+                    'Mobile Phone Number *',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: AppColors.text_secondary,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   TextField(
                     controller: phoneCtrl,
@@ -225,12 +263,26 @@ class _SettingsViewState extends State<SettingsView> {
                       hintText: '+254 700 000 000',
                       filled: true,
                       fillColor: AppColors.bg_subtle,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(
+                          color: AppColors.border_subtle,
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 14),
 
-                  Text(existingUser == null ? 'Staff PIN (4–6 digits) *' : 'New staff PIN (leave blank to keep current)', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text_secondary)),
+                  Text(
+                    existingUser == null
+                        ? 'Staff PIN (4–6 digits) *'
+                        : 'New staff PIN (leave blank to keep current)',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: AppColors.text_secondary,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   TextField(
                     controller: pinCtrl,
@@ -239,39 +291,81 @@ class _SettingsViewState extends State<SettingsView> {
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     decoration: InputDecoration(
-                      hintText: existingUser == null ? '4–6 digits' : 'Leave blank to keep current PIN',
+                      hintText: existingUser == null
+                          ? '4–6 digits'
+                          : 'Leave blank to keep current PIN',
                       filled: true,
                       fillColor: AppColors.bg_subtle,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(
+                          color: AppColors.border_subtle,
+                        ),
+                      ),
                       suffixIcon: IconButton(
-                        icon: Icon(obscurePin ? Icons.visibility_off : Icons.visibility, color: AppColors.text_tertiary, size: 18),
-                        onPressed: () => setModalState(() => obscurePin = !obscurePin),
+                        icon: Icon(
+                          obscurePin ? Icons.visibility_off : Icons.visibility,
+                          color: AppColors.text_tertiary,
+                          size: 18,
+                        ),
+                        onPressed: () =>
+                            setModalState(() => obscurePin = !obscurePin),
                       ),
                     ),
                   ),
                   const SizedBox(height: 8),
 
-                  const Text('Role & Authorization Level *', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text_secondary)),
+                  const Text(
+                    'Role & Authorization Level *',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                      color: AppColors.text_secondary,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<PosUserRole>(
                     value: selectedRole,
                     decoration: InputDecoration(
                       filled: true,
                       fillColor: AppColors.bg_subtle,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
-                    ),
-                    items: PosUserRole.values.map((r) {
-                      return DropdownMenuItem(
-                        value: r,
-                        child: Row(
-                          children: [
-                            Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: roleColor(r))),
-                            const SizedBox(width: 8),
-                            Text(r.name.toUpperCase()),
-                          ],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        borderSide: const BorderSide(
+                          color: AppColors.border_subtle,
                         ),
-                      );
-                    }).toList(),
+                      ),
+                    ),
+                    items: PosUserRole.values
+                        .where(
+                          (r) =>
+                              r != PosUserRole.systemAdmin ||
+                              widget.state.currentLoggedInUser?.role ==
+                                  PosUserRole.systemAdmin ||
+                              (selectedRole == PosUserRole.systemAdmin &&
+                                  existingUser?.role ==
+                                      PosUserRole.systemAdmin),
+                        )
+                        .map((r) {
+                          return DropdownMenuItem(
+                            value: r,
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: roleColor(r),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(r.name.toUpperCase()),
+                              ],
+                            ),
+                          );
+                        })
+                        .toList(),
                     onChanged: (val) {
                       if (val != null) setModalState(() => selectedRole = val);
                     },
@@ -283,13 +377,21 @@ class _SettingsViewState extends State<SettingsView> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: AppColors.text_secondary)),
+              child: const Text(
+                'Cancel',
+                style: TextStyle(color: AppColors.text_secondary),
+              ),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.accent_primary,
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 12,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10),
+                ),
               ),
               onPressed: () async {
                 final name = nameCtrl.text.trim();
@@ -297,43 +399,68 @@ class _SettingsViewState extends State<SettingsView> {
                 final pin = pinCtrl.text.trim();
 
                 if (name.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter a valid staff name.')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter a valid staff name.'),
+                    ),
+                  );
                   return;
                 }
                 if (phone.replaceAll(RegExp(r'\D'), '').length < 9) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Enter a valid staff phone number.')));
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Enter a valid staff phone number.'),
+                    ),
+                  );
                   return;
                 }
-                if ((existingUser == null && !RegExp(r'^\d{4,6}$').hasMatch(pin)) ||
-                    (existingUser != null && pin.isNotEmpty && !RegExp(r'^\d{4,6}$').hasMatch(pin))) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('PIN must be 4 to 6 numeric digits.')));
+                if ((existingUser == null &&
+                        !RegExp(r'^\d{4,6}$').hasMatch(pin)) ||
+                    (existingUser != null &&
+                        pin.isNotEmpty &&
+                        !RegExp(r'^\d{4,6}$').hasMatch(pin))) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('PIN must be 4 to 6 numeric digits.'),
+                    ),
+                  );
                   return;
                 }
 
                 try {
                   if (existingUser != null) {
-                    await widget.state.updateUser(PosUser(
-                      id: existingUser.id,
-                      fullName: name,
-                      phone: phone,
-                      pin: pin,
-                      role: selectedRole,
-                      active: existingUser.active,
-                      color: roleColor(selectedRole),
-                    ));
+                    await widget.state.updateUser(
+                      PosUser(
+                        id: existingUser.id,
+                        fullName: name,
+                        phone: phone,
+                        pin: pin,
+                        role: selectedRole,
+                        active: existingUser.active,
+                        color: roleColor(selectedRole),
+                      ),
+                    );
                   } else {
-                    await widget.state.addUser(PosUser(
-                      id: '',
-                      fullName: name,
-                      phone: phone,
-                      pin: pin,
-                      role: selectedRole,
-                      color: roleColor(selectedRole),
-                    ));
+                    await widget.state.addUser(
+                      PosUser(
+                        id: '',
+                        fullName: name,
+                        phone: phone,
+                        pin: pin,
+                        role: selectedRole,
+                        color: roleColor(selectedRole),
+                      ),
+                    );
                   }
                 } catch (error) {
                   if (ctx.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('PosException: ', ''))));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(
+                          error.toString().replaceFirst('PosException: ', ''),
+                        ),
+                      ),
+                    );
                   }
                   return;
                 }
@@ -348,7 +475,9 @@ class _SettingsViewState extends State<SettingsView> {
                   ),
                 );
               },
-              child: Text(existingUser == null ? 'Create Account' : 'Save Changes'),
+              child: Text(
+                existingUser == null ? 'Create Account' : 'Save Changes',
+              ),
             ),
           ],
         ),
@@ -358,6 +487,8 @@ class _SettingsViewState extends State<SettingsView> {
 
   Color _roleColor(PosUserRole role) {
     switch (role) {
+      case PosUserRole.systemAdmin:
+        return const Color(0xFFDC2626);
       case PosUserRole.owner:
         return const Color(0xFFD97706);
       case PosUserRole.manager:
@@ -378,45 +509,74 @@ class _SettingsViewState extends State<SettingsView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-            // Top Bar with Save Button
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text('Settings', style: TextStyle(fontSize: 25, fontWeight: FontWeight.w800, color: AppColors.text_primary)),
-                      SizedBox(height: 4),
-                      Text('Manage store, team, terminal and data preferences', style: TextStyle(fontSize: 13, color: AppColors.text_tertiary)),
-                    ],
+          // Top Bar with Save Button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Settings',
+                      style: TextStyle(
+                        fontSize: 25,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.text_primary,
+                      ),
+                    ),
+                    SizedBox(height: 4),
+                    Text(
+                      'Manage store, team, terminal and data preferences',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              FilledButton.icon(
+                onPressed: _isSaving ? null : _saveAllSettings,
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.save_outlined, size: 18),
+                label: const Text('Save Changes'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.accent_primary,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 20,
+                    vertical: 14,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
-                FilledButton.icon(
-                  onPressed: _isSaving ? null : _saveAllSettings,
-                  icon: _isSaving
-                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.save_outlined, size: 18),
-          label: const Text('Save Changes'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.accent_primary,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 28),
+              ),
+            ],
+          ),
+          const SizedBox(height: 28),
 
-            // ─── 1. Brand & Store Identity ───────────────────────────────
-            if (_selectedSettingsSection == 0) ...[
+          // ─── 1. Brand & Store Identity ───────────────────────────────
+          if (_selectedSettingsSection == 0) ...[
             _buildSection(
               title: 'Brand Identity & Store Profile',
               icon: Icons.storefront_outlined,
               children: [
                 const Text(
                   'Set your shop branding. This automatically customizes the login screen, receipt headers, and POS header navigation.',
-                  style: TextStyle(fontSize: 13, color: AppColors.text_secondary, height: 1.4),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.text_secondary,
+                    height: 1.4,
+                  ),
                 ),
                 const SizedBox(height: 18),
 
@@ -426,21 +586,54 @@ class _SettingsViewState extends State<SettingsView> {
                     if (isNarrow) {
                       return Column(
                         children: [
-                          _buildTextField('Shop / Business Name', _shopNameController, hint: 'e.g. ShopSmart POS'),
+                          _buildTextField(
+                            'Shop / Business Name',
+                            _shopNameController,
+                            hint: 'e.g. ShopSmart POS',
+                          ),
                           const SizedBox(height: 12),
-                          _buildTextField('Branch / Counter Location', _storeBranchController, hint: 'e.g. Kilimani Market · Counter 01'),
+                          _buildTextField(
+                            'Branch / Counter Location',
+                            _storeBranchController,
+                            hint: 'e.g. Kilimani Market · Counter 01',
+                          ),
                           const SizedBox(height: 12),
-                          _buildTextField('Till Terminal ID', _tillIdController, hint: 'e.g. TILL-01'),
+                          _buildTextField(
+                            'Till Terminal ID',
+                            _tillIdController,
+                            hint: 'e.g. TILL-01',
+                          ),
                         ],
                       );
                     }
                     return Row(
                       children: [
-                        Expanded(flex: 3, child: _buildTextField('Shop / Business Name', _shopNameController, hint: 'e.g. ShopSmart POS')),
+                        Expanded(
+                          flex: 3,
+                          child: _buildTextField(
+                            'Shop / Business Name',
+                            _shopNameController,
+                            hint: 'e.g. ShopSmart POS',
+                          ),
+                        ),
                         const SizedBox(width: 12),
-                        Expanded(flex: 3, child: _buildTextField('Branch / Counter Location', _storeBranchController, hint: 'e.g. Kilimani Market · Counter 01')),
+                        Expanded(
+                          flex: 3,
+                          child: _buildTextField(
+                            'Branch / Counter Location',
+                            _storeBranchController,
+                            hint: 'e.g. Kilimani Market · Counter 01',
+                          ),
+                        ),
                         const SizedBox(width: 12),
-                        Expanded(flex: 2, child: _buildTextField('Till Terminal ID', _tillIdController, hint: 'e.g. TILL-01')),
+                        Expanded(
+                          flex: 2,
+                          child: _buildTextField(
+                            'Till Terminal ID',
+                            _tillIdController,
+                            hint: 'e.g. TILL-01',
+                          ),
+                        ),
                       ],
                     );
                   },
@@ -450,16 +643,28 @@ class _SettingsViewState extends State<SettingsView> {
                 _buildTextField(
                   'Store Tagline (shown on login screen & receipts)',
                   _brandTaglineController,
-                  hint: 'e.g. Your shop. Your customers. Everything in one place.',
+                  hint:
+                      'e.g. Your shop. Your customers. Everything in one place.',
                 ),
                 const SizedBox(height: 20),
 
                 // Brand Logo Upload
-                const Text('Brand Logo',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text_primary)),
+                const Text(
+                  'Brand Logo',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text_primary,
+                  ),
+                ),
                 const SizedBox(height: 4),
-                const Text('Upload a square image — auto-cropped to 1:1 and compressed to keep the POS lightning fast.',
-                    style: TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                const Text(
+                  'Upload a square image — auto-cropped to 1:1 and compressed to keep the POS lightning fast.',
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: AppColors.text_tertiary,
+                  ),
+                ),
                 const SizedBox(height: 12),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -484,19 +689,37 @@ class _SettingsViewState extends State<SettingsView> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('— or choose preset / URL —',
-                              style: TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                          const Text(
+                            '— or choose preset / URL —',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: AppColors.text_tertiary,
+                            ),
+                          ),
                           const SizedBox(height: 6),
                           TextField(
                             controller: _brandLogoUrlController,
                             onChanged: (_) => setState(() {}),
                             decoration: InputDecoration(
-                              hintText: 'Leave empty for default leaf, or paste URL',
+                              hintText:
+                                  'Leave empty for default leaf, or paste URL',
                               filled: true,
                               fillColor: AppColors.bg_subtle,
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
-                              prefixIcon: const Icon(Icons.link, size: 18, color: AppColors.accent_primary),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 14,
+                                vertical: 12,
+                              ),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(
+                                  color: AppColors.border_subtle,
+                                ),
+                              ),
+                              prefixIcon: const Icon(
+                                Icons.link,
+                                size: 18,
+                                color: AppColors.accent_primary,
+                              ),
                             ),
                           ),
                           const SizedBox(height: 10),
@@ -505,9 +728,18 @@ class _SettingsViewState extends State<SettingsView> {
                             runSpacing: 8,
                             children: [
                               _logoPresetChip('Default Leaf', ''),
-                              _logoPresetChip('Retail Cart', 'https://cdn-icons-png.flaticon.com/512/3081/3081840.png'),
-                              _logoPresetChip('Storefront', 'https://cdn-icons-png.flaticon.com/512/2331/2331970.png'),
-                              _logoPresetChip('Shopping Bag', 'https://cdn-icons-png.flaticon.com/512/869/869636.png'),
+                              _logoPresetChip(
+                                'Retail Cart',
+                                'https://cdn-icons-png.flaticon.com/512/3081/3081840.png',
+                              ),
+                              _logoPresetChip(
+                                'Storefront',
+                                'https://cdn-icons-png.flaticon.com/512/2331/2331970.png',
+                              ),
+                              _logoPresetChip(
+                                'Shopping Bag',
+                                'https://cdn-icons-png.flaticon.com/512/869/869636.png',
+                              ),
                             ],
                           ),
                         ],
@@ -518,8 +750,14 @@ class _SettingsViewState extends State<SettingsView> {
                 const SizedBox(height: 20),
 
                 // Hero Background Image URL & Presets
-                const Text('Login Screen Hero Background Image',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.text_primary)),
+                const Text(
+                  'Login Screen Hero Background Image',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text_primary,
+                  ),
+                ),
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -531,9 +769,21 @@ class _SettingsViewState extends State<SettingsView> {
                           hintText: 'e.g. cashier_banner.jpg or web image URL',
                           filled: true,
                           fillColor: AppColors.bg_subtle,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
-                          prefixIcon: const Icon(Icons.wallpaper, size: 20, color: AppColors.accent_primary),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 12,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(
+                              color: AppColors.border_subtle,
+                            ),
+                          ),
+                          prefixIcon: const Icon(
+                            Icons.wallpaper,
+                            size: 20,
+                            color: AppColors.accent_primary,
+                          ),
                         ),
                       ),
                     ),
@@ -545,19 +795,31 @@ class _SettingsViewState extends State<SettingsView> {
                         setState(() => _heroImageUrlController.text = url);
                       },
                       itemBuilder: (context) => [
-                        const PopupMenuItem(value: 'cashier_banner.jpg', child: Text('African Retail Cashier (Default)')),
                         const PopupMenuItem(
-                            value: 'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=1600&q=80',
-                            child: Text('Supermarket Checkout Counter')),
+                          value: 'cashier_banner.jpg',
+                          child: Text('African Retail Cashier (Default)'),
+                        ),
                         const PopupMenuItem(
-                            value: 'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1600&q=80',
-                            child: Text('Modern Grocery Aisle')),
+                          value:
+                              'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=1600&q=80',
+                          child: Text('Supermarket Checkout Counter'),
+                        ),
                         const PopupMenuItem(
-                            value: 'https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=1600&q=80',
-                            child: Text('Boutique & Retail Counter')),
+                          value:
+                              'https://images.unsplash.com/photo-1604719312566-8912e9227c6a?w=1600&q=80',
+                          child: Text('Modern Grocery Aisle'),
+                        ),
+                        const PopupMenuItem(
+                          value:
+                              'https://images.unsplash.com/photo-1578916171728-46686eac8d58?w=1600&q=80',
+                          child: Text('Boutique & Retail Counter'),
+                        ),
                       ],
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 12,
+                        ),
                         decoration: BoxDecoration(
                           color: AppColors.bg_subtle,
                           borderRadius: BorderRadius.circular(10),
@@ -566,9 +828,19 @@ class _SettingsViewState extends State<SettingsView> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: const [
-                            Icon(Icons.photo_library_outlined, size: 16, color: AppColors.accent_primary),
+                            Icon(
+                              Icons.photo_library_outlined,
+                              size: 16,
+                              color: AppColors.accent_primary,
+                            ),
                             SizedBox(width: 6),
-                            Text('Background Presets', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            Text(
+                              'Background Presets',
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                             Icon(Icons.arrow_drop_down, size: 16),
                           ],
                         ),
@@ -580,10 +852,10 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 24),
-            ],
+          ],
 
-            // ─── 2. Users, Roles & Staff Access Section ──────────────────
-            if (_selectedSettingsSection == 1) ...[
+          // ─── 2. Users, Roles & Staff Access Section ──────────────────
+          if (_selectedSettingsSection == 1) ...[
             _buildSection(
               title: 'Users, Roles & Staff Access Control',
               icon: Icons.manage_accounts_outlined,
@@ -593,20 +865,30 @@ class _SettingsViewState extends State<SettingsView> {
                 label: const Text('Add Staff Member'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.accent_primary,
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
               children: [
                 const Text(
                   'Manage staff access. Staff sign in with their phone number and 4–6 digit PIN; PINs are verified by the shop API and never stored in the browser.',
-                  style: TextStyle(fontSize: 13, color: AppColors.text_secondary, height: 1.4),
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: AppColors.text_secondary,
+                    height: 1.4,
+                  ),
                 ),
                 const SizedBox(height: 18),
 
                 // Staff Cards List
                 ...users.map((u) {
-                  final isCurrent = widget.state.currentLoggedInUser?.id == u.id;
+                  final isCurrent =
+                      widget.state.currentLoggedInUser?.id == u.id;
                   final rColor = _roleColor(u.role);
 
                   return Container(
@@ -616,7 +898,9 @@ class _SettingsViewState extends State<SettingsView> {
                       color: AppColors.bg_subtle,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isCurrent ? AppColors.accent_primary : AppColors.border_subtle,
+                        color: isCurrent
+                            ? AppColors.accent_primary
+                            : AppColors.border_subtle,
                         width: isCurrent ? 1.5 : 1.0,
                       ),
                     ),
@@ -627,7 +911,11 @@ class _SettingsViewState extends State<SettingsView> {
                           backgroundColor: u.color.withValues(alpha: 0.15),
                           child: Text(
                             u.initials,
-                            style: TextStyle(color: u.color, fontWeight: FontWeight.bold, fontSize: 14),
+                            style: TextStyle(
+                              color: u.color,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 14,
+                            ),
                           ),
                         ),
                         const SizedBox(width: 16),
@@ -647,7 +935,10 @@ class _SettingsViewState extends State<SettingsView> {
                                   ),
                                   const SizedBox(width: 8),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 8,
+                                      vertical: 3,
+                                    ),
                                     decoration: BoxDecoration(
                                       color: rColor.withValues(alpha: 0.12),
                                       borderRadius: BorderRadius.circular(6),
@@ -664,15 +955,25 @@ class _SettingsViewState extends State<SettingsView> {
                                   if (isCurrent) ...[
                                     const SizedBox(width: 8),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 3,
+                                      ),
                                       decoration: BoxDecoration(
                                         color: AppColors.accent_light,
                                         borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: AppColors.accent_primary.withValues(alpha: 0.3)),
+                                        border: Border.all(
+                                          color: AppColors.accent_primary
+                                              .withValues(alpha: 0.3),
+                                        ),
                                       ),
                                       child: const Text(
                                         'Current Session',
-                                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.accent_primary),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: AppColors.accent_primary,
+                                        ),
                                       ),
                                     ),
                                   ],
@@ -681,13 +982,34 @@ class _SettingsViewState extends State<SettingsView> {
                               const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  const Icon(Icons.phone_outlined, size: 12, color: AppColors.text_tertiary),
+                                  const Icon(
+                                    Icons.phone_outlined,
+                                    size: 12,
+                                    color: AppColors.text_tertiary,
+                                  ),
                                   const SizedBox(width: 4),
-                                  Text(u.phone, style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
+                                  Text(
+                                    u.phone,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.text_tertiary,
+                                    ),
+                                  ),
                                   const SizedBox(width: 16),
-                                  const Icon(Icons.vpn_key_outlined, size: 12, color: AppColors.text_tertiary),
+                                  const Icon(
+                                    Icons.vpn_key_outlined,
+                                    size: 12,
+                                    color: AppColors.text_tertiary,
+                                  ),
                                   const SizedBox(width: 4),
-                                  Text('PIN: ${u.pin}', style: const TextStyle(fontSize: 12, color: AppColors.text_secondary, fontWeight: FontWeight.w600)),
+                                  Text(
+                                    'PIN: ${u.pin}',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      color: AppColors.text_secondary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ],
@@ -701,7 +1023,9 @@ class _SettingsViewState extends State<SettingsView> {
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
-                                color: u.active ? AppColors.status_success : AppColors.text_tertiary,
+                                color: u.active
+                                    ? AppColors.status_success
+                                    : AppColors.text_tertiary,
                               ),
                             ),
                             Transform.scale(
@@ -714,7 +1038,19 @@ class _SettingsViewState extends State<SettingsView> {
                                     await widget.state.toggleUserActive(u.id);
                                     if (mounted) setState(() {});
                                   } catch (error) {
-                                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('PosException: ', ''))));
+                                    if (mounted)
+                                      ScaffoldMessenger.of(
+                                        context,
+                                      ).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            error.toString().replaceFirst(
+                                              'PosException: ',
+                                              '',
+                                            ),
+                                          ),
+                                        ),
+                                      );
                                   }
                                 },
                               ),
@@ -724,21 +1060,48 @@ class _SettingsViewState extends State<SettingsView> {
                         const SizedBox(width: 8),
                         IconButton(
                           tooltip: 'Edit User & PIN',
-                          icon: const Icon(Icons.edit_outlined, color: AppColors.text_secondary, size: 18),
-                          onPressed: () => _showUserEditorModal(existingUser: u),
+                          icon: const Icon(
+                            Icons.edit_outlined,
+                            color: AppColors.text_secondary,
+                            size: 18,
+                          ),
+                          onPressed:
+                              u.role == PosUserRole.systemAdmin &&
+                                  widget.state.currentLoggedInUser?.role !=
+                                      PosUserRole.systemAdmin
+                              ? null
+                              : () => _showUserEditorModal(existingUser: u),
                         ),
                         if (users.length > 1)
                           IconButton(
                             tooltip: 'Delete User',
-                            icon: const Icon(Icons.delete_outline, color: AppColors.status_danger, size: 18),
+                            icon: const Icon(
+                              Icons.delete_outline,
+                              color: AppColors.status_danger,
+                              size: 18,
+                            ),
                             onPressed: () async {
                               try {
                                 await widget.state.deleteUser(u.id);
                                 if (!mounted) return;
                                 setState(() {});
-                                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deactivated ${u.fullName}.')));
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Deactivated ${u.fullName}.'),
+                                  ),
+                                );
                               } catch (error) {
-                                if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error.toString().replaceFirst('PosException: ', ''))));
+                                if (mounted)
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        error.toString().replaceFirst(
+                                          'PosException: ',
+                                          '',
+                                        ),
+                                      ),
+                                    ),
+                                  );
                               }
                             },
                           ),
@@ -750,10 +1113,10 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 24),
-            ],
+          ],
 
-            // ─── 3. Hardware & Peripherals ─────────────────────────────────
-            if (_selectedSettingsSection == 2) ...[
+          // ─── 3. Hardware & Peripherals ─────────────────────────────────
+          if (_selectedSettingsSection == 2) ...[
             _buildSection(
               title: 'Hardware & Peripherals',
               icon: Icons.print_outlined,
@@ -764,22 +1127,42 @@ class _SettingsViewState extends State<SettingsView> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: const [
-                          Text('Receipt Thermal Printer', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.text_primary)),
+                          Text(
+                            'Receipt Thermal Printer',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.text_primary,
+                            ),
+                          ),
                           SizedBox(height: 4),
-                          Text('Select standard paper roll width for ESC/POS output',
-                              style: TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
+                          Text(
+                            'Select standard paper roll width for ESC/POS output',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.text_tertiary,
+                            ),
+                          ),
                         ],
                       ),
                     ),
                     DropdownButton<String>(
                       value: _printerPaperSize,
                       dropdownColor: AppColors.bg_surface,
-                      style: const TextStyle(color: AppColors.text_primary, fontWeight: FontWeight.bold),
+                      style: const TextStyle(
+                        color: AppColors.text_primary,
+                        fontWeight: FontWeight.bold,
+                      ),
                       items: ['80mm', '58mm'].map((s) {
-                        return DropdownMenuItem(value: s, child: Text(s == '80mm' ? '80mm (Standard)' : '58mm (Compact)'));
+                        return DropdownMenuItem(
+                          value: s,
+                          child: Text(
+                            s == '80mm' ? '80mm (Standard)' : '58mm (Compact)',
+                          ),
+                        );
                       }).toList(),
                       onChanged: (val) {
-                        if (val != null) setState(() => _printerPaperSize = val);
+                        if (val != null)
+                          setState(() => _printerPaperSize = val);
                       },
                     ),
                   ],
@@ -787,18 +1170,40 @@ class _SettingsViewState extends State<SettingsView> {
                 const Divider(color: AppColors.border_subtle, height: 28),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Auto-print receipt on charge', style: TextStyle(color: AppColors.text_primary, fontWeight: FontWeight.w600)),
-                  subtitle: const Text('Immediately triggers thermal print job when transaction completes',
-                      style: TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
+                  title: const Text(
+                    'Auto-print receipt on charge',
+                    style: TextStyle(
+                      color: AppColors.text_primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Immediately triggers thermal print job when transaction completes',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.text_tertiary,
+                    ),
+                  ),
                   value: _autoPrintReceipt,
                   activeThumbColor: AppColors.accent_primary,
                   onChanged: (val) => setState(() => _autoPrintReceipt = val),
                 ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
-                  title: const Text('Kick Cash Drawer Pulse', style: TextStyle(color: AppColors.text_primary, fontWeight: FontWeight.w600)),
-                  subtitle: const Text('Send 24V solenoid pulse to RJ11 port on cash payments',
-                      style: TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
+                  title: const Text(
+                    'Kick Cash Drawer Pulse',
+                    style: TextStyle(
+                      color: AppColors.text_primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Send 24V solenoid pulse to RJ11 port on cash payments',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.text_tertiary,
+                    ),
+                  ),
                   value: _cashDrawerKick,
                   activeThumbColor: AppColors.accent_primary,
                   onChanged: (val) => setState(() => _cashDrawerKick = val),
@@ -807,10 +1212,10 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 24),
-            ],
+          ],
 
-            // ─── 4. Cloud & Synchronization ───────────────────────────────
-            if (_selectedSettingsSection == 3) ...[
+          // ─── 4. Cloud & Synchronization ───────────────────────────────
+          if (_selectedSettingsSection == 3) ...[
             _buildSection(
               title: 'Server & Cloud Synchronization',
               icon: Icons.cloud_sync_outlined,
@@ -820,14 +1225,27 @@ class _SettingsViewState extends State<SettingsView> {
                     Expanded(
                       child: TextField(
                         controller: _serverUrlController,
-                        style: const TextStyle(color: AppColors.text_primary, fontSize: 14),
+                        style: const TextStyle(
+                          color: AppColors.text_primary,
+                          fontSize: 14,
+                        ),
                         decoration: InputDecoration(
                           labelText: 'Shop API Base URL',
-                          labelStyle: const TextStyle(color: AppColors.text_secondary),
+                          labelStyle: const TextStyle(
+                            color: AppColors.text_secondary,
+                          ),
                           filled: true,
                           fillColor: AppColors.bg_subtle,
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border_subtle)),
-                          prefixIcon: const Icon(Icons.link, color: AppColors.accent_primary),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: const BorderSide(
+                              color: AppColors.border_subtle,
+                            ),
+                          ),
+                          prefixIcon: const Icon(
+                            Icons.link,
+                            color: AppColors.accent_primary,
+                          ),
                         ),
                       ),
                     ),
@@ -835,15 +1253,27 @@ class _SettingsViewState extends State<SettingsView> {
                     ElevatedButton.icon(
                       onPressed: _isCheckingConnection ? null : _testConnection,
                       icon: _isCheckingConnection
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            )
                           : const Icon(Icons.wifi_tethering, size: 18),
                       label: const Text('Test Ping'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.accent_primary,
                         foregroundColor: Colors.white,
                         elevation: 0,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: 18,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                     ),
                   ],
@@ -856,7 +1286,9 @@ class _SettingsViewState extends State<SettingsView> {
                       height: 10,
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: _connectionResult == true ? AppColors.status_success : AppColors.status_warning,
+                        color: _connectionResult == true
+                            ? AppColors.status_success
+                            : AppColors.status_warning,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -864,7 +1296,10 @@ class _SettingsViewState extends State<SettingsView> {
                       _connectionResult == true
                           ? 'Online • Synchronized with shop-api'
                           : 'Offline Fallback Enabled • Local transactions buffered in SQLite/RAM',
-                      style: const TextStyle(fontSize: 12, color: AppColors.text_secondary),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.text_secondary,
+                      ),
                     ),
                   ],
                 ),
@@ -872,17 +1307,20 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 24),
-            ],
+          ],
 
-            // ─── 5. Data & Catalogue Reset / Recovery ────────────────────
-            if (_selectedSettingsSection == 4) ...[
+          // ─── 5. Data & Catalogue Reset / Recovery ────────────────────
+          if (_selectedSettingsSection == 4) ...[
             _buildSection(
               title: 'Data & Catalogue Management',
               icon: Icons.storage_outlined,
               children: [
                 Text(
                   '${widget.state.products.length} products in catalogue • ${widget.state.users.length} registered staff members.',
-                  style: const TextStyle(fontSize: 13, color: AppColors.text_secondary),
+                  style: const TextStyle(
+                    fontSize: 13,
+                    color: AppColors.text_secondary,
+                  ),
                 ),
                 const SizedBox(height: 16),
                 Row(
@@ -895,15 +1333,28 @@ class _SettingsViewState extends State<SettingsView> {
                           context: context,
                           builder: (ctx) => AlertDialog(
                             title: const Text('Reset Catalogue?'),
-                            content: const Text('This will restore the factory sample product catalogue. Current customized products will be replaced.'),
+                            content: const Text(
+                              'This will restore the factory sample product catalogue. Current customized products will be replaced.',
+                            ),
                             actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('Cancel'),
+                              ),
                               FilledButton(
-                                style: FilledButton.styleFrom(backgroundColor: AppColors.status_danger),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppColors.status_danger,
+                                ),
                                 onPressed: () {
                                   Navigator.pop(ctx);
                                   widget.state.resetCatalogueToDefaults();
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Catalogue restored to defaults.')));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Catalogue restored to defaults.',
+                                      ),
+                                    ),
+                                  );
                                 },
                                 child: const Text('Confirm Reset'),
                               ),
@@ -921,15 +1372,28 @@ class _SettingsViewState extends State<SettingsView> {
                           context: context,
                           builder: (ctx) => AlertDialog(
                             title: const Text('Reset Staff Accounts?'),
-                            content: const Text('This will restore the default staff accounts and PINs.'),
+                            content: const Text(
+                              'This will restore the default staff accounts and PINs.',
+                            ),
                             actions: [
-                              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+                              TextButton(
+                                onPressed: () => Navigator.pop(ctx),
+                                child: const Text('Cancel'),
+                              ),
                               FilledButton(
-                                style: FilledButton.styleFrom(backgroundColor: AppColors.status_danger),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppColors.status_danger,
+                                ),
                                 onPressed: () {
                                   Navigator.pop(ctx);
                                   widget.state.resetUsersToDefaults();
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Staff accounts reset to defaults.')));
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text(
+                                        'Staff accounts reset to defaults.',
+                                      ),
+                                    ),
+                                  );
                                 },
                                 child: const Text('Confirm Reset'),
                               ),
@@ -944,29 +1408,38 @@ class _SettingsViewState extends State<SettingsView> {
             ),
 
             const SizedBox(height: 36),
-            ],
+          ],
 
-            // Bottom Sticky Save Bar
-            Center(
-              child: SizedBox(
-                width: 320,
-                child: FilledButton.icon(
-                  onPressed: _isSaving ? null : _saveAllSettings,
-                  icon: _isSaving
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.check, size: 20),
-                  label: Text(_isSaving ? 'Saving Changes...' : 'Save Changes'),
-                  style: FilledButton.styleFrom(
-                    backgroundColor: AppColors.accent_primary,
-                    padding: const EdgeInsets.symmetric(vertical: 18),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          // Bottom Sticky Save Bar
+          Center(
+            child: SizedBox(
+              width: 320,
+              child: FilledButton.icon(
+                onPressed: _isSaving ? null : _saveAllSettings,
+                icon: _isSaving
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.check, size: 20),
+                label: Text(_isSaving ? 'Saving Changes...' : 'Save Changes'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppColors.accent_primary,
+                  padding: const EdgeInsets.symmetric(vertical: 18),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
                   ),
                 ),
               ),
             ),
-            const SizedBox(height: 20),
-          ],
-        ),
+          ),
+          const SizedBox(height: 20),
+        ],
+      ),
     );
     return Scaffold(
       backgroundColor: AppColors.bg_canvas,
@@ -1020,11 +1493,18 @@ class _SettingsViewState extends State<SettingsView> {
               selected: selected,
               avatar: Icon(section.icon, size: 17),
               label: Text(section.label),
-              onSelected: (_) => setState(() => _selectedSettingsSection = section.id),
+              onSelected: (_) =>
+                  setState(() => _selectedSettingsSection = section.id),
               selectedColor: AppColors.accent_light,
-              side: BorderSide(color: selected ? AppColors.accent_primary : AppColors.border_subtle),
+              side: BorderSide(
+                color: selected
+                    ? AppColors.accent_primary
+                    : AppColors.border_subtle,
+              ),
               labelStyle: TextStyle(
-                color: selected ? AppColors.accent_primary : AppColors.text_secondary,
+                color: selected
+                    ? AppColors.accent_primary
+                    : AppColors.text_secondary,
                 fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
               ),
             );
@@ -1047,9 +1527,16 @@ class _SettingsViewState extends State<SettingsView> {
             padding: EdgeInsets.fromLTRB(8, 2, 8, 14),
             child: Row(
               children: [
-                Icon(Icons.tune_rounded, color: AppColors.accent_primary, size: 20),
+                Icon(
+                  Icons.tune_rounded,
+                  color: AppColors.accent_primary,
+                  size: 20,
+                ),
                 SizedBox(width: 9),
-                Text('Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+                Text(
+                  'Settings',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                ),
               ],
             ),
           ),
@@ -1077,9 +1564,18 @@ class _SettingsViewState extends State<SettingsView> {
             child: const Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline, size: 16, color: AppColors.text_tertiary),
+                Icon(
+                  Icons.info_outline,
+                  size: 16,
+                  color: AppColors.text_tertiary,
+                ),
                 SizedBox(width: 8),
-                Expanded(child: Text('Store and terminal preferences save with Save Changes. Staff access updates immediately.', style: AppText.xs)),
+                Expanded(
+                  child: Text(
+                    'Store and terminal preferences save with Save Changes. Staff access updates immediately.',
+                    style: AppText.xs,
+                  ),
+                ),
               ],
             ),
           ),
@@ -1089,12 +1585,17 @@ class _SettingsViewState extends State<SettingsView> {
   }
 
   Widget _settingsGroupLabel(String label) => Padding(
-        padding: const EdgeInsets.fromLTRB(9, 0, 9, 6),
-        child: Text(
-          label,
-          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 1, color: AppColors.text_tertiary),
-        ),
-      );
+    padding: const EdgeInsets.fromLTRB(9, 0, 9, 6),
+    child: Text(
+      label,
+      style: const TextStyle(
+        fontSize: 10,
+        fontWeight: FontWeight.w800,
+        letterSpacing: 1,
+        color: AppColors.text_tertiary,
+      ),
+    ),
+  );
 
   Widget _settingsNavTile(({int id, String label, IconData icon}) section) {
     final selected = _selectedSettingsSection == section.id;
@@ -1110,7 +1611,13 @@ class _SettingsViewState extends State<SettingsView> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 11),
             child: Row(
               children: [
-                Icon(section.icon, size: 18, color: selected ? AppColors.accent_primary : AppColors.text_tertiary),
+                Icon(
+                  section.icon,
+                  size: 18,
+                  color: selected
+                      ? AppColors.accent_primary
+                      : AppColors.text_tertiary,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -1118,11 +1625,18 @@ class _SettingsViewState extends State<SettingsView> {
                     style: TextStyle(
                       fontSize: 12.5,
                       fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-                      color: selected ? AppColors.accent_primary : AppColors.text_secondary,
+                      color: selected
+                          ? AppColors.accent_primary
+                          : AppColors.text_secondary,
                     ),
                   ),
                 ),
-                if (selected) const Icon(Icons.chevron_right_rounded, size: 17, color: AppColors.accent_primary),
+                if (selected)
+                  const Icon(
+                    Icons.chevron_right_rounded,
+                    size: 17,
+                    color: AppColors.accent_primary,
+                  ),
               ],
             ),
           ),
@@ -1131,11 +1645,22 @@ class _SettingsViewState extends State<SettingsView> {
     );
   }
 
-  Widget _buildTextField(String label, TextEditingController ctrl, {String? hint}) {
+  Widget _buildTextField(
+    String label,
+    TextEditingController ctrl, {
+    String? hint,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: AppColors.text_secondary)),
+        Text(
+          label,
+          style: const TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 13,
+            color: AppColors.text_secondary,
+          ),
+        ),
         const SizedBox(height: 6),
         TextField(
           controller: ctrl,
@@ -1144,8 +1669,14 @@ class _SettingsViewState extends State<SettingsView> {
             hintText: hint,
             filled: true,
             fillColor: AppColors.bg_subtle,
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+            contentPadding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 12,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: const BorderSide(color: AppColors.border_subtle),
+            ),
           ),
         ),
       ],
@@ -1153,7 +1684,8 @@ class _SettingsViewState extends State<SettingsView> {
   }
 
   Widget _logoPresetChip(String label, String url) {
-    final isSelected = (_pendingLogoBase64 == null || _pendingLogoBase64!.isEmpty) &&
+    final isSelected =
+        (_pendingLogoBase64 == null || _pendingLogoBase64!.isEmpty) &&
         _brandLogoUrlController.text.trim() == url;
     return InkWell(
       borderRadius: BorderRadius.circular(20),
@@ -1167,10 +1699,14 @@ class _SettingsViewState extends State<SettingsView> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.accent_primary.withAlpha(25) : AppColors.bg_subtle,
+          color: isSelected
+              ? AppColors.accent_primary.withAlpha(25)
+              : AppColors.bg_subtle,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isSelected ? AppColors.accent_primary : AppColors.border_subtle,
+            color: isSelected
+                ? AppColors.accent_primary
+                : AppColors.border_subtle,
           ),
         ),
         child: Text(
@@ -1178,7 +1714,9 @@ class _SettingsViewState extends State<SettingsView> {
           style: TextStyle(
             fontSize: 11,
             fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
-            color: isSelected ? AppColors.accent_primary : AppColors.text_secondary,
+            color: isSelected
+                ? AppColors.accent_primary
+                : AppColors.text_secondary,
           ),
         ),
       ),
@@ -1208,7 +1746,11 @@ class _SettingsViewState extends State<SettingsView> {
               Expanded(
                 child: Text(
                   title,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.text_primary),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.text_primary,
+                  ),
                 ),
               ),
               if (headerTrailing != null) headerTrailing,

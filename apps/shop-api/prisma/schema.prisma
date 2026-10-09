@@ -26,6 +26,7 @@ enum UserRole {
   MANAGER
   CASHIER
   STOCK_CLERK
+  SUPER_ADMIN
 }
 
 enum PaymentMethod {

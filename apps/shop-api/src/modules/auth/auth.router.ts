@@ -26,14 +26,14 @@ const StaffCreateSchema = z.object({
   fullName: z.string().trim().min(1).max(120),
   phone: z.string().min(9).max(24),
   pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits'),
-  role: z.enum(['OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK']),
+  role: z.enum(['OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK', 'SUPER_ADMIN']),
 });
 
 const StaffUpdateSchema = z.object({
   fullName: z.string().trim().min(1).max(120).optional(),
   phone: z.string().min(9).max(24).optional(),
   pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits').optional(),
-  role: z.enum(['OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK']).optional(),
+  role: z.enum(['OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK', 'SUPER_ADMIN']).optional(),
   active: z.boolean().optional(),
 }).refine((data) => Object.keys(data).length > 0, 'At least one field is required.');
 
@@ -129,8 +129,8 @@ export function authRouter(): Router {
     }
   });
 
-  // Staff management is owner-only; PIN hashes are never returned.
-  router.get('/users', requireAuth, requireRole('OWNER'), async (_req, res) => {
+  // PIN hashes are never returned.
+  router.get('/users', requireAuth, requireRole('OWNER', 'MANAGER'), async (_req, res) => {
     try {
       const users = await prisma.user.findMany({
         select: { id: true, fullName: true, phone: true, role: true, active: true },
@@ -143,9 +143,16 @@ export function authRouter(): Router {
     }
   });
 
-  router.post('/users', requireAuth, requireRole('OWNER'), async (req, res) => {
+  router.post('/users', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
     const body = parseBody(StaffCreateSchema, req, res);
     if (!body) return;
+    const auth = res.locals.auth;
+    if (auth.role === 'MANAGER' && (body.role === 'OWNER' || body.role === 'SUPER_ADMIN')) {
+      return sendError(res, 403, 'FORBIDDEN', 'Managers cannot create owner or system administrator accounts.');
+    }
+    if (body.role === 'SUPER_ADMIN' && auth.role !== 'SUPER_ADMIN') {
+      return sendError(res, 403, 'FORBIDDEN', 'Only a system administrator can create another system administrator.');
+    }
     try {
       const phone = normalizePhone(body.phone);
       const pinHash = await argon2.hash(body.pin, { type: argon2.argon2id });
@@ -176,8 +183,14 @@ export function authRouter(): Router {
 
       const nextRole = body.role ?? current.role;
       const nextActive = body.active ?? current.active;
-      if (current.id === auth.userId && (nextRole !== 'OWNER' || !nextActive)) {
-        return sendError(res, 409, 'LAST_OWNER', 'You cannot deactivate or demote your own owner account.');
+      if (current.role === 'SUPER_ADMIN' && auth.role !== 'SUPER_ADMIN') {
+        return sendError(res, 403, 'FORBIDDEN', 'Only a system administrator can update a system administrator account.');
+      }
+      if (nextRole === 'SUPER_ADMIN' && auth.role !== 'SUPER_ADMIN') {
+        return sendError(res, 403, 'FORBIDDEN', 'Only a system administrator can assign the system administrator role.');
+      }
+      if (current.id === auth.userId && (nextRole !== current.role || !nextActive)) {
+        return sendError(res, 409, 'LAST_OWNER', 'You cannot deactivate or demote your own administrator account.');
       }
       if (current.role === 'OWNER' && current.active && (nextRole !== 'OWNER' || !nextActive)) {
         const activeOwners = await prisma.user.count({ where: { role: 'OWNER', active: true } });
