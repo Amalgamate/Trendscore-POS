@@ -18,6 +18,8 @@ import 'views/login_view.dart';
 import 'views/reports_view.dart';
 import 'views/settings_view.dart';
 import 'views/purchase_orders_view.dart';
+import 'views/delivery_view.dart';
+import 'views/rider_home_view.dart';
 import 'shared/icons.dart';
 
 void main() async {
@@ -87,7 +89,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isLocked = widget.state.currentLoggedInUser == null;
-    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 7);
+    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 8);
     _startInactivityTimer();
   }
 
@@ -125,11 +127,12 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   Set<int> _accessibleTabs(PosUser? user) {
     if (user == null) return const <int>{};
     return switch (user.role) {
-      PosUserRole.superAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7},
-      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7},
-      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7},
-      PosUserRole.cashier => const <int>{0, 1, 4},
+      PosUserRole.superAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8},
+      PosUserRole.owner      => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8},
+      PosUserRole.manager    => const <int>{0, 1, 2, 3, 4, 5, 7, 8},
+      PosUserRole.cashier    => const <int>{0, 1, 4, 8},
       PosUserRole.stockClerk => const <int>{2, 7},
+      PosUserRole.rider      => const <int>{},
     };
   }
 
@@ -357,6 +360,11 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
           final screenWidth = MediaQuery.sizeOf(context).width;
           final isMobile = screenWidth < 768;
 
+          // Rider role: show dedicated dashboard, no POS access
+          if (currentUser?.role == PosUserRole.rider) {
+            return RiderHomeView(state: widget.state, onLogout: _lockTill);
+          }
+
           final views = [
             _PosTerminalView(
               state: widget.state,
@@ -369,6 +377,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             ReportsView(state: widget.state),
             SettingsView(state: widget.state),
             PurchaseOrdersView(state: widget.state),
+            // index 8 — Delivery management view
+            DeliveryView(state: widget.state),
           ];
 
           if (isMobile) {
@@ -623,6 +633,7 @@ class _NavigationSidebar extends StatelessWidget {
                     (tab: 1, icon: AppIcons.receiptLong, label: 'Sales'),
                     (tab: 2, icon: AppIcons.inventory, label: 'Stock'),
                     (tab: 7, icon: AppIcons.shipping, label: 'Orders'),
+                    (tab: 8, icon: AppIcons.shipping, label: 'Delivery'),
                     (tab: 3, icon: AppIcons.people, label: 'Credit'),
                     (tab: 4, icon: AppIcons.wallet, label: 'Till'),
                     (tab: 5, icon: AppIcons.analytics, label: 'Reports'),

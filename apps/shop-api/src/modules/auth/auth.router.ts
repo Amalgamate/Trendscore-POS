@@ -26,14 +26,14 @@ const StaffCreateSchema = z.object({
   fullName: z.string().trim().min(1).max(120),
   phone: z.string().min(9).max(24),
   pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits'),
-  role: z.enum(['SUPER_ADMIN', 'OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK']),
+  role: z.enum(['SUPER_ADMIN', 'OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK', 'RIDER']),
 });
 
 const StaffUpdateSchema = z.object({
   fullName: z.string().trim().min(1).max(120).optional(),
   phone: z.string().min(9).max(24).optional(),
   pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits').optional(),
-  role: z.enum(['SUPER_ADMIN', 'OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK']).optional(),
+  role: z.enum(['SUPER_ADMIN', 'OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK', 'RIDER']).optional(),
   active: z.boolean().optional(),
 }).refine((data) => Object.keys(data).length > 0, 'At least one field is required.');
 

@@ -27,6 +27,7 @@ enum UserRole {
   MANAGER
   CASHIER
   STOCK_CLERK
+  RIDER
 }
 
 enum PaymentMethod {
@@ -106,11 +107,21 @@ enum EntityType {
   SUPPLIER_PAYMENT
   CASH_SESSION
   OPENING_BALANCE
+  DELIVERY
 }
 
 enum LedgerEntryType {
   DEBIT
   CREDIT
+}
+
+enum DeliveryStatus {
+  PENDING
+  ASSIGNED
+  IN_TRANSIT
+  DELIVERED
+  FAILED
+  CANCELLED
 }
 
 enum ExpenseStatus {
@@ -147,6 +158,10 @@ model User {
   approvalsRequested Approval[]       @relation("ApprovalRequestedBy")
   expensesRequested Expense[]        @relation("RequestedBy")
   stockMovements    StockMovement[]
+  riderDeliveries    DeliveryOrder[] @relation("RiderDeliveries")
+  deliveriesCreated  DeliveryOrder[] @relation("DeliveryCreatedBy")
+  riderLedgerEntries RiderLedger[]   @relation("RiderLedgerEntries")
+  riderPayouts       RiderPayout[]   @relation("RiderPayouts")
 
   @@map("users")
 }
@@ -201,6 +216,9 @@ model Business {
   stockMovements  StockMovement[]
   auditLogs        AuditLog[]
   settings     BusinessSetting[]
+  deliveryOrders DeliveryOrder[]
+  riderLedger    RiderLedger[]
+  riderPayouts   RiderPayout[]
 
   @@map("businesses")
 }
@@ -403,6 +421,7 @@ model Sale {
   payments SalePayment[]
   refunds  Refund[]
   stockMovements StockMovement[] @relation("SaleStockMovements")
+  deliveryOrders DeliveryOrder[]
 
   @@index([businessId, createdAt])
   @@index([cashierId, createdAt])
@@ -737,4 +756,90 @@ model ReceiptSequence {
 
   @@id([businessId, year])
   @@map("receipt_sequences")
+}
+
+// ---------------------------------------------------------------- delivery
+
+model DeliveryOrder {
+  id              String         @id @default(uuid()) @db.Uuid
+  businessId      String         @db.Uuid
+  saleId          String?        @db.Uuid
+  riderId         String?        @db.Uuid
+  status          DeliveryStatus @default(PENDING)
+  recipientName   String
+  recipientPhone  String
+  deliveryAddress String
+  distanceKm      Decimal        @db.Decimal(8, 2)
+  /// Snapshotted from business_settings at order creation time.
+  baseFee         Decimal        @db.Decimal(14, 2)
+  topupRate       Decimal        @db.Decimal(14, 2)
+  /// Computed: baseFee + distanceKm × topupRate. Stored for fast queries.
+  deliveryFee     Decimal        @db.Decimal(14, 2)
+  assignedAt      DateTime?
+  pickedUpAt      DateTime?
+  deliveredAt     DateTime?
+  failureReason   String?
+  createdById     String         @db.Uuid
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  business  Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  rider     User?    @relation("RiderDeliveries", fields: [riderId], references: [id], onDelete: SetNull)
+  createdBy User     @relation("DeliveryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([businessId, createdAt])
+  @@index([riderId, status])
+  @@index([saleId])
+  @@map("delivery_orders")
+}
+
+/// APPEND-ONLY. Corrections are always new entries, never UPDATE or DELETE.
+/// Trigger in migration enforces this at the DB level.
+model RiderLedger {
+  id          String          @id @default(uuid()) @db.Uuid
+  businessId  String          @db.Uuid
+  riderId     String          @db.Uuid
+  entryType   LedgerEntryType
+  amount      Decimal         @db.Decimal(14, 2)
+  /// Running balance AFTER this entry.
+  balance     Decimal         @db.Decimal(14, 2)
+  entityType  EntityType
+  entityId    String?         @db.Uuid
+  reference   String?
+  note        String?
+  createdAt   DateTime        @default(now())
+  createdById String?         @db.Uuid
+
+  rider    User     @relation("RiderLedgerEntries", fields: [riderId], references: [id], onDelete: Restrict)
+  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  /// Back-relation required by Prisma — no column, navigation only.
+  /// The ledger never holds a FK to payouts; the payout holds the FK to the ledger.
+  payout   RiderPayout?
+
+  @@index([riderId, createdAt])
+  @@index([businessId, createdAt])
+  @@map("rider_ledger")
+}
+
+model RiderPayout {
+  id                 String        @id @default(uuid()) @db.Uuid
+  businessId         String        @db.Uuid
+  riderId            String        @db.Uuid
+  amount             Decimal       @db.Decimal(14, 2)
+  mpesaPhone         String
+  mpesaReceipt       String?       @unique
+  checkoutRequestId  String?
+  status             PaymentStatus
+  initiatedAt        DateTime      @default(now())
+  settledAt          DateTime?
+  riderLedgerEntryId String        @unique @db.Uuid
+
+  rider       User        @relation("RiderPayouts", fields: [riderId], references: [id], onDelete: Restrict)
+  business    Business    @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  ledgerEntry RiderLedger @relation(fields: [riderLedgerEntryId], references: [id], onDelete: Restrict)
+
+  @@index([riderId, initiatedAt])
+  @@index([status])
+  @@map("rider_payouts")
 }

@@ -427,6 +427,8 @@ class _LoginViewState extends State<LoginView> {
         return const Color(0xFF10B981);
       case PosUserRole.stockClerk:
         return const Color(0xFF2563EB);
+      case PosUserRole.rider:
+        return const Color(0xFFEA580C);
     }
   }
 

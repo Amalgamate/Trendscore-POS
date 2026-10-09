@@ -514,6 +514,7 @@ enum PosUserRole {
   manager,
   cashier,
   stockClerk,
+  rider,
 }
 
 extension PosUserRoleLabel on PosUserRole {
@@ -523,6 +524,7 @@ extension PosUserRoleLabel on PosUserRole {
     PosUserRole.manager    => 'Manager',
     PosUserRole.cashier    => 'Cashier',
     PosUserRole.stockClerk => 'Stock Clerk',
+    PosUserRole.rider      => 'Rider',
   };
 }
 
@@ -559,6 +561,8 @@ class PosUser {
         return 'Cashier';
       case PosUserRole.stockClerk:
         return 'Stock Clerk';
+      case PosUserRole.rider:
+        return 'Rider';
     }
   }
 
@@ -574,6 +578,8 @@ class PosUser {
         return 'POS Counter: Ring sales, cash drawer, receipts';
       case PosUserRole.stockClerk:
         return 'Stockroom: Inventory counts, shelf stock, receiving';
+      case PosUserRole.rider:
+        return 'Delivery: View and advance own assigned orders';
     }
   }
 
@@ -603,6 +609,7 @@ class PosUser {
       PosUserRole.manager => 'MANAGER',
       PosUserRole.cashier => 'CASHIER',
       PosUserRole.stockClerk => 'STOCK_CLERK',
+      PosUserRole.rider => 'RIDER',
     },
     if (includePin && pin.isNotEmpty) 'pin': pin,
     if (id.isNotEmpty) 'active': active,
@@ -614,6 +621,7 @@ class PosUser {
       'OWNER' => PosUserRole.owner,
       'MANAGER' => PosUserRole.manager,
       'STOCK_CLERK' => PosUserRole.stockClerk,
+      'RIDER' => PosUserRole.rider,
       _ => PosUserRole.cashier,
     };
     final color = switch (role) {
@@ -622,6 +630,7 @@ class PosUser {
       PosUserRole.manager => const Color(0xFF7C3AED),
       PosUserRole.cashier => const Color(0xFF10B981),
       PosUserRole.stockClerk => const Color(0xFF2563EB),
+      PosUserRole.rider => const Color(0xFFEA580C),
     };
     return PosUser(
       id: json['id'] as String,

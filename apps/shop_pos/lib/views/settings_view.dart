@@ -154,6 +154,7 @@ class _SettingsViewState extends State<SettingsView> {
     final currentRole = widget.state.currentLoggedInUser?.role;
     final assignableRoles = PosUserRole.values.where((r) {
       if (r == PosUserRole.superAdmin) return currentRole == PosUserRole.superAdmin;
+      if (r == PosUserRole.rider) return false; // riders are system accounts
       return true;
     }).toList();
 
@@ -169,6 +170,8 @@ class _SettingsViewState extends State<SettingsView> {
           return const Color(0xFF10B981);
         case PosUserRole.stockClerk:
           return const Color(0xFF2563EB);
+        case PosUserRole.rider:
+          return const Color(0xFFEA580C);
       }
     }
 
@@ -378,6 +381,8 @@ class _SettingsViewState extends State<SettingsView> {
         return const Color(0xFF10B981);
       case PosUserRole.stockClerk:
         return const Color(0xFF2563EB);
+      case PosUserRole.rider:
+        return const Color(0xFFEA580C);
     }
   }
 
