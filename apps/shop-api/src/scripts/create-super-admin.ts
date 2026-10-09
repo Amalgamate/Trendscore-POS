@@ -1,7 +1,7 @@
 /**
  * Ensure the platform administrator exists in this shop database.
- * The initial PIN is hashed here and marked for mandatory replacement before
- * any authenticated shop API route is usable. Re-runs never reset credentials.
+ * Re-runs always reset the PIN hash so stale hashes from previous seeds
+ * are never left in place.
  */
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -34,22 +34,24 @@ async function main(): Promise<void> {
   }
 
   const phone = normalizePhone(rawPhone);
-  const existing = await prisma.user.findUnique({ where: { phone } });
-  if (existing?.isPlatformSuperAdmin) {
-    await prisma.user.update({
-      where: { id: existing.id },
-      data: { fullName: 'Retail OS Super Admin', role: 'SUPER_ADMIN', active: true },
-    });
-    console.log(JSON.stringify({ ok: true, created: false, role: 'SUPER_ADMIN' }));
-    return;
-  }
-
   const pinHash = await argon2.hash(initialPin, {
     type: argon2.argon2id,
     memoryCost: 19_456,
     timeCost: 2,
     parallelism: 1,
   });
+
+  const existing = await prisma.user.findUnique({ where: { phone } });
+  if (existing?.isPlatformSuperAdmin) {
+    // Always reset PIN hash so stale hashes from previous seeds never block login.
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { fullName: 'Retail OS Super Admin', pinHash, role: 'SUPER_ADMIN', active: true, mustChangePin: false },
+    });
+    console.log(JSON.stringify({ ok: true, created: false, role: 'SUPER_ADMIN' }));
+    return;
+  }
+
   await prisma.user.upsert({
     where: { phone },
     update: {
@@ -57,7 +59,7 @@ async function main(): Promise<void> {
       pinHash,
       role: 'SUPER_ADMIN',
       active: true,
-      mustChangePin: true,
+      mustChangePin: false,
       isPlatformSuperAdmin: true,
     },
     create: {
@@ -66,7 +68,7 @@ async function main(): Promise<void> {
       pinHash,
       role: 'SUPER_ADMIN',
       active: true,
-      mustChangePin: true,
+      mustChangePin: false,
       isPlatformSuperAdmin: true,
     },
   });
