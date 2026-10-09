@@ -73,7 +73,11 @@ export type SaleRejection =
   | { kind: 'INSUFFICIENT_STOCK'; productId: string; name: string; available: Milli; requested: Milli }
   | { kind: 'QUANTITY_NOT_POSITIVE'; productId: string; requested: Milli }
   | { kind: 'DUPLICATE_PRODUCT'; productId: string }
-  | { kind: 'EMPTY_SALE' };
+  | { kind: 'EMPTY_SALE' }
+  | { kind: 'CUSTOMER_REQUIRED' }
+  | { kind: 'CREDIT_ACCOUNT_UNAVAILABLE'; customerId: string }
+  | { kind: 'CREDIT_FROZEN'; customerId: string }
+  | { kind: 'CREDIT_LIMIT_EXCEEDED'; customerId: string; available: Cents; requested: Cents };
 
 
 /** Rounds half away from zero. `Math.round` rounds -0.5 to -0, which is wrong for money. */
@@ -238,4 +242,3 @@ export function sumLines(lines: readonly PricedLine[]): SaleTotals {
 
   return { subtotal, costTotal, vatAmount, total: subtotal };
 }
-

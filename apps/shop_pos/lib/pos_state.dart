@@ -371,18 +371,82 @@ class PosCustomer {
     required this.creditLimit,
     required this.currentBalance,
     List<CustomerLedgerEntry>? history,
+    this.email,
+    this.address,
+    this.notes,
+    this.creditFrozen = false,
+    this.status = 'ACTIVE',
   }) : ledger = history ?? [];
 
   final String id;
   final String name;
   final String phone;
-  final Money creditLimit;
+  String? email;
+  String? address;
+  String? notes;
+  Money creditLimit;
   Money currentBalance;
+  bool creditFrozen;
+  String status;
   final List<CustomerLedgerEntry> ledger;
 
   Money get availableCredit => creditLimit > currentBalance
       ? Money(creditLimit.minorUnits - currentBalance.minorUnits)
       : const Money(0);
+
+  Map<String, dynamic> toJson() => {
+    'id': id,
+    'name': name,
+    'phone': phone,
+    'email': email,
+    'address': address,
+    'notes': notes,
+    'creditLimitMinor': creditLimit.minorUnits,
+    'currentBalanceMinor': currentBalance.minorUnits,
+    'creditFrozen': creditFrozen,
+    'status': status,
+    'ledger': ledger
+        .map(
+          (entry) => {
+            'id': entry.id,
+            'timestamp': entry.timestamp.toIso8601String(),
+            'type': entry.type.name,
+            'amountMinor': entry.amount.minorUnits,
+            'reference': entry.reference,
+            'runningBalanceMinor': entry.runningBalance.minorUnits,
+          },
+        )
+        .toList(),
+  };
+
+  factory PosCustomer.fromJson(Map<String, dynamic> json) => PosCustomer(
+    id: json['id'] as String,
+    name: json['name'] as String,
+    phone: json['phone'] as String? ?? '',
+    email: json['email'] as String?,
+    address: json['address'] as String?,
+    notes: json['notes'] as String?,
+    creditLimit: Money((json['creditLimitMinor'] as num?)?.toInt() ?? 0),
+    currentBalance: Money((json['currentBalanceMinor'] as num?)?.toInt() ?? 0),
+    creditFrozen: json['creditFrozen'] as bool? ?? false,
+    status: json['status'] as String? ?? 'ACTIVE',
+    history: (json['ledger'] as List<dynamic>? ?? const []).map((item) {
+      final entry = Map<String, dynamic>.from(item as Map);
+      return CustomerLedgerEntry(
+        id: entry['id'] as String,
+        timestamp: DateTime.parse(entry['timestamp'] as String),
+        type: LedgerEntryType.values.firstWhere(
+          (type) => type.name == entry['type'],
+          orElse: () => LedgerEntryType.saleDebit,
+        ),
+        amount: Money((entry['amountMinor'] as num?)?.toInt() ?? 0),
+        reference: entry['reference'] as String? ?? '',
+        runningBalance: Money(
+          (entry['runningBalanceMinor'] as num?)?.toInt() ?? 0,
+        ),
+      );
+    }).toList(),
+  );
 }
 
 enum CashMovementType {
@@ -628,6 +692,7 @@ class PosState extends ChangeNotifier {
 
   /// True once the async _loadFromStorage() has completed.
   bool sessionLoaded = false;
+  DateTime? sessionExpiresAt;
 
   List<PosUser> get activeUsers => users.where((u) => u.active).toList();
 
@@ -806,6 +871,7 @@ class PosState extends ChangeNotifier {
   String? catalogueSyncMessage;
   bool catalogueSyncing = false;
   late List<PosCustomer> customers;
+  List<PosCustomer> archivedCustomers = [];
   final Set<String> _archivedCustomerIds = {};
   late List<SaleRecord> sales;
   List<SaleRecord> get salesLedger => sales;
@@ -1518,12 +1584,306 @@ class PosState extends ChangeNotifier {
 
   void addCustomer(PosCustomer c) {
     _archivedCustomerIds.remove(c.id);
+    c.status = 'ACTIVE';
+    archivedCustomers.removeWhere((customer) => customer.id == c.id);
     customers.insert(0, c);
     notifyListeners();
     _persistAll();
   }
 
-  Future<void> deleteCustomer(String id) async {
+  void replaceCustomerAccounts({
+    required List<PosCustomer> active,
+    required List<PosCustomer> archived,
+  }) {
+    customers = active;
+    archivedCustomers = archived;
+    final selectedId = selectedCustomer?.id;
+    selectedCustomer = null;
+    if (selectedId != null) {
+      for (final customer in customers) {
+        if (customer.id == selectedId) {
+          selectedCustomer = customer;
+          break;
+        }
+      }
+    }
+    notifyListeners();
+    _persistAll();
+  }
+
+  void updateCustomerSnapshot(PosCustomer customer) {
+    final list = customer.status == 'ARCHIVED' ? archivedCustomers : customers;
+    final index = list.indexWhere((item) => item.id == customer.id);
+    if (index < 0) return;
+    list[index] = customer;
+    notifyListeners();
+    _persistAll();
+  }
+
+  bool get canManageCustomerCredit => canDeleteCustomers;
+
+  bool _isRemoteCustomerId(String id) =>
+      RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(id);
+
+  Future<PosCustomer> _resolveRemoteCustomer(PosCustomer customer) async {
+    Map<String, dynamic>? remote;
+    if (_isRemoteCustomerId(customer.id)) {
+      remote = await ApiService.instance.getCustomer(customer.id);
+      if (remote == null &&
+          ApiService.instance.lastError != 'Customer not found.') {
+        throw PosException(
+          ApiService.instance.lastError ??
+              'Could not verify the customer account on the shop API.',
+        );
+      }
+    }
+
+    if (remote == null) {
+      final search = customer.phone.trim().isNotEmpty
+          ? customer.phone.trim()
+          : customer.name.trim();
+      var candidates = await ApiService.instance.getCustomers(search: search);
+      if (candidates == null) {
+        throw PosException(
+          ApiService.instance.lastError ??
+              'Could not find the customer account on the shop API.',
+        );
+      }
+
+      List<Map<String, dynamic>> findMatches(
+        List<Map<String, dynamic>> values,
+      ) {
+        final byId = values
+            .where((candidate) => candidate['id'] == customer.id)
+            .toList();
+        if (byId.isNotEmpty) return byId;
+
+        final normalizedPhone = _normalizeCustomerPhone(customer.phone);
+        return values.where((candidate) {
+          final candidatePhone = _normalizeCustomerPhone(
+            candidate['phone'] as String? ?? '',
+          );
+          final nameMatches =
+              (candidate['fullName'] as String? ?? '').trim().toLowerCase() ==
+              customer.name.trim().toLowerCase();
+          if (normalizedPhone.isNotEmpty) {
+            return candidatePhone == normalizedPhone && nameMatches;
+          }
+          return nameMatches;
+        }).toList();
+      }
+
+      var matches = findMatches(candidates);
+      if (matches.isEmpty && customer.phone.trim().isNotEmpty) {
+        candidates = await ApiService.instance.getCustomers(
+          search: customer.name.trim(),
+        );
+        if (candidates == null) {
+          throw PosException(
+            ApiService.instance.lastError ??
+                'Could not find the customer account on the shop API.',
+          );
+        }
+        matches = findMatches(candidates);
+      }
+      if (matches.length > 1) {
+        throw PosException(
+          'More than one customer account matches ${customer.name}. Select the correct account from Customers & Credit.',
+        );
+      }
+      if (matches.isNotEmpty) {
+        final id = matches.single['id'] as String?;
+        if (id == null) {
+          throw PosException(
+            'The shop API returned a customer account without an ID.',
+          );
+        }
+        remote = await ApiService.instance.getCustomer(id);
+        if (remote == null) {
+          throw PosException(
+            ApiService.instance.lastError ??
+                'Could not load the customer account from the shop API.',
+          );
+        }
+      }
+    }
+
+    if (remote == null) {
+      if (!customer.currentBalance.isZero || customer.ledger.isNotEmpty) {
+        throw PosException(
+          'This customer has an unsynced balance or transaction history. Do not charge the account until its history has been restored.',
+        );
+      }
+      remote = await ApiService.instance.createCustomer({
+        'fullName': customer.name.trim(),
+        if (customer.phone.trim().isNotEmpty) 'phone': customer.phone.trim(),
+        if (customer.email?.trim().isNotEmpty == true)
+          'email': customer.email!.trim(),
+        if (customer.address?.trim().isNotEmpty == true)
+          'address': customer.address!.trim(),
+        'creditLimit': customer.creditLimit.minorUnits / 100,
+        if (customer.notes?.trim().isNotEmpty == true)
+          'notes': customer.notes!.trim(),
+      });
+      if (remote == null) {
+        throw PosException(
+          ApiService.instance.lastError ??
+              'Could not save the customer account before recording this sale.',
+        );
+      }
+    }
+
+    final remoteId = remote['id'] as String?;
+    if (remoteId == null) {
+      throw PosException(
+        'The shop API returned a customer account without an ID.',
+      );
+    }
+    if (remote['ledger'] is! List) {
+      final detail = await ApiService.instance.getCustomer(remoteId);
+      if (detail == null) {
+        throw PosException(
+          ApiService.instance.lastError ??
+              'Could not load the customer account from the shop API.',
+        );
+      }
+      remote = detail;
+    }
+
+    final syncedCustomer = _customerFromApi(remote);
+    if (!customer.currentBalance.isZero &&
+        customer.ledger.isEmpty &&
+        customer.currentBalance != syncedCustomer.currentBalance) {
+      throw PosException(
+        'This customer has an outstanding balance that is not on the shop API. Restore the account balance before charging it.',
+      );
+    }
+    if (customer.ledger.any(
+      (entry) => !syncedCustomer.ledger.any(
+        (remoteEntry) => remoteEntry.reference == entry.reference,
+      ),
+    )) {
+      throw PosException(
+        'This customer has transactions that are not on the shop API. Restore the account history before charging it.',
+      );
+    }
+
+    customers.removeWhere(
+      (item) => item.id == customer.id || item.id == syncedCustomer.id,
+    );
+    customers.insert(0, syncedCustomer);
+    selectedCustomer = syncedCustomer;
+    notifyListeners();
+    await _persistAll();
+    return syncedCustomer;
+  }
+
+  String _normalizeCustomerPhone(String phone) {
+    final digits = phone.replaceAll(RegExp(r'\D'), '');
+    if (digits.startsWith('254')) return digits;
+    if (digits.startsWith('0')) return '254${digits.substring(1)}';
+    if (digits.startsWith('7') && digits.length == 9) return '254$digits';
+    return digits;
+  }
+
+  PosCustomer _customerFromApi(Map<String, dynamic> data) {
+    final rawLedger = data['ledger'];
+    final ledger = rawLedger is List
+        ? rawLedger.map((item) {
+            final entry = Map<String, dynamic>.from(item as Map);
+            final entryType = entry['entryType'] as String? ?? '';
+            final amount = (entry['amount'] as num?)?.toDouble() ?? 0;
+            final balance = (entry['balance'] as num?)?.toDouble() ?? 0;
+            return CustomerLedgerEntry(
+              id:
+                  entry['id'] as String? ??
+                  'ledger_${DateTime.now().microsecondsSinceEpoch}',
+              timestamp:
+                  DateTime.tryParse(entry['createdAt'] as String? ?? '') ??
+                  DateTime.now(),
+              type: switch (entryType) {
+                'DEBIT' => LedgerEntryType.saleDebit,
+                'CREDIT' => LedgerEntryType.paymentCredit,
+                _ => LedgerEntryType.reversal,
+              },
+              amount: Money.fromDouble(amount),
+              reference: entry['reference'] as String? ?? '',
+              runningBalance: Money.fromDouble(balance),
+            );
+          }).toList()
+        : <CustomerLedgerEntry>[];
+
+    return PosCustomer(
+      id: data['id'] as String,
+      name: data['fullName'] as String? ?? 'Customer',
+      phone: data['phone'] as String? ?? '',
+      email: data['email'] as String?,
+      address: data['address'] as String?,
+      notes: data['notes'] as String?,
+      creditLimit: Money.fromDouble(
+        (data['creditLimit'] as num?)?.toDouble() ?? 0,
+      ),
+      currentBalance: Money.fromDouble(
+        (data['balance'] as num?)?.toDouble() ?? 0,
+      ),
+      creditFrozen: data['creditFrozen'] as bool? ?? false,
+      status: data['status'] as String? ?? 'ACTIVE',
+      history: ledger,
+    );
+  }
+
+  Future<void> updateCustomerCredit(
+    PosCustomer customer, {
+    Money? creditLimit,
+    bool? creditFrozen,
+    String? notes,
+  }) async {
+    if (!canManageCustomerCredit) {
+      throw PosException(
+        'Only an owner, manager, or system administrator can change credit terms.',
+      );
+    }
+    final payload = <String, dynamic>{
+      if (creditLimit != null) 'creditLimit': creditLimit.minorUnits / 100,
+      if (creditFrozen != null) 'creditFrozen': creditFrozen,
+      if (notes != null) 'notes': notes,
+    };
+    if (ApiService.instance.hasToken && _isRemoteCustomerId(customer.id)) {
+      final updated = await ApiService.instance.updateCustomer(
+        customer.id,
+        payload,
+      );
+      if (updated == null) {
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not update customer account.',
+        );
+      }
+    }
+    if (creditLimit != null) customer.creditLimit = creditLimit;
+    if (creditFrozen != null) customer.creditFrozen = creditFrozen;
+    if (notes != null) customer.notes = notes;
+    notifyListeners();
+    await _persistAll();
+  }
+
+  Future<void> saveCustomerNotes(PosCustomer customer, String notes) async {
+    if (ApiService.instance.hasToken && _isRemoteCustomerId(customer.id)) {
+      final saved = await ApiService.instance.updateCustomerNotes(
+        customer.id,
+        notes,
+      );
+      if (!saved) {
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not save customer notes.',
+        );
+      }
+    }
+    customer.notes = notes;
+    notifyListeners();
+    await _persistAll();
+  }
+
+  Future<void> archiveCustomer(String id) async {
     if (!canDeleteCustomers) {
       throw PosException(
         'Only an owner, manager, or system administrator can archive customer accounts.',
@@ -1538,8 +1898,7 @@ class PosState extends ChangeNotifier {
       );
     }
 
-    if (ApiService.instance.hasToken &&
-        RegExp(r'^[0-9a-fA-F-]{36}$').hasMatch(id)) {
+    if (ApiService.instance.hasToken && _isRemoteCustomerId(id)) {
       final archived = await ApiService.instance.archiveCustomer(id);
       if (!archived) {
         throw PosException(
@@ -1555,7 +1914,8 @@ class PosState extends ChangeNotifier {
         'archived_customer_ids',
         archivedIds.toList(),
       );
-      if (!saved) throw PosException('Could not save the customer archive status.');
+      if (!saved)
+        throw PosException('Could not save the customer archive status.');
     } catch (error) {
       debugPrint('Failed to persist archived customer IDs: $error');
       throw PosException('Could not save the customer archive status.');
@@ -1563,15 +1923,72 @@ class PosState extends ChangeNotifier {
     _archivedCustomerIds
       ..clear()
       ..addAll(archivedIds);
+    customer.status = 'ARCHIVED';
     customers.removeAt(index);
+    archivedCustomers.removeWhere((item) => item.id == id);
+    archivedCustomers.insert(0, customer);
     if (selectedCustomer?.id == id) selectedCustomer = null;
     notifyListeners();
     await _persistAll();
   }
 
+  Future<void> restoreCustomer(PosCustomer customer) async {
+    if (!canDeleteCustomers) {
+      throw PosException(
+        'Only an owner, manager, or system administrator can restore customer accounts.',
+      );
+    }
+    if (ApiService.instance.hasToken && _isRemoteCustomerId(customer.id)) {
+      final restored = await ApiService.instance.restoreCustomer(customer.id);
+      if (!restored) {
+        throw PosException(
+          ApiService.instance.lastError ??
+              'Could not restore customer account.',
+        );
+      }
+    }
+    customer.status = 'ACTIVE';
+    archivedCustomers.removeWhere((item) => item.id == customer.id);
+    _archivedCustomerIds.remove(customer.id);
+    customers.removeWhere((item) => item.id == customer.id);
+    customers.insert(0, customer);
+    notifyListeners();
+    await _persistAll();
+  }
+
+  Future<void> permanentlyDeleteCustomer(PosCustomer customer) async {
+    if (!canDeleteCustomers) {
+      throw PosException(
+        'Only an owner, manager, or system administrator can permanently delete customer accounts.',
+      );
+    }
+    if (customer.status != 'ARCHIVED') {
+      throw PosException('Archive the account before permanently deleting it.');
+    }
+    if (customer.currentBalance.minorUnits > 0 || customer.ledger.isNotEmpty) {
+      throw PosException(
+        'This account has financial history and must remain archived.',
+      );
+    }
+    if (ApiService.instance.hasToken && _isRemoteCustomerId(customer.id)) {
+      final deleted = await ApiService.instance.permanentlyDeleteCustomer(
+        customer.id,
+      );
+      if (!deleted) {
+        throw PosException(
+          ApiService.instance.lastError ??
+              'Could not permanently delete customer.',
+        );
+      }
+    }
+    archivedCustomers.removeWhere((item) => item.id == customer.id);
+    _archivedCustomerIds.remove(customer.id);
+    notifyListeners();
+    await _persistAll();
+  }
+
   int savedTabIndex = 0;
-  static const int sessionTimeoutMinutes =
-      60; // 1 hour unattended session threshold
+  static const int sessionDurationMinutes = 8 * 60;
 
   void setActiveTab(int index) {
     savedTabIndex = index;
@@ -1586,7 +2003,7 @@ class PosState extends ChangeNotifier {
     } catch (_) {}
   }
 
-  /// Touch session on any user action so the 1-hour unattended window rolls forward
+  /// Record activity without extending the fixed eight-hour login expiry.
   Future<void> touchSession() async {
     if (currentLoggedInUser == null) return;
     try {
@@ -1672,6 +2089,28 @@ class PosState extends ChangeNotifier {
           debugPrint('Error parsing categories_json: $e');
         }
       }
+      final customersJson = prefs.getString('customers_json');
+      if (customersJson != null) {
+        try {
+          final list = jsonDecode(customersJson) as List;
+          customers = list
+              .map((item) => PosCustomer.fromJson(item as Map<String, dynamic>))
+              .toList();
+        } catch (e) {
+          debugPrint('Error parsing customers_json: $e');
+        }
+      }
+      final archivedCustomersJson = prefs.getString('archived_customers_json');
+      if (archivedCustomersJson != null) {
+        try {
+          final list = jsonDecode(archivedCustomersJson) as List;
+          archivedCustomers = list
+              .map((item) => PosCustomer.fromJson(item as Map<String, dynamic>))
+              .toList();
+        } catch (e) {
+          debugPrint('Error parsing archived_customers_json: $e');
+        }
+      }
       _archivedCustomerIds
         ..clear()
         ..addAll(prefs.getStringList('archived_customer_ids') ?? const []);
@@ -1688,13 +2127,40 @@ class PosState extends ChangeNotifier {
         );
       }
 
-      // The JWT is intentionally memory-only. A cached user object is not an
-      // authentication credential, so every browser restart requires a PIN.
-      currentLoggedInUser = null;
       savedTabIndex = prefs.getInt('session_active_tab') ?? 0;
-      await prefs.remove('session_user_id');
-      await prefs.remove('session_user_json');
-      await prefs.remove('session_last_active');
+      final sessionToken = prefs.getString('session_token');
+      final expiryMillis = prefs.getInt('session_expires_at');
+      final sessionUserJson = prefs.getString('session_user_json');
+      final expiry = expiryMillis == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(expiryMillis, isUtc: true);
+      if (sessionToken != null &&
+          sessionUserJson != null &&
+          expiry != null &&
+          expiry.isAfter(DateTime.now().toUtc())) {
+        try {
+          final decoded = jsonDecode(sessionUserJson);
+          if (decoded is! Map) {
+            throw const FormatException('Invalid saved session user.');
+          }
+          final user = PosUser.fromJson(Map<String, dynamic>.from(decoded));
+          ApiService.instance.setToken(sessionToken, expiresAt: expiry);
+          currentLoggedInUser = user;
+          activeCashier = user.fullName;
+          sessionExpiresAt = expiry;
+        } catch (error) {
+          debugPrint('Could not restore the saved login session: $error');
+          ApiService.instance.setToken(null);
+          currentLoggedInUser = null;
+          sessionExpiresAt = null;
+          await _clearPersistedSession(prefs);
+        }
+      } else {
+        ApiService.instance.setToken(null);
+        currentLoggedInUser = null;
+        sessionExpiresAt = null;
+        await _clearPersistedSession(prefs);
+      }
 
       sessionLoaded = true;
       notifyListeners();
@@ -1738,6 +2204,16 @@ class PosState extends ChangeNotifier {
         'categories_json',
         jsonEncode(categories.map((c) => c.toJson()).toList()),
       );
+      await prefs.setString(
+        'customers_json',
+        jsonEncode(customers.map((customer) => customer.toJson()).toList()),
+      );
+      await prefs.setString(
+        'archived_customers_json',
+        jsonEncode(
+          archivedCustomers.map((customer) => customer.toJson()).toList(),
+        ),
+      );
       await prefs.setStringList(
         'archived_customer_ids',
         _archivedCustomerIds.toList(),
@@ -1750,6 +2226,16 @@ class PosState extends ChangeNotifier {
           'session_user_json',
           jsonEncode(currentLoggedInUser!.toJson()),
         );
+        final token = ApiService.instance.authToken;
+        final expiresAt = ApiService.instance.authTokenExpiresAt;
+        if (token != null && expiresAt != null) {
+          sessionExpiresAt = expiresAt;
+          await prefs.setString('session_token', token);
+          await prefs.setInt(
+            'session_expires_at',
+            expiresAt.millisecondsSinceEpoch,
+          );
+        }
         await prefs.setInt(
           'session_last_active',
           DateTime.now().millisecondsSinceEpoch,
@@ -1763,7 +2249,16 @@ class PosState extends ChangeNotifier {
 
   /// Call when a user logs in or out to immediately persist/clear the session.
   Future<void> persistSession(PosUser? user, {int? tabIndex}) async {
-    if (user == null) ApiService.instance.setToken(null);
+    if (user == null) {
+      ApiService.instance.setToken(null);
+      sessionExpiresAt = null;
+    } else {
+      sessionExpiresAt =
+          ApiService.instance.authTokenExpiresAt ??
+          DateTime.now().toUtc().add(
+            const Duration(minutes: sessionDurationMinutes),
+          );
+    }
     currentLoggedInUser = user;
     if (user != null) activeCashier = user.fullName;
     if (tabIndex != null) savedTabIndex = tabIndex;
@@ -1771,23 +2266,41 @@ class PosState extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
       if (user != null) {
-        await prefs.setString('session_user_id', user.id);
-        await prefs.setString('session_user_json', jsonEncode(user.toJson()));
-        await prefs.setInt(
-          'session_last_active',
-          DateTime.now().millisecondsSinceEpoch,
-        );
-        if (tabIndex != null) {
-          await prefs.setInt('session_active_tab', tabIndex);
+        final token = ApiService.instance.authToken;
+        final expiresAt = ApiService.instance.authTokenExpiresAt;
+        if (token != null && expiresAt != null) {
+          sessionExpiresAt = expiresAt;
+          await prefs.setString('session_user_id', user.id);
+          await prefs.setString('session_user_json', jsonEncode(user.toJson()));
+          await prefs.setString('session_token', token);
+          await prefs.setInt(
+            'session_expires_at',
+            expiresAt.millisecondsSinceEpoch,
+          );
+          await prefs.setInt(
+            'session_last_active',
+            DateTime.now().millisecondsSinceEpoch,
+          );
+          if (tabIndex != null) {
+            await prefs.setInt('session_active_tab', tabIndex);
+          }
+        } else {
+          await _clearPersistedSession(prefs);
         }
       } else {
-        await prefs.remove('session_user_id');
-        await prefs.remove('session_user_json');
-        await prefs.remove('session_last_active');
+        await _clearPersistedSession(prefs);
       }
     } catch (e) {
       debugPrint('Error persisting session: $e');
     }
+  }
+
+  Future<void> _clearPersistedSession(SharedPreferences prefs) async {
+    await prefs.remove('session_token');
+    await prefs.remove('session_expires_at');
+    await prefs.remove('session_user_id');
+    await prefs.remove('session_user_json');
+    await prefs.remove('session_last_active');
   }
 
   Future<void> saveSettings({
@@ -2194,17 +2707,111 @@ class PosState extends ChangeNotifier {
 
   // --- Sale Checkout ---
 
-  SaleRecord completeSale({
+  Future<SaleRecord> completeSale({
     required SalePaymentMethod method,
     required String paymentReference,
+    String? idempotencyKey,
+    PosCustomer? customer,
     Money? cashTendered,
     Money? changeDue,
-  }) {
+  }) async {
     assert(cart.canCheckout, 'Cart must be non-empty and within stock limits');
 
     _receiptCounter++;
-    final receiptNum = 'RCP-2026-$_receiptCounter';
+    var receiptNum = 'RCP-2026-$_receiptCounter';
     final now = DateTime.now();
+
+    var saleCustomer = customer ?? selectedCustomer;
+    var recordedTotal = cart.subtotal;
+    var duplicateSale = false;
+    if (ApiService.instance.hasToken) {
+      if (cart.lines.any((line) => !_isRemoteProductId(line.productId))) {
+        throw PosException(
+          'Some products in this basket are not synced to the shop database. Refresh the catalogue before completing the sale.',
+        );
+      }
+      if (method == SalePaymentMethod.credit) {
+        if (saleCustomer == null) {
+          throw PosException(
+            'Select a customer before recording a credit sale.',
+          );
+        }
+        saleCustomer = await _resolveRemoteCustomer(saleCustomer);
+      }
+      final key = idempotencyKey?.trim();
+      if (key == null || key.isEmpty) {
+        throw PosException('Could not prepare a safe sale reference. Retry.');
+      }
+      final response = await ApiService.instance.submitSale({
+        'idempotencyKey': key,
+        'clientRef': key,
+        'method': method.apiValue,
+        if (method == SalePaymentMethod.credit) 'customerId': saleCustomer!.id,
+        'lines': cart.lines
+            .map(
+              (line) => {
+                'productId': line.productId,
+                'quantity': line.quantity,
+              },
+            )
+            .toList(),
+      });
+      if (response == null) {
+        throw PosException(
+          ApiService.instance.lastError ??
+              'The shop API did not record the sale.',
+        );
+      }
+      final data = response['data'];
+      if (data is! Map<String, dynamic> || data['receiptNumber'] is! String) {
+        throw PosException(
+          'The shop API response did not include a receipt number. Retry this sale.',
+        );
+      }
+      receiptNum = data['receiptNumber'] as String;
+      final apiTotal = data['total'];
+      if (apiTotal is num)
+        recordedTotal = Money.fromDouble(apiTotal.toDouble());
+      duplicateSale = response['duplicate'] == true;
+      if (duplicateSale && apiTotal is! num) {
+        throw PosException(
+          'The shop API could not confirm the original sale total. Retry after reconnecting.',
+        );
+      }
+      if (duplicateSale && method == SalePaymentMethod.credit) {
+        final duplicateCustomerId = saleCustomer!.id;
+        if (data['customerId'] != duplicateCustomerId) {
+          throw PosException(
+            'This retry key belongs to a different customer account. The basket was left unchanged.',
+          );
+        }
+        final refreshed = await ApiService.instance.getCustomer(
+          duplicateCustomerId,
+        );
+        if (refreshed == null) {
+          throw PosException(
+            ApiService.instance.lastError ??
+                'Could not refresh the customer balance after confirming the sale.',
+          );
+        }
+        final refreshedCustomer = _customerFromApi(refreshed);
+        if (!refreshedCustomer.ledger.any(
+          (entry) => entry.reference == receiptNum,
+        )) {
+          throw PosException(
+            'The shop API confirmed the sale but its customer ledger entry is not available yet. The basket was left unchanged.',
+          );
+        }
+        saleCustomer = refreshedCustomer;
+        customers.removeWhere((item) => item.id == refreshedCustomer.id);
+        customers.insert(0, refreshedCustomer);
+        selectedCustomer = refreshedCustomer;
+      }
+    } else if (method == SalePaymentMethod.credit) {
+      throw PosException(
+        'Connect to the shop API before completing a credit sale so the customer ledger is recorded.',
+      );
+    }
 
     final items = cart.lines
         .map(
@@ -2228,20 +2835,22 @@ class PosState extends ChangeNotifier {
     }
 
     // 2. If Credit, append to Customer Credit Ledger
-    if (method == SalePaymentMethod.credit && selectedCustomer != null) {
-      final newBalance = selectedCustomer!.currentBalance + saleSubtotal;
-      selectedCustomer!.currentBalance = newBalance;
-      selectedCustomer!.ledger.insert(
-        0,
-        CustomerLedgerEntry(
-          id: 'led_sale_${now.millisecondsSinceEpoch}',
-          timestamp: now,
-          type: LedgerEntryType.saleDebit,
-          amount: saleSubtotal,
-          reference: receiptNum,
-          runningBalance: newBalance,
-        ),
-      );
+    if (method == SalePaymentMethod.credit && saleCustomer != null) {
+      if (!duplicateSale) {
+        final newBalance = saleCustomer.currentBalance + recordedTotal;
+        saleCustomer.currentBalance = newBalance;
+        saleCustomer.ledger.insert(
+          0,
+          CustomerLedgerEntry(
+            id: 'led_sale_${now.millisecondsSinceEpoch}',
+            timestamp: now,
+            type: LedgerEntryType.saleDebit,
+            amount: recordedTotal,
+            reference: receiptNum,
+            runningBalance: newBalance,
+          ),
+        );
+      }
     }
 
     // 3. If Cash, append to Shift Cash movements
@@ -2270,7 +2879,7 @@ class PosState extends ChangeNotifier {
       vatAmount: saleVat,
       paymentMethod: method,
       paymentReference: paymentReference,
-      customer: selectedCustomer,
+      customer: saleCustomer,
       cashTendered: cashTendered,
       changeDue: changeDue,
     );
@@ -2282,6 +2891,7 @@ class PosState extends ChangeNotifier {
     selectedCustomer = null;
 
     notifyListeners();
+    await _persistAll();
     return record;
   }
 
@@ -2356,12 +2966,33 @@ class PosState extends ChangeNotifier {
 
   // --- Customer Credit Payment ---
 
-  void recordCustomerPayment(
+  Future<void> recordCustomerPayment(
     String customerId,
     Money amount,
     String reference,
-  ) {
+    String method, {
+    String? note,
+  }) async {
     final cust = customers.firstWhere((c) => c.id == customerId);
+    if (ApiService.instance.hasToken && _isRemoteCustomerId(customerId)) {
+      final apiMethod = switch (method) {
+        'M-Pesa' => 'MPESA',
+        'Bank Transfer' => 'BANK',
+        _ => 'CASH',
+      };
+      final saved = await ApiService.instance.recordCustomerPayment(
+        customerId,
+        amount.minorUnits / 100,
+        apiMethod,
+        reference,
+        note: note,
+      );
+      if (!saved) {
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not record the payment.',
+        );
+      }
+    }
     final newBal = Money(
       cust.currentBalance.minorUnits >= amount.minorUnits
           ? cust.currentBalance.minorUnits - amount.minorUnits
@@ -2381,7 +3012,7 @@ class PosState extends ChangeNotifier {
     );
 
     // If payment was cash, it goes into till
-    if (reference.toUpperCase().contains('CASH')) {
+    if (method == 'Cash') {
       shift.cashPaidIn = shift.cashPaidIn + amount;
       shift.movements.insert(
         0,
@@ -2397,6 +3028,7 @@ class PosState extends ChangeNotifier {
     }
 
     notifyListeners();
+    await _persistAll();
   }
 
   // --- Cash Drawer Drops & Expenses ---

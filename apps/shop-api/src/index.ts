@@ -10,6 +10,7 @@ import { customersRouter } from './modules/customers/customers.router';
 import { salesRouter } from './modules/sales/sales.router';
 import { categoriesRouter } from './modules/categories/categories.router';
 import { businessRouter } from './modules/business/business.router';
+import { suppliersRouter } from './modules/suppliers/suppliers.router';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const VERSION = process.env.APP_VERSION ?? 'dev';
@@ -42,7 +43,7 @@ app.use(cors({
   ],
   credentials: true,
 }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '12mb' }));
 app.use(pinoHttp({ logger: log }));
 
 // ─── Unauthenticated ─────────────────────────────────────────────────────────
@@ -54,6 +55,7 @@ if (BUSINESS_ID) {
   app.use('/products', productsRouter(BUSINESS_ID));
   app.use('/categories', categoriesRouter(BUSINESS_ID));
   app.use('/customers', customersRouter(BUSINESS_ID));
+  app.use('/suppliers', suppliersRouter(BUSINESS_ID));
   app.use('/sales', salesRouter(BUSINESS_ID));
   app.use('/business', businessRouter(BUSINESS_ID));
 } else {

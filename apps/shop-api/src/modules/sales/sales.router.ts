@@ -187,7 +187,12 @@ export function salesRouter(businessId: string): Router {
         return sendError(res, 422, 'VALIDATION_ERROR', err.message);
       }
       if (err instanceof DuplicateSaleError) {
-        return sendError(res, 409, 'DUPLICATE_SALE', err.message, { receiptNumber: err.receiptNumber });
+        return sendError(res, 409, 'DUPLICATE_SALE', err.message, {
+          receiptNumber: err.receiptNumber,
+          saleId: err.saleId,
+          total: err.total,
+          customerId: err.customerId,
+        });
       }
       console.error('sales/create error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Failed to create sale.');

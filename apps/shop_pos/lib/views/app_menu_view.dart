@@ -42,6 +42,18 @@ class AppMenuView extends StatelessWidget {
       Icons.manage_accounts_rounded,
       Color(0xFF0D9488),
     ),
+    _WorkspaceApp(
+      9,
+      'Website Builder',
+      Icons.storefront_rounded,
+      Color(0xFF0D9488),
+    ),
+    _WorkspaceApp(
+      10,
+      'Social Commerce',
+      Icons.campaign_rounded,
+      Color(0xFF2563EB),
+    ),
   ];
 
   @override

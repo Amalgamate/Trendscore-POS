@@ -9,7 +9,7 @@ import 'services/favicon_service.dart';
 import 'theme/tokens.dart';
 import 'views/cash_drawer_view.dart';
 import 'views/checkout_modal.dart';
-import 'views/customers_view.dart';
+import 'views/credit_workspace_view.dart';
 import 'views/inventory_view.dart';
 import 'views/sales_history_view.dart';
 import 'views/login_view.dart';
@@ -17,6 +17,8 @@ import 'views/reports_view.dart';
 import 'views/settings_view.dart';
 import 'views/purchase_orders_view.dart';
 import 'views/staff_management_view.dart';
+import 'views/website_builder_view.dart';
+import 'views/social_commerce_view.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -28,7 +30,7 @@ void main() async {
         : state.brandLogoUrl,
   );
   ApiService.instance.configure(state.serverUrl);
-  if (state.currentLoggedInUser != null) {
+  if (state.currentLoggedInUser != null && !ApiService.instance.hasToken) {
     state.catalogueSyncMessage =
         'Local-only mode: lock the till and re-enter your PIN to sync the shop catalogue.';
   }
@@ -63,45 +65,45 @@ class PosShell extends StatefulWidget {
 class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   late int _activeTabIndex;
   late bool _isLocked;
-  Timer? _inactivityTimer;
+  Timer? _sessionTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isLocked = widget.state.currentLoggedInUser == null;
-    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 8);
-    _startInactivityTimer();
+    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 10);
+    _startSessionTimer();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _inactivityTimer?.cancel();
+    _sessionTimer?.cancel();
     super.dispose();
   }
 
-  void _startInactivityTimer() {
-    _inactivityTimer?.cancel();
+  void _startSessionTimer() {
+    _sessionTimer?.cancel();
     if (!_isLocked) {
-      _inactivityTimer = Timer(
-        const Duration(minutes: PosState.sessionTimeoutMinutes),
-        () {
-          if (mounted && !_isLocked) {
-            _lockTill();
-          }
-        },
-      );
+      final expiresAt = widget.state.sessionExpiresAt;
+      final remaining = expiresAt == null
+          ? const Duration(minutes: PosState.sessionDurationMinutes)
+          : expiresAt.difference(DateTime.now().toUtc());
+      if (remaining <= Duration.zero) {
+        _lockTill();
+        return;
+      }
+      _sessionTimer = Timer(remaining, _lockTill);
     }
   }
 
   void _onUserInteraction() {
     widget.state.touchSession();
-    _startInactivityTimer();
   }
 
   void _lockTill() {
-    _inactivityTimer?.cancel();
+    _sessionTimer?.cancel();
     widget.state.logout();
     setState(() {
       _isLocked = true;
@@ -112,10 +114,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     if (user == null) return const <int>{};
     return switch (user.role) {
       PosUserRole.owner ||
-      PosUserRole.systemAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7},
-      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8},
-      PosUserRole.cashier => const <int>{0, 1, 4},
-      PosUserRole.stockClerk => const <int>{2, 7},
+      PosUserRole.systemAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8, 9, 10},
+      PosUserRole.cashier => const <int>{0, 1, 3, 4},
+      PosUserRole.stockClerk => const <int>{2, 3, 7},
     };
   }
 
@@ -277,6 +279,20 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                     Icons.manage_accounts_outlined,
                     'Staff Management',
                     8,
+                    ctx,
+                  ),
+                if (allowedTabs.contains(9))
+                  _moreTile(
+                    Icons.storefront_outlined,
+                    'Website Builder',
+                    9,
+                    ctx,
+                  ),
+                if (allowedTabs.contains(10))
+                  _moreTile(
+                    Icons.campaign_outlined,
+                    'Social Commerce',
+                    10,
                     ctx,
                   ),
               ],
@@ -452,8 +468,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             _activeTabIndex = allowedTabs.first;
           }
           widget.state.persistSession(user, tabIndex: _activeTabIndex);
-          _startInactivityTimer();
           setState(() => _isLocked = false);
+          _startSessionTimer();
         },
       );
     }
@@ -480,16 +496,32 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             ),
             SalesHistoryView(state: widget.state),
             InventoryView(state: widget.state),
-            CustomersView(state: widget.state),
+            CreditWorkspaceView(state: widget.state),
             CashDrawerView(state: widget.state),
             ReportsView(state: widget.state),
             SettingsView(state: widget.state),
             PurchaseOrdersView(state: widget.state),
             StaffManagementView(state: widget.state),
+            WebsiteBuilderView(state: widget.state),
+            const SocialCommerceView(),
           ];
 
           if (isMobile) {
             return Scaffold(
+              appBar: _buildGlobalAppBar(
+                context,
+                currentUser: currentUser,
+                onOpenSync: () {
+                  _onUserInteraction();
+                  _showSyncDiagnostics(context);
+                },
+                onOpenProfile: () {
+                  _onUserInteraction();
+                  _showMoreSheet(context, currentUser, allowedTabs);
+                },
+                onLockTill: _lockTill,
+                compact: true,
+              ),
               body: SafeArea(
                 bottom: false,
                 child: IndexedStack(index: _activeTabIndex, children: views),
@@ -509,6 +541,20 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
           }
 
           return Scaffold(
+            appBar: _buildGlobalAppBar(
+              context,
+              currentUser: currentUser,
+              onOpenSync: () {
+                _onUserInteraction();
+                _showSyncDiagnostics(context);
+              },
+              onOpenProfile: () {
+                _onUserInteraction();
+                _showMoreSheet(context, currentUser, allowedTabs);
+              },
+              onLockTill: _lockTill,
+              compact: false,
+            ),
             body: Row(
               children: [
                 // Left Navigation Rail
@@ -516,17 +562,6 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                   activeIndex: _activeTabIndex,
                   visibleTabs: allowedTabs,
                   onSelectTab: _selectTab,
-                  onLockTill: _lockTill,
-                  onOpenSync: () {
-                    _onUserInteraction();
-                    _showSyncDiagnostics(context);
-                  },
-                  activeCashier:
-                      currentUser?.fullName ?? widget.state.activeCashier,
-                  roleDisplay: currentUser?.roleDisplay ?? 'Staff',
-                  initials: currentUser?.initials,
-                  logoBase64: widget.state.brandLogoBase64,
-                  logoUrl: widget.state.brandLogoUrl,
                 ),
 
                 // Active Main View — animated tab switch
@@ -562,6 +597,192 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
           );
         },
       ),
+    );
+  }
+
+  PreferredSizeWidget _buildGlobalAppBar(
+    BuildContext context, {
+    required PosUser? currentUser,
+    required VoidCallback onOpenSync,
+    required VoidCallback onOpenProfile,
+    required VoidCallback onLockTill,
+    required bool compact,
+  }) {
+    final section = switch (_activeTabIndex) {
+      0 => 'Point of Sale',
+      1 => 'Sales History',
+      2 => 'Inventory',
+      3 => 'Customers & Credit',
+      4 => 'Cash Drawer',
+      5 => 'Reports & Analytics',
+      6 => 'Settings',
+      7 => 'Purchase Orders',
+      8 => 'Staff Management',
+      9 => 'Website Builder',
+      10 => 'Social Commerce',
+      _ => 'Point of Sale',
+    };
+    final logo = _buildAppBarLogo();
+    final initials =
+        currentUser?.initials ??
+        (widget.state.activeCashier.isNotEmpty
+            ? widget.state.activeCashier.substring(0, 1).toUpperCase()
+            : 'S');
+
+    return AppBar(
+      toolbarHeight: 64,
+      titleSpacing: compact ? 8 : 16,
+      leadingWidth: compact ? 44 : 54,
+      leading: Padding(
+        padding: EdgeInsets.only(left: compact ? 8 : 16),
+        child: Center(child: logo),
+      ),
+      title: compact
+          ? Text(
+              section,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+            )
+          : Row(
+              children: [
+                Flexible(
+                  child: Text(
+                    widget.state.shopName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 15,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Container(
+                  width: 1,
+                  height: 26,
+                  color: Colors.white.withValues(alpha: 0.22),
+                ),
+                const SizedBox(width: 14),
+                Flexible(
+                  child: Text(
+                    section,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Colors.white.withValues(alpha: 0.78),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+      actions: [
+        IconButton(
+          onPressed: onOpenSync,
+          tooltip: 'Sync and connection status',
+          icon: const Icon(Icons.cloud_sync_outlined),
+        ),
+        if (!compact)
+          Padding(
+            padding: const EdgeInsets.only(left: 8),
+            child: InkWell(
+              onTap: onOpenProfile,
+              borderRadius: BorderRadius.circular(10),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                child: Row(
+                  children: [
+                    CircleAvatar(
+                      radius: 16,
+                      backgroundColor: Colors.white.withValues(alpha: 0.16),
+                      child: Text(
+                        initials,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 190),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            currentUser?.fullName ?? widget.state.activeCashier,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            currentUser?.roleDisplay ?? 'Staff',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.68),
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        IconButton(
+          onPressed: compact ? onOpenProfile : onLockTill,
+          tooltip: compact ? 'Account and more options' : 'Lock till',
+          icon: Icon(compact ? Icons.person_outline : Icons.lock_outline),
+          padding: EdgeInsets.only(left: 4, right: compact ? 8 : 16),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAppBarLogo() {
+    Widget logo = const Icon(
+      Icons.storefront_rounded,
+      color: Colors.white,
+      size: 22,
+    );
+    final base64Logo = widget.state.brandLogoBase64;
+    if (base64Logo != null && base64Logo.isNotEmpty) {
+      try {
+        logo = Image.memory(
+          base64Decode(base64Logo.split(',').last),
+          fit: BoxFit.cover,
+          gaplessPlayback: true,
+        );
+      } catch (_) {
+        // Use the storefront mark when a saved logo cannot be decoded.
+      }
+    } else if (widget.state.brandLogoUrl.isNotEmpty) {
+      logo = Image.network(
+        widget.state.brandLogoUrl,
+        fit: BoxFit.contain,
+        errorBuilder: (_, _, _) =>
+            const Icon(Icons.storefront_rounded, color: Colors.white, size: 22),
+      );
+    }
+    return Container(
+      width: 36,
+      height: 36,
+      decoration: BoxDecoration(
+        color: AppColors.accent_primary,
+        borderRadius: AppRadius.md,
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Center(child: logo),
     );
   }
 }
@@ -683,53 +904,30 @@ class _NavigationSidebar extends StatelessWidget {
     required this.activeIndex,
     required this.visibleTabs,
     required this.onSelectTab,
-    required this.onLockTill,
-    required this.onOpenSync,
-    required this.activeCashier,
-    this.roleDisplay,
-    this.initials,
-    this.logoBase64,
-    this.logoUrl,
   });
 
   final int activeIndex;
   final Set<int> visibleTabs;
   final ValueChanged<int> onSelectTab;
-  final VoidCallback onLockTill;
-  final VoidCallback onOpenSync;
-  final String activeCashier;
-  final String? roleDisplay;
-  final String? initials;
-  final String? logoBase64;
-  final String? logoUrl;
-
-  Widget _buildLogo() {
-    if (logoBase64 != null && logoBase64!.isNotEmpty) {
-      try {
-        return Image.memory(
-          base64Decode(logoBase64!.split(',').last),
-          fit: BoxFit.cover,
-          width: 44,
-          height: 44,
-          gaplessPlayback: true,
-        );
-      } catch (_) {}
-    }
-    if (logoUrl != null && logoUrl!.isNotEmpty) {
-      return Image.network(
-        logoUrl!,
-        fit: BoxFit.contain,
-        width: 44,
-        height: 44,
-        errorBuilder: (_, __, ___) =>
-            const Icon(Icons.storefront, color: Colors.white, size: 24),
-      );
-    }
-    return const Icon(Icons.storefront, color: Colors.white, size: 24);
-  }
 
   @override
   Widget build(BuildContext context) {
+    const navItems = <({int tab, IconData icon, String label})>[
+      (tab: 0, icon: Icons.point_of_sale, label: 'POS'),
+      (tab: 1, icon: Icons.receipt_long_outlined, label: 'Sales'),
+      (tab: 2, icon: Icons.inventory_2_outlined, label: 'Stock'),
+      (tab: 7, icon: Icons.local_shipping_outlined, label: 'Orders'),
+      (tab: 3, icon: Icons.people_outline, label: 'Credit'),
+      (tab: 4, icon: Icons.account_balance_wallet_outlined, label: 'Till'),
+      (tab: 5, icon: Icons.analytics_outlined, label: 'Reports'),
+      (tab: 8, icon: Icons.manage_accounts_outlined, label: 'Staff'),
+      (tab: 9, icon: Icons.storefront_outlined, label: 'Website'),
+      (tab: 10, icon: Icons.campaign_outlined, label: 'Social'),
+    ];
+    final mainItems = navItems
+        .where((item) => visibleTabs.contains(item.tab))
+        .toList();
+
     return Container(
       width: 80,
       decoration: const BoxDecoration(
@@ -737,117 +935,42 @@ class _NavigationSidebar extends StatelessWidget {
         border: Border(right: BorderSide(color: AppColors.border_subtle)),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 16),
-          // Logo / Store Icon
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.accent_primary,
-              borderRadius: AppRadius.md,
-            ),
-            clipBehavior: Clip.antiAlias,
-            child: _buildLogo(),
-          ),
-          const SizedBox(height: 18),
-
-          // Nav Items
-          for (final item in <({int tab, IconData icon, String label})>[
-            (tab: 0, icon: Icons.point_of_sale, label: 'POS'),
-            (tab: 1, icon: Icons.receipt_long_outlined, label: 'Sales'),
-            (tab: 2, icon: Icons.inventory_2_outlined, label: 'Stock'),
-            (tab: 7, icon: Icons.local_shipping_outlined, label: 'Orders'),
-            (tab: 3, icon: Icons.people_outline, label: 'Credit'),
-            (
-              tab: 4,
-              icon: Icons.account_balance_wallet_outlined,
-              label: 'Till',
-            ),
-            (tab: 5, icon: Icons.analytics_outlined, label: 'Reports'),
-            (tab: 6, icon: Icons.settings_outlined, label: 'Settings'),
-            (tab: 8, icon: Icons.manage_accounts_outlined, label: 'Staff'),
-          ])
-            if (visibleTabs.contains(item.tab))
-              _NavIcon(
-                icon: item.icon,
-                label: item.label,
-                isSelected: activeIndex == item.tab,
-                onTap: () => onSelectTab(item.tab),
-              ),
-
-          const Spacer(),
-
-          // Offline Sync Status Icon
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Tooltip(
-              message: 'Local-First Sync Status: Online',
-              child: InkWell(
-                onTap: onOpenSync,
-                borderRadius: BorderRadius.circular(20),
-                child: Container(
-                  width: 34,
-                  height: 34,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFF0FDF4),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Center(
-                    child: Icon(
-                      Icons.cloud_done_outlined,
-                      color: AppColors.status_success,
-                      size: 18,
-                    ),
-                  ),
+          Expanded(
+            child: Scrollbar(
+              thumbVisibility: true,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    const SizedBox(height: 16),
+                    const Divider(height: 1, color: AppColors.border_subtle),
+                    for (final item in mainItems) ...[
+                      _NavIcon(
+                        icon: item.icon,
+                        label: item.label,
+                        isSelected: activeIndex == item.tab,
+                        onTap: () => onSelectTab(item.tab),
+                      ),
+                      const Divider(height: 1, color: AppColors.border_subtle),
+                    ],
+                  ],
                 ),
               ),
             ),
           ),
-
-          // Lock Till Button
-          Padding(
-            padding: const EdgeInsets.only(bottom: 10),
-            child: Tooltip(
-              message: 'Lock Till',
-              child: IconButton(
-                icon: const Icon(
-                  Icons.lock_outline,
-                  color: AppColors.text_tertiary,
-                  size: 20,
-                ),
-                onPressed: onLockTill,
-              ),
+          if (visibleTabs.contains(6)) ...[
+            const Divider(height: 1, color: AppColors.border_subtle),
+            _NavIcon(
+              icon: Icons.settings_outlined,
+              label: 'Settings',
+              isSelected: activeIndex == 6,
+              onTap: () => onSelectTab(6),
             ),
-          ),
-
-          // Cashier Profile Avatar
-          Padding(
-            padding: const EdgeInsets.only(bottom: 18),
-            child: Tooltip(
-              message:
-                  '$activeCashier • ${roleDisplay ?? 'Staff'} (Tap to lock)',
-              child: InkWell(
-                onTap: onLockTill,
-                borderRadius: BorderRadius.circular(18),
-                child: CircleAvatar(
-                  radius: 18,
-                  backgroundColor: AppColors.accent_light,
-                  child: Text(
-                    initials ??
-                        (activeCashier.isNotEmpty
-                            ? activeCashier.substring(0, 2).toUpperCase()
-                            : 'JM'),
-                    style: const TextStyle(
-                      color: AppColors.accent_primary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
+            const Divider(height: 1, color: AppColors.border_subtle),
+            const SizedBox(height: 12),
+          ],
         ],
       ),
     );
@@ -875,19 +998,11 @@ class _NavIcon extends StatelessWidget {
         message: label,
         child: InkWell(
           onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
           child: Container(
-            width: 56,
+            width: double.infinity,
             padding: const EdgeInsets.symmetric(vertical: 7),
             decoration: BoxDecoration(
               color: isSelected ? AppColors.accent_light : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              border: isSelected
-                  ? Border.all(
-                      color: AppColors.accent_primary.withValues(alpha: 0.3),
-                      width: 1,
-                    )
-                  : null,
             ),
             child: Column(
               mainAxisSize: MainAxisSize.min,

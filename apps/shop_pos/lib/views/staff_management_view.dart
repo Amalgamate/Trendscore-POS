@@ -225,29 +225,8 @@ class _StaffManagementViewState extends State<StaffManagementView> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          const Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  'Staff Management',
-                                  style: TextStyle(
-                                    fontSize: 25,
-                                    fontWeight: FontWeight.w800,
-                                    color: AppColors.text_primary,
-                                  ),
-                                ),
-                                SizedBox(height: 4),
-                                Text(
-                                  'Create staff accounts for your shop.',
-                                  style: TextStyle(
-                                    color: AppColors.text_secondary,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
                           FilledButton.icon(
                             onPressed: widget.state.canCreateUsers
                                 ? _showCreateUserDialog

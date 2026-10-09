@@ -39,6 +39,7 @@ dependencies:
   file_picker: ^13.1.0
   file_picker_web: ^4.0.1
   image: ^4.10.1
+  archive: ^4.3.0
 
 dev_dependencies:
   flutter_test:

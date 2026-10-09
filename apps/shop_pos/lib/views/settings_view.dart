@@ -511,31 +511,8 @@ class _SettingsViewState extends State<SettingsView> {
         children: [
           // Top Bar with Save Button
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Settings',
-                      style: TextStyle(
-                        fontSize: 25,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.text_primary,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      'Manage store, team, terminal and data preferences',
-                      style: TextStyle(
-                        fontSize: 13,
-                        color: AppColors.text_tertiary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
               FilledButton.icon(
                 onPressed: _isSaving ? null : _saveAllSettings,
                 icon: _isSaving
@@ -1523,25 +1500,7 @@ class _SettingsViewState extends State<SettingsView> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(8, 2, 8, 14),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.tune_rounded,
-                  color: AppColors.accent_primary,
-                  size: 20,
-                ),
-                SizedBox(width: 9),
-                Text(
-                  'Settings',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
-                ),
-              ],
-            ),
-          ),
-          const Divider(height: 1, color: AppColors.border_subtle),
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           _settingsGroupLabel('STORE'),
           _settingsNavTile(sections[0]),
           const SizedBox(height: 14),
