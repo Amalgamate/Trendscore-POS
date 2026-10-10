@@ -31,8 +31,8 @@ class ApiService {
   /// subdomain slug on trendscore.co.ke.
   ///
   /// Examples:
-  ///   gutagala  → https://gutagala.trendscore.co.ke
-  ///   GUTAGALA  → https://gutagala.trendscore.co.ke  (lowercased)
+  ///   gutagala  → https://www.gutagala.trendscore.co.ke/api
+  ///   GUTAGALA  → https://www.gutagala.trendscore.co.ke/api  (lowercased)
   ///
   /// No lookup server needed — the code IS the subdomain.
   /// When the control-plane resolve API is ready this can be swapped in.
@@ -43,7 +43,7 @@ class ApiService {
       lastError = 'Shop code cannot be empty.';
       return '';
     }
-    return 'https://$slug.trendscore.co.ke';
+    return 'https://www.$slug.trendscore.co.ke/api';
   }
 
   /// Check server health
