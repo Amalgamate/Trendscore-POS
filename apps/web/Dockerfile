@@ -22,6 +22,7 @@ ENV HOSTNAME=0.0.0.0
 RUN addgroup -S storefront && adduser -S storefront -G storefront
 COPY --from=builder --chown=storefront:storefront /app/.next/standalone ./
 COPY --from=builder --chown=storefront:storefront /app/.next/static ./.next/static
+COPY --from=builder --chown=storefront:storefront /app/public ./public
 
 USER storefront
 EXPOSE 3000
