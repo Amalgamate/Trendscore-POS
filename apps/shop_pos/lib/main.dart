@@ -139,13 +139,21 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   Widget _userProfileAction(PosUser? user, {required bool compact}) {
     final name = user?.fullName ?? widget.state.activeCashier;
     final role = user?.roleDisplay ?? 'Staff';
-    final initials = user?.initials ??
+    final initials =
+        user?.initials ??
         (name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?');
 
     return PopupMenuButton<String>(
-      tooltip: 'User profile and sign out',
+      tooltip: 'Profile, settings, and sign out',
       onSelected: (action) {
-        if (action == 'sign_out') _lockTill();
+        switch (action) {
+          case 'profile':
+            _showUserProfile(user, name: name, role: role);
+          case 'settings':
+            _selectTab(6);
+          case 'sign_out':
+            _lockTill();
+        }
       },
       itemBuilder: (context) => [
         PopupMenuItem<String>(
@@ -190,6 +198,26 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         ),
         const PopupMenuDivider(),
         const PopupMenuItem<String>(
+          value: 'profile',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            leading: Icon(AppIcons.people, color: AppColors.text_secondary),
+            title: Text('Profile'),
+          ),
+        ),
+        if (_accessibleTabs(user).contains(6))
+          const PopupMenuItem<String>(
+            value: 'settings',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(AppIcons.settings, color: AppColors.text_secondary),
+              title: Text('Settings'),
+            ),
+          ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(
           value: 'sign_out',
           child: ListTile(
             contentPadding: EdgeInsets.zero,
@@ -200,7 +228,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         ),
       ],
       child: Padding(
-        padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 12, vertical: 6),
+        padding: EdgeInsets.symmetric(
+          horizontal: compact ? 8 : 12,
+          vertical: 6,
+        ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -255,6 +286,80 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     );
   }
 
+  void _showUserProfile(
+    PosUser? user, {
+    required String name,
+    required String role,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Profile'),
+        content: SizedBox(
+          width: 320,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 28,
+                backgroundColor: AppColors.accent_light,
+                foregroundColor: AppColors.accent_primary,
+                child: Text(
+                  user?.initials ??
+                      (name.isNotEmpty
+                          ? name.substring(0, 1).toUpperCase()
+                          : '?'),
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 16),
+              _profileDetail('Name', name),
+              _profileDetail('Role', role),
+              if (user?.phone case final phone? when phone.isNotEmpty)
+                _profileDetail('Phone', phone),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _profileDetail(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          SizedBox(
+            width: 64,
+            child: Text(
+              label,
+              style: const TextStyle(color: AppColors.text_tertiary),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(
+                color: AppColors.text_primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _lockTill() {
     _inactivityTimer?.cancel();
     widget.state.logout();
@@ -295,10 +400,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     }
   }
 
-  void _showMoreSheet(
-    BuildContext context,
-    Set<int> allowedTabs,
-  ) {
+  void _showMoreSheet(BuildContext context, Set<int> allowedTabs) {
     showModalBottomSheet<void>(
       context: context,
       backgroundColor: Colors.white,
@@ -334,8 +436,6 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                   _moreTile(AppIcons.wallet, 'Cash Drawer & Shifts', 4, ctx),
                 if (allowedTabs.contains(5))
                   _moreTile(AppIcons.analytics, 'Reports & Analytics', 5, ctx),
-                if (allowedTabs.contains(6))
-                  _moreTile(AppIcons.settings, 'Settings & Hardware', 6, ctx),
               ],
             ),
           ),
@@ -836,7 +936,7 @@ class _NavigationSidebar extends StatelessWidget {
       ),
       child: Column(
         children: [
-          const SizedBox(height: 16),
+          const SizedBox(height: 8),
           // Logo / Store Icon
           Container(
             width: 44,
@@ -848,7 +948,7 @@ class _NavigationSidebar extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: _buildLogo(),
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 6),
 
           // Nav Items - scrollable when many tabs
           Flexible(
@@ -864,7 +964,6 @@ class _NavigationSidebar extends StatelessWidget {
                     (tab: 3, icon: AppIcons.people, label: 'Credit'),
                     (tab: 4, icon: AppIcons.wallet, label: 'Till'),
                     (tab: 5, icon: AppIcons.analytics, label: 'Reports'),
-                    (tab: 6, icon: AppIcons.settings, label: 'Settings'),
                   ])
                     if (visibleTabs.contains(item.tab))
                       _NavIcon(
@@ -932,7 +1031,7 @@ class _NavIcon extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
         child: Container(
           width: 80,
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: 4),
           decoration: BoxDecoration(
             color: isSelected ? AppColors.accent_light : Colors.transparent,
           ),
