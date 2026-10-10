@@ -5,6 +5,13 @@ on:
     workflows: [CI]
     types: [completed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      reset_super_admin_pin:
+        description: Reset the production super-admin PIN and require a new PIN at next login
+        type: boolean
+        required: true
+        default: false
 
 permissions:
   contents: read
@@ -17,17 +24,18 @@ concurrency:
 jobs:
   deploy:
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
       github.event.workflow_run.event == 'push' &&
-      github.event.workflow_run.head_branch == 'main'
+      github.event.workflow_run.head_branch == 'main')
     runs-on: ubuntu-latest
     environment: production
     env:
       DOMAIN: www.gutagala.trendscore.co.ke
       EXPECTED_IP: 185.127.16.124
       TLS_EMAIL: admin@trendscore.app
-      POS_IMAGE: ghcr.io/amalgamate/shop-pos:sha-${{ github.event.workflow_run.head_sha }}
-      API_IMAGE: ghcr.io/amalgamate/shop-api:sha-${{ github.event.workflow_run.head_sha }}
+      POS_IMAGE: ghcr.io/amalgamate/shop-pos:sha-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      API_IMAGE: ghcr.io/amalgamate/shop-api:sha-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       DEPLOY_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
       REMOTE_DIR: /tmp/retailpos-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -61,6 +69,7 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           POS_SUPER_ADMIN_PHONE: ${{ secrets.POS_SUPER_ADMIN_PHONE }}
           POS_SUPER_ADMIN_PIN: ${{ secrets.POS_SUPER_ADMIN_PIN }}
+          RESET_SUPER_ADMIN_PIN: ${{ github.event_name == 'workflow_dispatch' && inputs.reset_super_admin_pin || false }}
         run: |
           set -euo pipefail
           test -n "$POS_SUPER_ADMIN_PHONE" || { echo "Missing production secret POS_SUPER_ADMIN_PHONE" >&2; exit 1; }
@@ -68,7 +77,9 @@ jobs:
           auth="$(printf '%s' "${GITHUB_ACTOR}:${GHCR_TOKEN}" | base64 -w0)"
           printf '{"auths":{"ghcr.io":{"auth":"%s"}}}\n' "$auth" > "$RUNNER_TEMP/retailpos-docker-config.json"
           chmod 600 "$RUNNER_TEMP/retailpos-docker-config.json"
-          jq -n --arg phone "$POS_SUPER_ADMIN_PHONE" --arg pin "$POS_SUPER_ADMIN_PIN" '{phone:$phone,pin:$pin}' > "$RUNNER_TEMP/retailpos-super-admin.json"
+          jq -n --arg phone "$POS_SUPER_ADMIN_PHONE" --arg pin "$POS_SUPER_ADMIN_PIN" \
+            --argjson resetPin "$RESET_SUPER_ADMIN_PIN" \
+            '{phone:$phone,pin:$pin,resetPin:$resetPin}' > "$RUNNER_TEMP/retailpos-super-admin.json"
           chmod 600 "$RUNNER_TEMP/retailpos-super-admin.json"
           ssh production "mkdir -m 700 '$REMOTE_DIR'"
           scp "$RUNNER_TEMP/retailpos-docker-config.json" "production:$REMOTE_DIR/config.json"

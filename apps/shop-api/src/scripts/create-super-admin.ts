@@ -1,10 +1,8 @@
 /**
  * Ensure the platform administrator exists in this shop database.
- *
- * New account: created with the supplied initial PIN and mustChangePin = true,
- * so the admin must set their own PIN at first login.
- * Existing account: the PIN and mustChangePin are left untouched, so re-running
- * this script never forces a PIN change or resets a PIN the admin already chose.
+ * New accounts must replace the supplied initial PIN at first login. Existing
+ * credentials are preserved unless an explicit reset is requested in the
+ * protected credential file.
  */
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -24,10 +22,12 @@ async function main(): Promise<void> {
   const args = process.argv.slice(2);
   let rawPhone: string | undefined;
   let pin: string | undefined;
+  let resetPin = false;
   if (args.length === 1) {
-    const credentials = JSON.parse(readFileSync(args[0]!, 'utf8')) as { phone?: unknown; pin?: unknown };
+    const credentials = JSON.parse(readFileSync(args[0]!, 'utf8')) as { phone?: unknown; pin?: unknown; resetPin?: unknown };
     rawPhone = typeof credentials.phone === 'string' ? credentials.phone : undefined;
     pin = typeof credentials.pin === 'string' ? credentials.pin : undefined;
+    resetPin = credentials.resetPin === true;
   } else {
     [rawPhone, pin] = args;
   }
@@ -43,15 +43,31 @@ async function main(): Promise<void> {
     timeCost: 2,
     parallelism: 1,
   });
-
   const existing = await prisma.user.findUnique({ where: { phone } });
   if (existing?.isPlatformSuperAdmin) {
-    // Existing admin: never touch pinHash or mustChangePin.
+    const data = {
+      fullName: 'Retail OS Super Admin',
+      role: 'SUPER_ADMIN' as const,
+      active: true,
+      ...(resetPin
+        ? {
+            pinHash,
+            mustChangePin: true,
+          }
+        : {}),
+    };
     await prisma.user.update({
       where: { id: existing.id },
-      data: { fullName: 'Retail OS Super Admin', role: 'SUPER_ADMIN', active: true },
+      data,
     });
-    console.log(JSON.stringify({ ok: true, created: false, role: 'SUPER_ADMIN' }));
+    console.log(
+      JSON.stringify({
+        ok: true,
+        created: false,
+        resetPin,
+        role: 'SUPER_ADMIN',
+      }),
+    );
     return;
   }
 
@@ -74,7 +90,7 @@ async function main(): Promise<void> {
       isPlatformSuperAdmin: true,
     },
   });
-  console.log(JSON.stringify({ ok: true, created: true, role: 'SUPER_ADMIN' }));
+  console.log(JSON.stringify({ ok: true, created: true, resetPin, role: 'SUPER_ADMIN' }));
 }
 
 main()
