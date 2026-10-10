@@ -950,9 +950,12 @@ class _NavigationSidebar extends StatelessWidget {
           ),
           const SizedBox(height: 6),
 
-          // Nav Items - scrollable when many tabs
-          Flexible(
+          // Give navigation the full remaining height; only the nav list should
+          // scroll when the available viewport is genuinely too short.
+          Expanded(
             child: SingleChildScrollView(
+              key: const ValueKey('sidebar-navigation-scroll-view'),
+              physics: const ClampingScrollPhysics(),
               child: Column(
                 children: [
                   for (final item in <({int tab, IconData icon, String label})>[
@@ -977,7 +980,6 @@ class _NavigationSidebar extends StatelessWidget {
             ),
           ),
 
-          const Spacer(),
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Tooltip(
