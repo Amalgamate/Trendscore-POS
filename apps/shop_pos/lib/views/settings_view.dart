@@ -3,7 +3,6 @@ import 'package:flutter/services.dart';
 import '../pos_state.dart';
 import '../theme/tokens.dart';
 import '../services/api_service.dart';
-import '../services/favicon_service.dart';
 import 'widgets/image_upload_widget.dart';
 import '../shared/icons.dart';
 
@@ -99,12 +98,6 @@ class _SettingsViewState extends State<SettingsView> {
       newPrinterPaperSize: _printerPaperSize,
     );
     _clearLogo = false;
-    FaviconService.update(
-      widget.state.brandLogoBase64?.isNotEmpty == true
-          ? widget.state.brandLogoBase64
-          : widget.state.brandLogoUrl,
-    );
-
     ApiService.instance.configure(_serverUrlController.text);
 
     setState(() => _isSaving = false);
