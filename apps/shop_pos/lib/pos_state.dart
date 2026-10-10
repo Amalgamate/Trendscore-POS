@@ -38,8 +38,18 @@ const Map<String, IconData> kCategoryIcons = {
 
 /// Soft tint colours a shop owner can pick for a category.
 const List<int> kCategoryColors = [
-  0xFFEFF6FF, 0xFFFFFBEB, 0xFFF0FDF4, 0xFFFFF7ED, 0xFFF5F3FF, 0xFFFEFCE8,
-  0xFFFFEFF2, 0xFFEEF2FF, 0xFFECFEFF, 0xFFFDF2F8, 0xFFF7FEE7, 0xFFF8FAFC,
+  0xFFEFF6FF,
+  0xFFFFFBEB,
+  0xFFF0FDF4,
+  0xFFFFF7ED,
+  0xFFF5F3FF,
+  0xFFFEFCE8,
+  0xFFFFEFF2,
+  0xFFEEF2FF,
+  0xFFECFEFF,
+  0xFFFDF2F8,
+  0xFFF7FEE7,
+  0xFFF8FAFC,
 ];
 
 /// A shop-defined product category.
@@ -60,18 +70,18 @@ class PosCategory {
   IconData get icon => kCategoryIcons[iconKey] ?? AppIcons.inventory;
 
   Map<String, dynamic> toJson() => {
-        'id': id,
-        'name': name,
-        'color': colorValue,
-        'icon': iconKey,
-      };
+    'id': id,
+    'name': name,
+    'color': colorValue,
+    'icon': iconKey,
+  };
 
   factory PosCategory.fromJson(Map<String, dynamic> json) => PosCategory(
-        id: json['id'] as String,
-        name: json['name'] as String,
-        colorValue: json['color'] as int? ?? 0xFFF8FAFC,
-        iconKey: json['icon'] as String? ?? 'box',
-      );
+    id: json['id'] as String,
+    name: json['name'] as String,
+    colorValue: json['color'] as int? ?? 0xFFF8FAFC,
+    iconKey: json['icon'] as String? ?? 'box',
+  );
 }
 
 /// A product in the shop catalog.
@@ -115,6 +125,7 @@ class PosProduct {
   final int taxRateBasisPoints;
   bool isActive;
   String? notes;
+
   /// Base64-encoded 1:1 JPEG product image (data URI), or null if none.
   String? imageBase64;
 
@@ -125,15 +136,18 @@ class PosProduct {
   String? variantLabel;
 
   /// Name shown on receipts and in the basket, e.g. "Fresh milk · 500ml".
-  String get displayName =>
-      (variantLabel == null || variantLabel!.isEmpty) ? name : '$name · $variantLabel';
+  String get displayName => (variantLabel == null || variantLabel!.isEmpty)
+      ? name
+      : '$name · $variantLabel';
 
   bool get isOutOfStock => stock <= 0;
   bool get isLowStock => stock > 0 && stock <= lowStockThreshold;
 
   double? get marginPercent {
     if (costPrice == null || costPrice!.minorUnits == 0) return null;
-    return ((unitPrice.minorUnits - costPrice!.minorUnits) / costPrice!.minorUnits) * 100;
+    return ((unitPrice.minorUnits - costPrice!.minorUnits) /
+            costPrice!.minorUnits) *
+        100;
   }
 
   PosProduct copyWith({
@@ -170,9 +184,13 @@ class PosProduct {
       taxRateBasisPoints: taxRateBasisPoints ?? this.taxRateBasisPoints,
       isActive: isActive ?? this.isActive,
       notes: notes ?? this.notes,
-      imageBase64: imageBase64 == _sentinel ? this.imageBase64 : (imageBase64 as String?),
+      imageBase64: imageBase64 == _sentinel
+          ? this.imageBase64
+          : (imageBase64 as String?),
       groupId: groupId == _sentinel ? this.groupId : (groupId as String?),
-      variantLabel: variantLabel == _sentinel ? this.variantLabel : (variantLabel as String?),
+      variantLabel: variantLabel == _sentinel
+          ? this.variantLabel
+          : (variantLabel as String?),
     );
   }
 
@@ -206,12 +224,15 @@ class PosProduct {
     barcode: json['barcode'] as String?,
     category: json['category'] as String,
     unitPrice: Money(json['unitPriceMinor'] as int? ?? 0),
-    costPrice: json['costPriceMinor'] != null ? Money(json['costPriceMinor'] as int) : null,
+    costPrice: json['costPriceMinor'] != null
+        ? Money(json['costPriceMinor'] as int)
+        : null,
     stock: json['stock'] as int? ?? 0,
     lowStockThreshold: json['lowStockThreshold'] as int? ?? 10,
     icon: _iconFromCode(json['iconCode'] as int?),
     tint: Color(json['tint'] as int? ?? 0xFFF1F5F9),
-    taxRateBasisPoints: json['taxRateBasisPoints'] as int? ?? defaultVatRateBasisPoints,
+    taxRateBasisPoints:
+        json['taxRateBasisPoints'] as int? ?? defaultVatRateBasisPoints,
     isActive: json['isActive'] as bool? ?? true,
     notes: json['notes'] as String?,
     imageBase64: json['imageBase64'] as String?,
@@ -225,21 +246,31 @@ class PosProduct {
       if (icon.codePoint == code) return icon;
     }
     switch (code) {
-      case 0xe6e8: return AppIcons.waterDrop;
-      case 0xe0d6: return AppIcons.bakery;
-      case 0xe21a: return AppIcons.egg;
-      case 0xe2e6: return AppIcons.grain;
-      case 0xe5d2: return AppIcons.beauty;
-      case 0xe333: return AppIcons.iceCream;
-      case 0xe463: return AppIcons.oil;
-      case 0xe206: return AppIcons.produce;
-      case 0xe3a7: return AppIcons.drink;
-      case 0xe532: return AppIcons.rice;
-      default: return AppIcons.inventory;
+      case 0xe6e8:
+        return AppIcons.waterDrop;
+      case 0xe0d6:
+        return AppIcons.bakery;
+      case 0xe21a:
+        return AppIcons.egg;
+      case 0xe2e6:
+        return AppIcons.grain;
+      case 0xe5d2:
+        return AppIcons.beauty;
+      case 0xe333:
+        return AppIcons.iceCream;
+      case 0xe463:
+        return AppIcons.oil;
+      case 0xe206:
+        return AppIcons.produce;
+      case 0xe3a7:
+        return AppIcons.drink;
+      case 0xe532:
+        return AppIcons.rice;
+      default:
+        return AppIcons.inventory;
     }
   }
 }
-
 
 /// A line item in a completed or printed sale.
 class SaleRecordItem {
@@ -270,6 +301,7 @@ enum SaleStatus {
 /// Completed sale record in the immutable sales ledger.
 class SaleRecord {
   SaleRecord({
+    this.saleId,
     required this.receiptNumber,
     required this.timestamp,
     required this.cashier,
@@ -280,11 +312,13 @@ class SaleRecord {
     required this.paymentReference,
     this.customer,
     this.status = SaleStatus.completed,
+    this.paymentPending = false,
     this.reversalReason,
     this.cashTendered,
     this.changeDue,
   });
 
+  final String? saleId;
   final String receiptNumber;
   final DateTime timestamp;
   final String cashier;
@@ -292,9 +326,10 @@ class SaleRecord {
   final Money subtotal;
   final Money vatAmount;
   final SalePaymentMethod paymentMethod;
-  final String paymentReference;
+  String paymentReference;
   final PosCustomer? customer;
   SaleStatus status;
+  bool paymentPending;
   String? reversalReason;
   final Money? cashTendered;
   final Money? changeDue;
@@ -302,7 +337,10 @@ class SaleRecord {
   int get totalUnits => items.fold(0, (sum, i) => sum + i.quantity);
   bool get isReversed => status == SaleStatus.reversed;
 
-  static SaleRecord fromApi(Map<String, dynamic> json, {Map<String, PosCustomer>? customersMap}) {
+  static SaleRecord fromApi(
+    Map<String, dynamic> json, {
+    Map<String, PosCustomer>? customersMap,
+  }) {
     final itemsRaw = json['items'] as List<dynamic>? ?? [];
     final items = itemsRaw.map((raw) {
       final item = raw as Map<String, dynamic>;
@@ -318,15 +356,25 @@ class SaleRecord {
     final paymentsRaw = json['payments'] as List<dynamic>? ?? [];
     SalePaymentMethod paymentMethod = SalePaymentMethod.cash;
     String paymentReference = '';
-    if (paymentsRaw.isNotEmpty) {
-      final firstPayment = paymentsRaw.first as Map<String, dynamic>;
+    var paymentPending = false;
+    final activePayments = paymentsRaw
+        .map((payment) => payment as Map<String, dynamic>)
+        .where((payment) => payment['status'] != 'REVERSED')
+        .toList();
+    final primaryPayment = activePayments.isEmpty ? null : activePayments.first;
+    if (primaryPayment != null) {
+      final firstPayment = primaryPayment;
       final methodStr = firstPayment['method'] as String? ?? 'CASH';
       paymentMethod = switch (methodStr) {
         'MPESA' => SalePaymentMethod.mpesa,
         'CREDIT' => SalePaymentMethod.credit,
         _ => SalePaymentMethod.cash,
       };
-      paymentReference = firstPayment['reference'] as String? ?? '';
+      paymentReference =
+          firstPayment['reference'] as String? ??
+          firstPayment['mpesaReceipt'] as String? ??
+          '';
+      paymentPending = firstPayment['status'] == 'PENDING';
     }
 
     final statusStr = json['status'] as String? ?? 'COMPLETED';
@@ -345,6 +393,7 @@ class SaleRecord {
     }
 
     return SaleRecord(
+      saleId: json['id'] as String?,
       receiptNumber: json['receiptNumber'] as String? ?? '',
       timestamp: DateTime.parse(json['createdAt'] as String),
       cashier: cashierName,
@@ -355,8 +404,13 @@ class SaleRecord {
       paymentReference: paymentReference,
       customer: customer,
       status: status,
-      cashTendered: null,
-      changeDue: null,
+      paymentPending: paymentPending,
+      cashTendered: primaryPayment?['cashTendered'] == null
+          ? null
+          : Money(((primaryPayment!['cashTendered'] as num) * 100).round()),
+      changeDue: primaryPayment?['changeDue'] == null
+          ? null
+          : Money(((primaryPayment!['changeDue'] as num) * 100).round()),
     );
   }
 }
@@ -412,8 +466,9 @@ class PosCustomer {
   final bool creditFrozen;
   final List<CustomerLedgerEntry> ledger;
 
-  Money get availableCredit =>
-      creditLimit > currentBalance ? Money(creditLimit.minorUnits - currentBalance.minorUnits) : const Money(0);
+  Money get availableCredit => creditLimit > currentBalance
+      ? Money(creditLimit.minorUnits - currentBalance.minorUnits)
+      : const Money(0);
 
   factory PosCustomer.fromApi(Map<String, dynamic> json) {
     final ledgerRaw = json['ledger'] as List<dynamic>?;
@@ -422,16 +477,18 @@ class PosCustomer {
       for (final raw in ledgerRaw) {
         final entry = raw as Map<String, dynamic>;
         final entryType = entry['entryType'] as String? ?? 'DEBIT';
-        history.add(CustomerLedgerEntry(
-          id: entry['id'] as String? ?? 'led_${history.length}',
-          timestamp: DateTime.parse(entry['createdAt'] as String),
-          type: entryType == 'CREDIT'
-              ? LedgerEntryType.paymentCredit
-              : LedgerEntryType.saleDebit,
-          amount: Money(((entry['amount'] as num) * 100).round()),
-          reference: entry['reference'] as String? ?? '',
-          runningBalance: Money(((entry['balance'] as num) * 100).round()),
-        ));
+        history.add(
+          CustomerLedgerEntry(
+            id: entry['id'] as String? ?? 'led_${history.length}',
+            timestamp: DateTime.parse(entry['createdAt'] as String),
+            type: entryType == 'CREDIT'
+                ? LedgerEntryType.paymentCredit
+                : LedgerEntryType.saleDebit,
+            amount: Money(((entry['amount'] as num) * 100).round()),
+            reference: entry['reference'] as String? ?? '',
+            runningBalance: Money(((entry['balance'] as num) * 100).round()),
+          ),
+        );
       }
     }
     return PosCustomer(
@@ -483,19 +540,19 @@ class CashShift {
     required this.openedAt,
     required this.openingFloat,
     required this.cashier,
-  })  : cashSales = const Money(0),
-        cashPaidIn = const Money(0),
-        cashPaidOut = const Money(0),
-        movements = [
-          CashMovement(
-            id: 'mov_init',
-            timestamp: openedAt,
-            type: CashMovementType.floatIn,
-            amount: openingFloat,
-            reason: 'Opening till float',
-            cashier: cashier,
-          ),
-        ];
+  }) : cashSales = const Money(0),
+       cashPaidIn = const Money(0),
+       cashPaidOut = const Money(0),
+       movements = [
+         CashMovement(
+           id: 'mov_init',
+           timestamp: openedAt,
+           type: CashMovementType.floatIn,
+           amount: openingFloat,
+           reason: 'Opening till float',
+           cashier: cashier,
+         ),
+       ];
 
   final String shiftId;
   final DateTime openedAt;
@@ -510,27 +567,23 @@ class CashShift {
   Money? variance;
 
   Money get expectedCash => Money(
-        openingFloat.minorUnits + cashSales.minorUnits + cashPaidIn.minorUnits - cashPaidOut.minorUnits,
-      );
+    openingFloat.minorUnits +
+        cashSales.minorUnits +
+        cashPaidIn.minorUnits -
+        cashPaidOut.minorUnits,
+  );
 }
 
-enum PosUserRole {
-  superAdmin,
-  owner,
-  manager,
-  cashier,
-  stockClerk,
-  rider,
-}
+enum PosUserRole { superAdmin, owner, manager, cashier, stockClerk, rider }
 
 extension PosUserRoleLabel on PosUserRole {
   String get roleLabel => switch (this) {
     PosUserRole.superAdmin => 'Super Admin',
-    PosUserRole.owner      => 'Owner',
-    PosUserRole.manager    => 'Manager',
-    PosUserRole.cashier    => 'Cashier',
+    PosUserRole.owner => 'Owner',
+    PosUserRole.manager => 'Manager',
+    PosUserRole.cashier => 'Cashier',
     PosUserRole.stockClerk => 'Stock Clerk',
-    PosUserRole.rider      => 'Rider',
+    PosUserRole.rider => 'Rider',
   };
 }
 
@@ -655,7 +708,11 @@ class PosUser {
     phone: json['phone'] as String,
     // Migrate old browser records without restoring plaintext PINs.
     pin: '',
-    role: PosUserRole.values[(json['role'] as int? ?? 2).clamp(0, PosUserRole.values.length - 1)],
+    role:
+        PosUserRole.values[(json['role'] as int? ?? 2).clamp(
+          0,
+          PosUserRole.values.length - 1,
+        )],
     color: Color(json['color'] as int? ?? 0xFF10B981),
     active: json['active'] as bool? ?? true,
   );
@@ -664,7 +721,8 @@ class PosUser {
 /// Global reactive state for the Retail OS POS.
 class PosState extends ChangeNotifier {
   PosState({bool? includeDemoProducts})
-      : _includeDemoProducts = includeDemoProducts ?? _defaultIncludeDemoProducts {
+    : _includeDemoProducts =
+          includeDemoProducts ?? _defaultIncludeDemoProducts {
     _initSampleData(includeProducts: _includeDemoProducts);
   }
 
@@ -687,6 +745,7 @@ class PosState extends ChangeNotifier {
   String storeBranch = 'Kilimani Market · Counter 01';
   String tillId = 'TILL-01';
   String brandLogoUrl = '';
+
   /// Uploaded brand logo as base64 data URI (overrides brandLogoUrl when set).
   String? brandLogoBase64;
   String heroImageUrl = 'cashier_banner.jpg';
@@ -697,6 +756,7 @@ class PosState extends ChangeNotifier {
   bool cashDrawerKick = true;
   bool requirePinForReversal = true;
   String printerPaperSize = '80mm';
+
   /// Empty on mobile = not yet configured; shows ShopCodeView on first launch.
   String serverUrl = kIsWeb ? 'http://localhost:4001' : '';
 
@@ -709,12 +769,18 @@ class PosState extends ChangeNotifier {
   List<PosUser> get activeUsers => users.where((u) => u.active).toList();
 
   Future<void> addUser(PosUser user) async {
-    if (!ApiService.instance.hasToken || (currentLoggedInUser?.role != PosUserRole.owner && currentLoggedInUser?.role != PosUserRole.superAdmin)) {
+    if (!ApiService.instance.hasToken ||
+        (currentLoggedInUser?.role != PosUserRole.owner &&
+            currentLoggedInUser?.role != PosUserRole.superAdmin)) {
       throw PosException('Only an online owner can create a staff account.');
     }
-    final response = await ApiService.instance.createStaffUser(user.toApiJson(includePin: true));
+    final response = await ApiService.instance.createStaffUser(
+      user.toApiJson(includePin: true),
+    );
     if (response == null) {
-      throw PosException(ApiService.instance.lastError ?? 'Could not create staff account.');
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not create staff account.',
+      );
     }
     users.add(PosUser.fromApi(response));
     user.pin = '';
@@ -723,13 +789,20 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> updateUser(PosUser updated) async {
-    if (!ApiService.instance.hasToken || (currentLoggedInUser?.role != PosUserRole.owner && currentLoggedInUser?.role != PosUserRole.superAdmin)) {
+    if (!ApiService.instance.hasToken ||
+        (currentLoggedInUser?.role != PosUserRole.owner &&
+            currentLoggedInUser?.role != PosUserRole.superAdmin)) {
       throw PosException('Only an online owner can update staff accounts.');
     }
     final payload = updated.toApiJson(includePin: true)..remove('active');
-    final response = await ApiService.instance.updateStaffUser(updated.id, payload);
+    final response = await ApiService.instance.updateStaffUser(
+      updated.id,
+      payload,
+    );
     if (response == null) {
-      throw PosException(ApiService.instance.lastError ?? 'Could not update staff account.');
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not update staff account.',
+      );
     }
     final saved = PosUser.fromApi(response);
     updated.pin = '';
@@ -746,15 +819,23 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> deleteUser(String id) async {
-    if (!ApiService.instance.hasToken || (currentLoggedInUser?.role != PosUserRole.owner && currentLoggedInUser?.role != PosUserRole.superAdmin)) {
+    if (!ApiService.instance.hasToken ||
+        (currentLoggedInUser?.role != PosUserRole.owner &&
+            currentLoggedInUser?.role != PosUserRole.superAdmin)) {
       throw PosException('Only an online owner can deactivate staff accounts.');
     }
     if (currentLoggedInUser?.id == id) {
-      throw PosException('Your active owner account cannot be deactivated here.');
+      throw PosException(
+        'Your active owner account cannot be deactivated here.',
+      );
     }
-    final response = await ApiService.instance.updateStaffUser(id, {'active': false});
+    final response = await ApiService.instance.updateStaffUser(id, {
+      'active': false,
+    });
     if (response == null) {
-      throw PosException(ApiService.instance.lastError ?? 'Could not deactivate staff account.');
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not deactivate staff account.',
+      );
     }
     users.removeWhere((u) => u.id == id);
     notifyListeners();
@@ -762,10 +843,33 @@ class PosState extends ChangeNotifier {
   }
 
   Future<PosUser?> authenticateShopUser(String phone, String pin) async {
+    return _authenticateShopUser(() => ApiService.instance.login(phone, pin));
+  }
+
+  Future<PosUser?> authenticateShopUserById(String userId, String pin) {
+    return _authenticateShopUser(
+      () => ApiService.instance.loginWithUserId(userId, pin),
+    );
+  }
+
+  Future<bool> refreshShopLoginUsers() async {
     ApiService.instance.configure(serverUrl);
-    final auth = await ApiService.instance.login(phone, pin);
+    final remoteUsers = await ApiService.instance.getLoginUsers();
+    if (remoteUsers == null) return false;
+    users = remoteUsers.map(PosUser.fromApi).toList();
+    notifyListeners();
+    return true;
+  }
+
+  Future<PosUser?> _authenticateShopUser(
+    Future<Map<String, dynamic>?> Function() login,
+  ) async {
+    ApiService.instance.configure(serverUrl);
+    final auth = await login();
     if (auth == null) {
-      catalogueSyncMessage = ApiService.instance.lastError ?? 'The shop API could not authenticate this account.';
+      catalogueSyncMessage =
+          ApiService.instance.lastError ??
+          'The shop API could not authenticate this account.';
       notifyListeners();
       return null;
     }
@@ -789,14 +893,17 @@ class PosState extends ChangeNotifier {
     }
     final changed = await ApiService.instance.changePin(newPin);
     if (!changed) {
-      throw PosException(ApiService.instance.lastError ?? 'Could not update your PIN.');
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not update your PIN.',
+      );
     }
     user.mustChangePin = false;
     await _finishAuthenticatedLogin(user);
   }
 
   Future<void> _finishAuthenticatedLogin(PosUser user) async {
-    catalogueSyncMessage = 'Signed in as ${user.roleDisplay}. Refreshing shop data…';
+    catalogueSyncMessage =
+        'Signed in as ${user.roleDisplay}. Refreshing shop data…';
     if (user.role == PosUserRole.owner || user.role == PosUserRole.superAdmin) {
       final remoteUsers = await ApiService.instance.getStaffUsers();
       if (remoteUsers != null) {
@@ -821,8 +928,12 @@ class PosState extends ChangeNotifier {
     try {
       final remoteSales = await ApiService.instance.getSales();
       if (remoteSales != null) {
-        final customersMap = {for (final c in customers) c.name.toLowerCase(): c};
-        sales = remoteSales.map((json) => SaleRecord.fromApi(json, customersMap: customersMap)).toList();
+        final customersMap = {
+          for (final c in customers) c.name.toLowerCase(): c,
+        };
+        sales = remoteSales
+            .map((json) => SaleRecord.fromApi(json, customersMap: customersMap))
+            .toList();
       }
     } catch (e) {
       debugPrint('Could not load sales from API: $e');
@@ -836,12 +947,13 @@ class PosState extends ChangeNotifier {
   Future<void> toggleUserActive(String id) async {
     final idx = users.indexWhere((u) => u.id == id);
     if (idx == -1) return;
-    final response = await ApiService.instance.updateStaffUser(
-      id,
-      {'active': !users[idx].active},
-    );
+    final response = await ApiService.instance.updateStaffUser(id, {
+      'active': !users[idx].active,
+    });
     if (response == null) {
-      throw PosException(ApiService.instance.lastError ?? 'Could not update staff status.');
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not update staff status.',
+      );
     }
     users[idx] = PosUser.fromApi(response);
     notifyListeners();
@@ -881,10 +993,16 @@ class PosState extends ChangeNotifier {
     final index = products.indexWhere((item) => item.id == product.id);
     final previous = index == -1 ? null : products[index];
     if (!isNew && index == -1) {
-      throw StateError('This product is no longer in the catalogue. Refresh and try again.');
+      throw StateError(
+        'This product is no longer in the catalogue. Refresh and try again.',
+      );
     }
-    if (!isNew && _isRemoteProductId(product.id) && !ApiService.instance.hasToken) {
-      throw PosException('Sign in to the shop API before editing a server product.');
+    if (!isNew &&
+        _isRemoteProductId(product.id) &&
+        !ApiService.instance.hasToken) {
+      throw PosException(
+        'Sign in to the shop API before editing a server product.',
+      );
     }
 
     var savedProduct = product;
@@ -912,7 +1030,9 @@ class PosState extends ChangeNotifier {
       if (isNew) {
         products.removeWhere((item) => item.id == savedProduct.id);
       } else if (previous != null) {
-        final savedIndex = products.indexWhere((item) => item.id == savedProduct.id);
+        final savedIndex = products.indexWhere(
+          (item) => item.id == savedProduct.id,
+        );
         if (savedIndex != -1) products[savedIndex] = previous;
       }
       notifyListeners();
@@ -934,11 +1054,17 @@ class PosState extends ChangeNotifier {
       r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
     ).hasMatch(productId);
     if (isApiProduct && !ApiService.instance.hasToken) {
-      throw PosException('Sign in to the shop API before deactivating a server product.');
+      throw PosException(
+        'Sign in to the shop API before deactivating a server product.',
+      );
     }
     if (ApiService.instance.hasToken && isApiProduct) {
       final ok = await ApiService.instance.deactivateProduct(productId);
-      if (!ok) throw PosException(ApiService.instance.lastError ?? 'The shop API could not deactivate this product.');
+      if (!ok)
+        throw PosException(
+          ApiService.instance.lastError ??
+              'The shop API could not deactivate this product.',
+        );
     }
     products[index] = previous.copyWith(isActive: false);
     notifyListeners();
@@ -946,7 +1072,9 @@ class PosState extends ChangeNotifier {
   }
 
   Future<int> importProducts(List<PosProduct> imported) async {
-    final existingSkus = products.map((product) => product.sku.toLowerCase()).toSet();
+    final existingSkus = products
+        .map((product) => product.sku.toLowerCase())
+        .toSet();
     final rows = <PosProduct>[];
     for (final product in imported) {
       if (existingSkus.contains(product.sku.toLowerCase())) continue;
@@ -954,9 +1082,14 @@ class PosState extends ChangeNotifier {
       rows.add(product);
     }
     if (ApiService.instance.hasToken && rows.isNotEmpty) {
-      final remoteRows = await ApiService.instance.importProducts(rows.map(_productPayload).toList());
+      final remoteRows = await ApiService.instance.importProducts(
+        rows.map(_productPayload).toList(),
+      );
       if (remoteRows == null) {
-        throw PosException(ApiService.instance.lastError ?? 'The shop API could not import these products.');
+        throw PosException(
+          ApiService.instance.lastError ??
+              'The shop API could not import these products.',
+        );
       }
       rows
         ..clear()
@@ -972,8 +1105,12 @@ class PosState extends ChangeNotifier {
         'products_json',
         jsonEncode(products.map((item) => item.toJson()).toList()),
       );
-      if (!saved) throw PosException('The browser declined to save imported products.');
-      await prefs.setString('categories_json', jsonEncode(categories.map((item) => item.toJson()).toList()));
+      if (!saved)
+        throw PosException('The browser declined to save imported products.');
+      await prefs.setString(
+        'categories_json',
+        jsonEncode(categories.map((item) => item.toJson()).toList()),
+      );
       return rows.length;
     } catch (_) {
       products
@@ -990,10 +1127,16 @@ class PosState extends ChangeNotifier {
     final product = products[index];
     if (_isRemoteProductId(productId)) {
       if (!ApiService.instance.hasToken) {
-        throw PosException('Sign in to the shop API before changing a server product.');
+        throw PosException(
+          'Sign in to the shop API before changing a server product.',
+        );
       }
       final ok = await ApiService.instance.setProductActive(productId, active);
-      if (!ok) throw PosException(ApiService.instance.lastError ?? 'The shop API could not update this product.');
+      if (!ok)
+        throw PosException(
+          ApiService.instance.lastError ??
+              'The shop API could not update this product.',
+        );
     }
     products[index] = product.copyWith(isActive: active);
     notifyListeners();
@@ -1001,45 +1144,64 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> syncCatalogueFromApi() async {
-    if (!ApiService.instance.hasToken) return;
+    if (!ApiService.instance.hasToken || catalogueSyncing) return;
     catalogueSyncing = true;
     catalogueSyncMessage = 'Refreshing shop catalogue…';
     notifyListeners();
     try {
       final remoteCategories = await ApiService.instance.getCategories();
       if (remoteCategories == null) {
-        throw PosException(ApiService.instance.lastError ?? 'Could not refresh shop categories.');
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not refresh shop categories.',
+        );
       }
       final remoteProducts = await ApiService.instance.getProducts();
       if (remoteProducts == null) {
-        throw PosException(ApiService.instance.lastError ?? 'Could not refresh shop products.');
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not refresh shop products.',
+        );
       }
 
       final oldById = {for (final product in products) product.id: product};
       final syncedCategories = <PosCategory>[];
       for (final remote in remoteCategories) {
         final name = remote['name'] as String? ?? 'Other';
-        final existing = categories.where((item) => item.name.toLowerCase() == name.toLowerCase()).firstOrNull;
-        syncedCategories.add(PosCategory(
-          id: remote['id'] as String,
-          name: name,
-          colorValue: _colorFromHex(remote['colorHex'] as String?) ?? existing?.colorValue ?? 0xFFF8FAFC,
-          iconKey: existing?.iconKey ?? _iconKeyForCategory(name),
-        ));
+        final existing = categories
+            .where((item) => item.name.toLowerCase() == name.toLowerCase())
+            .firstOrNull;
+        syncedCategories.add(
+          PosCategory(
+            id: remote['id'] as String,
+            name: name,
+            colorValue:
+                _colorFromHex(remote['colorHex'] as String?) ??
+                existing?.colorValue ??
+                0xFFF8FAFC,
+            iconKey: existing?.iconKey ?? _iconKeyForCategory(name),
+          ),
+        );
       }
       // Make remote category IDs available while uploading local-only products.
       // Otherwise an existing category may be needlessly POSTed before the
       // final category list is assigned below.
-      final remoteNames = syncedCategories.map((item) => item.name.toLowerCase()).toSet();
-      final localCategories = categories.where((item) => !remoteNames.contains(item.name.toLowerCase()));
+      final remoteNames = syncedCategories
+          .map((item) => item.name.toLowerCase())
+          .toSet();
+      final localCategories = categories.where(
+        (item) => !remoteNames.contains(item.name.toLowerCase()),
+      );
       categories = [...syncedCategories, ...localCategories];
 
       final syncedProducts = remoteProducts.map((remote) {
         final id = remote['id'] as String;
         return _productFromApi(remote, fallback: oldById[id]);
       }).toList();
-      final serverSkus = syncedProducts.map((product) => product.sku.toLowerCase()).toSet();
-      final localOnly = products.where((product) => !_isRemoteProductId(product.id)).toList();
+      final serverSkus = syncedProducts
+          .map((product) => product.sku.toLowerCase())
+          .toSet();
+      final localOnly = products
+          .where((product) => !_isRemoteProductId(product.id))
+          .toList();
       final remainingLocal = <PosProduct>[];
       for (final local in localOnly) {
         if (!local.isActive || _isBundledDemoProduct(local.id)) continue;
@@ -1070,24 +1232,39 @@ class PosState extends ChangeNotifier {
   }
 
   Future<Map<String, dynamic>> _createRemoteProduct(PosProduct product) async {
-    if (!ApiService.instance.hasToken) throw PosException('Sign in to the shop API first.');
+    if (!ApiService.instance.hasToken)
+      throw PosException('Sign in to the shop API first.');
     final categoryId = await _ensureRemoteCategory(product.category);
     final response = await ApiService.instance.createProduct({
       ..._productPayload(product),
       'categoryId': categoryId,
     });
-    if (response == null) throw PosException(ApiService.instance.lastError ?? 'The shop API did not create the product.');
+    if (response == null)
+      throw PosException(
+        ApiService.instance.lastError ??
+            'The shop API did not create the product.',
+      );
     return response;
   }
 
-  Future<Map<String, dynamic>> _updateRemoteProduct(PosProduct product, PosProduct previous) async {
+  Future<Map<String, dynamic>> _updateRemoteProduct(
+    PosProduct product,
+    PosProduct previous,
+  ) async {
     final categoryId = await _ensureRemoteCategory(product.category);
     final payload = _productPayload(product)
       ..remove('category')
       ..remove('initialStock')
       ..['categoryId'] = categoryId;
-    final response = await ApiService.instance.updateProduct(product.id, payload);
-    if (response == null) throw PosException(ApiService.instance.lastError ?? 'The shop API did not update the product.');
+    final response = await ApiService.instance.updateProduct(
+      product.id,
+      payload,
+    );
+    if (response == null)
+      throw PosException(
+        ApiService.instance.lastError ??
+            'The shop API did not update the product.',
+      );
     if (product.stock != previous.stock) {
       final changed = await ApiService.instance.adjustStock(
         product.id,
@@ -1095,14 +1272,20 @@ class PosState extends ChangeNotifier {
         product.stock >= previous.stock ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
         'POS product edit',
       );
-      if (!changed) throw PosException(ApiService.instance.lastError ?? 'Product details saved, but stock adjustment failed. Refresh before retrying.');
-      response['stock'] = product.stock;
+      if (changed == null)
+        throw PosException(
+          ApiService.instance.lastError ??
+              'Product details saved, but stock adjustment failed. Refresh before retrying.',
+        );
+      response['stock'] = changed;
     }
     return response;
   }
 
   Future<String?> _ensureRemoteCategory(String name) async {
-    final existing = categories.where((item) => item.name.toLowerCase() == name.toLowerCase()).firstOrNull;
+    final existing = categories
+        .where((item) => item.name.toLowerCase() == name.toLowerCase())
+        .firstOrNull;
     if (existing != null && _isRemoteProductId(existing.id)) return existing.id;
     final created = await ApiService.instance.createCategory(name);
     if (created != null && created['id'] is String) {
@@ -1112,30 +1295,44 @@ class PosState extends ChangeNotifier {
         colorValue: existing?.colorValue ?? 0xFFF8FAFC,
         iconKey: existing?.iconKey ?? _iconKeyForCategory(name),
       );
-      categories.removeWhere((item) => item.name.toLowerCase() == name.toLowerCase());
+      categories.removeWhere(
+        (item) => item.name.toLowerCase() == name.toLowerCase(),
+      );
       categories.add(category);
       return category.id;
     }
     final remoteCategories = await ApiService.instance.getCategories();
-    final match = remoteCategories?.where((item) => (item['name'] as String?)?.toLowerCase() == name.toLowerCase()).firstOrNull;
+    final match = remoteCategories
+        ?.where(
+          (item) =>
+              (item['name'] as String?)?.toLowerCase() == name.toLowerCase(),
+        )
+        .firstOrNull;
     if (match?['id'] is String) return match!['id'] as String;
-    throw PosException(ApiService.instance.lastError ?? 'Could not prepare category "$name" on the shop API.');
+    throw PosException(
+      ApiService.instance.lastError ??
+          'Could not prepare category "$name" on the shop API.',
+    );
   }
 
   Map<String, dynamic> _productPayload(PosProduct product) => {
-        'name': product.name,
-        'sku': product.sku,
-        if (product.barcode != null && product.barcode!.isNotEmpty) 'barcode': product.barcode,
-        'category': product.category,
-        'salePrice': product.unitPrice.minorUnits / 100,
-        'costPrice': (product.costPrice ?? const Money(0)).minorUnits / 100,
-        'vatRate': product.taxRateBasisPoints / 10000,
-        'unit': 'pc',
-        'initialStock': product.stock,
-        'lowStockThreshold': product.lowStockThreshold,
-      };
+    'name': product.name,
+    'sku': product.sku,
+    if (product.barcode != null && product.barcode!.isNotEmpty)
+      'barcode': product.barcode,
+    'category': product.category,
+    'salePrice': product.unitPrice.minorUnits / 100,
+    'costPrice': (product.costPrice ?? const Money(0)).minorUnits / 100,
+    'vatRate': product.taxRateBasisPoints / 10000,
+    'unit': 'pc',
+    'initialStock': product.stock,
+    'lowStockThreshold': product.lowStockThreshold,
+  };
 
-  PosProduct _productFromApi(Map<String, dynamic> remote, {PosProduct? fallback}) {
+  PosProduct _productFromApi(
+    Map<String, dynamic> remote, {
+    PosProduct? fallback,
+  }) {
     final categoryValue = remote['category'];
     final categoryName = categoryValue is Map<String, dynamic>
         ? (categoryValue['name'] as String? ?? fallback?.category ?? 'Other')
@@ -1143,7 +1340,9 @@ class PosState extends ChangeNotifier {
     final categoryColor = categoryValue is Map<String, dynamic>
         ? _colorFromHex(categoryValue['colorHex'] as String?)
         : null;
-    final localCategory = categories.where((item) => item.name.toLowerCase() == categoryName.toLowerCase()).firstOrNull;
+    final localCategory = categories
+        .where((item) => item.name.toLowerCase() == categoryName.toLowerCase())
+        .firstOrNull;
     final price = remote['salePrice'] as num;
     final cost = remote['costPrice'] as num?;
     final vat = remote['vatRate'] as num?;
@@ -1154,12 +1353,22 @@ class PosState extends ChangeNotifier {
       barcode: remote['barcode'] as String? ?? fallback?.barcode,
       category: categoryName,
       unitPrice: Money.parse(price.toString()),
-      costPrice: cost == null || cost == 0 ? null : Money.parse(cost.toString()),
+      costPrice: cost == null || cost == 0
+          ? null
+          : Money.parse(cost.toString()),
       stock: (remote['stock'] as num? ?? fallback?.stock ?? 0).toInt(),
-      lowStockThreshold: (remote['lowStockThreshold'] as num? ?? fallback?.lowStockThreshold ?? 10).toInt(),
+      lowStockThreshold:
+          (remote['lowStockThreshold'] as num? ??
+                  fallback?.lowStockThreshold ??
+                  10)
+              .toInt(),
       icon: localCategory?.icon ?? fallback?.icon ?? AppIcons.inventory,
-      tint: categoryColor != null ? Color(categoryColor) : localCategory?.color ?? fallback?.tint ?? const Color(0xFFF8FAFC),
-      taxRateBasisPoints: vat == null ? (fallback?.taxRateBasisPoints ?? defaultVatRateBasisPoints) : (vat * 10000).round(),
+      tint: categoryColor != null
+          ? Color(categoryColor)
+          : localCategory?.color ?? fallback?.tint ?? const Color(0xFFF8FAFC),
+      taxRateBasisPoints: vat == null
+          ? (fallback?.taxRateBasisPoints ?? defaultVatRateBasisPoints)
+          : (vat * 10000).round(),
       isActive: remote['active'] as bool? ?? fallback?.isActive ?? true,
       notes: fallback?.notes,
       imageBase64: fallback?.imageBase64,
@@ -1180,19 +1389,22 @@ class PosState extends ChangeNotifier {
     final normalized = name.toLowerCase();
     if (normalized.contains('dairy')) return 'dairy';
     if (normalized.contains('bakery')) return 'bakery';
-    if (normalized.contains('drink') || normalized.contains('beverage')) return 'drink';
+    if (normalized.contains('drink') || normalized.contains('beverage'))
+      return 'drink';
     if (normalized.contains('produce')) return 'produce';
     if (normalized.contains('snack')) return 'snack';
-    if (normalized.contains('health') || normalized.contains('personal care')) return 'health';
+    if (normalized.contains('health') || normalized.contains('personal care'))
+      return 'health';
     if (normalized.contains('clean')) return 'clean';
     if (normalized.contains('house')) return 'home';
-    if (normalized.contains('grain') || normalized.contains('food')) return 'grain';
+    if (normalized.contains('grain') || normalized.contains('food'))
+      return 'grain';
     return 'box';
   }
 
   bool _isRemoteProductId(String id) => RegExp(
-        r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
-      ).hasMatch(id);
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+  ).hasMatch(id);
 
   // ─── Variants ──────────────────────────────────────────────────────────────────────
 
@@ -1308,7 +1520,9 @@ class PosState extends ChangeNotifier {
     final cat = PosCategory(
       id: 'cat_${DateTime.now().millisecondsSinceEpoch}',
       name: clean,
-      colorValue: colorValue ?? kCategoryColors[categories.length % kCategoryColors.length],
+      colorValue:
+          colorValue ??
+          kCategoryColors[categories.length % kCategoryColors.length],
       iconKey: iconKey,
     );
     categories.add(cat);
@@ -1359,7 +1573,9 @@ class PosState extends ChangeNotifier {
       throw PosException('Keep at least one category.');
     }
     if (inUse > 0) {
-      final target = moveProductsTo == null ? null : categoryByName(moveProductsTo);
+      final target = moveProductsTo == null
+          ? null
+          : categoryByName(moveProductsTo);
       if (target == null || target.id == id) {
         throw PosException('Choose a category to move its $inUse products to.');
       }
@@ -1378,16 +1594,66 @@ class PosState extends ChangeNotifier {
 
   void _initDefaultCategories() {
     categories = [
-      PosCategory(id: 'cat_dairy', name: 'Dairy', colorValue: 0xFFEFF6FF, iconKey: 'dairy'),
-      PosCategory(id: 'cat_bakery', name: 'Bakery', colorValue: 0xFFFFFBEB, iconKey: 'bakery'),
-      PosCategory(id: 'cat_beverages', name: 'Beverages', colorValue: 0xFFF0FDF4, iconKey: 'drink'),
-      PosCategory(id: 'cat_produce', name: 'Produce', colorValue: 0xFFF7FEE7, iconKey: 'produce'),
-      PosCategory(id: 'cat_groceries', name: 'Groceries', colorValue: 0xFFFEFCE8, iconKey: 'grain'),
-      PosCategory(id: 'cat_snacks', name: 'Snacks', colorValue: 0xFFFFF7ED, iconKey: 'snack'),
-      PosCategory(id: 'cat_household', name: 'Household', colorValue: 0xFFF5F3FF, iconKey: 'home'),
-      PosCategory(id: 'cat_health', name: 'Health', colorValue: 0xFFFFEFF2, iconKey: 'health'),
-      PosCategory(id: 'cat_cleaning', name: 'Cleaning', colorValue: 0xFFEEF2FF, iconKey: 'clean'),
-      PosCategory(id: 'cat_other', name: 'Other', colorValue: 0xFFF8FAFC, iconKey: 'box'),
+      PosCategory(
+        id: 'cat_dairy',
+        name: 'Dairy',
+        colorValue: 0xFFEFF6FF,
+        iconKey: 'dairy',
+      ),
+      PosCategory(
+        id: 'cat_bakery',
+        name: 'Bakery',
+        colorValue: 0xFFFFFBEB,
+        iconKey: 'bakery',
+      ),
+      PosCategory(
+        id: 'cat_beverages',
+        name: 'Beverages',
+        colorValue: 0xFFF0FDF4,
+        iconKey: 'drink',
+      ),
+      PosCategory(
+        id: 'cat_produce',
+        name: 'Produce',
+        colorValue: 0xFFF7FEE7,
+        iconKey: 'produce',
+      ),
+      PosCategory(
+        id: 'cat_groceries',
+        name: 'Groceries',
+        colorValue: 0xFFFEFCE8,
+        iconKey: 'grain',
+      ),
+      PosCategory(
+        id: 'cat_snacks',
+        name: 'Snacks',
+        colorValue: 0xFFFFF7ED,
+        iconKey: 'snack',
+      ),
+      PosCategory(
+        id: 'cat_household',
+        name: 'Household',
+        colorValue: 0xFFF5F3FF,
+        iconKey: 'home',
+      ),
+      PosCategory(
+        id: 'cat_health',
+        name: 'Health',
+        colorValue: 0xFFFFEFF2,
+        iconKey: 'health',
+      ),
+      PosCategory(
+        id: 'cat_cleaning',
+        name: 'Cleaning',
+        colorValue: 0xFFEEF2FF,
+        iconKey: 'clean',
+      ),
+      PosCategory(
+        id: 'cat_other',
+        name: 'Other',
+        colorValue: 0xFFF8FAFC,
+        iconKey: 'box',
+      ),
     ];
   }
 
@@ -1396,12 +1662,14 @@ class PosState extends ChangeNotifier {
   void _syncCategoriesWithProducts() {
     for (final p in products) {
       if (categoryByName(p.category) == null) {
-        categories.add(PosCategory(
-          id: 'cat_${DateTime.now().microsecondsSinceEpoch}_${categories.length}',
-          name: p.category,
-          colorValue: p.tint.toARGB32(),
-          iconKey: 'box',
-        ));
+        categories.add(
+          PosCategory(
+            id: 'cat_${DateTime.now().microsecondsSinceEpoch}_${categories.length}',
+            name: p.category,
+            colorValue: p.tint.toARGB32(),
+            iconKey: 'box',
+          ),
+        );
       }
     }
   }
@@ -1425,9 +1693,9 @@ class PosState extends ChangeNotifier {
     return null;
   }
 
-
   int savedTabIndex = 0;
-  static const int sessionTimeoutMinutes = 60; // 1 hour unattended session threshold
+  static const int sessionTimeoutMinutes =
+      60; // 1 hour unattended session threshold
 
   void setActiveTab(int index) {
     savedTabIndex = index;
@@ -1447,7 +1715,10 @@ class PosState extends ChangeNotifier {
     if (currentLoggedInUser == null) return;
     try {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('session_last_active', DateTime.now().millisecondsSinceEpoch);
+      await prefs.setInt(
+        'session_last_active',
+        DateTime.now().millisecondsSinceEpoch,
+      );
     } catch (_) {}
   }
 
@@ -1468,12 +1739,16 @@ class PosState extends ChangeNotifier {
       heroImageUrl = prefs.getString('hero_image_url') ?? heroImageUrl;
       brandTagline = prefs.getString('brand_tagline') ?? brandTagline;
 
-      autoPrintReceipt = prefs.getBool('auto_print_receipt') ?? autoPrintReceipt;
+      autoPrintReceipt =
+          prefs.getBool('auto_print_receipt') ?? autoPrintReceipt;
       cashDrawerKick = prefs.getBool('cash_drawer_kick') ?? cashDrawerKick;
-      requirePinForReversal = prefs.getBool('require_pin_reversal') ?? requirePinForReversal;
-      printerPaperSize = prefs.getString('printer_paper_size') ?? printerPaperSize;
+      requirePinForReversal =
+          prefs.getBool('require_pin_reversal') ?? requirePinForReversal;
+      printerPaperSize =
+          prefs.getString('printer_paper_size') ?? printerPaperSize;
       serverUrl = prefs.getString('server_url') ?? serverUrl;
-      if (serverUrl == 'http://localhost:3000' || serverUrl == 'http://localhost:4000') {
+      if (serverUrl == 'http://localhost:3000' ||
+          serverUrl == 'http://localhost:4000') {
         serverUrl = 'http://localhost:4001';
       }
 
@@ -1481,10 +1756,15 @@ class PosState extends ChangeNotifier {
       if (usersJson != null) {
         try {
           final list = jsonDecode(usersJson) as List;
-          users = list.map((item) => PosUser.fromJson(item as Map<String, dynamic>)).toList();
+          users = list
+              .map((item) => PosUser.fromJson(item as Map<String, dynamic>))
+              .toList();
           // Rewrite legacy browser records immediately; older versions stored
           // staff PINs in plaintext inside users_json.
-          await prefs.setString('users_json', jsonEncode(users.map((u) => u.toJson()).toList()));
+          await prefs.setString(
+            'users_json',
+            jsonEncode(users.map((u) => u.toJson()).toList()),
+          );
         } catch (e) {
           debugPrint('Error parsing users_json: $e');
         }
@@ -1494,7 +1774,9 @@ class PosState extends ChangeNotifier {
       if (productsJson != null) {
         try {
           final list = jsonDecode(productsJson) as List;
-          products = list.map((item) => PosProduct.fromJson(item as Map<String, dynamic>)).toList();
+          products = list
+              .map((item) => PosProduct.fromJson(item as Map<String, dynamic>))
+              .toList();
         } catch (e) {
           debugPrint('Error parsing products_json: $e');
         }
@@ -1507,7 +1789,9 @@ class PosState extends ChangeNotifier {
       if (categoriesJson != null) {
         try {
           final list = jsonDecode(categoriesJson) as List;
-          final loaded = list.map((item) => PosCategory.fromJson(item as Map<String, dynamic>)).toList();
+          final loaded = list
+              .map((item) => PosCategory.fromJson(item as Map<String, dynamic>))
+              .toList();
           if (loaded.isNotEmpty) categories = loaded;
         } catch (e) {
           debugPrint('Error parsing categories_json: $e');
@@ -1517,7 +1801,10 @@ class PosState extends ChangeNotifier {
       if (!_includeDemoProducts && productsJson == null) {
         await prefs.setString('products_json', jsonEncode(<dynamic>[]));
       } else if (!_includeDemoProducts && productsJson != null) {
-        await prefs.setString('products_json', jsonEncode(products.map((item) => item.toJson()).toList()));
+        await prefs.setString(
+          'products_json',
+          jsonEncode(products.map((item) => item.toJson()).toList()),
+        );
       }
 
       // The JWT is intentionally memory-only. A cached user object is not an
@@ -1566,13 +1853,22 @@ class PosState extends ChangeNotifier {
 
       final productsList = products.map((p) => p.toJson()).toList();
       await prefs.setString('products_json', jsonEncode(productsList));
-      await prefs.setString('categories_json', jsonEncode(categories.map((c) => c.toJson()).toList()));
+      await prefs.setString(
+        'categories_json',
+        jsonEncode(categories.map((c) => c.toJson()).toList()),
+      );
 
       // Persist session if active
       if (currentLoggedInUser != null) {
         await prefs.setString('session_user_id', currentLoggedInUser!.id);
-        await prefs.setString('session_user_json', jsonEncode(currentLoggedInUser!.toJson()));
-        await prefs.setInt('session_last_active', DateTime.now().millisecondsSinceEpoch);
+        await prefs.setString(
+          'session_user_json',
+          jsonEncode(currentLoggedInUser!.toJson()),
+        );
+        await prefs.setInt(
+          'session_last_active',
+          DateTime.now().millisecondsSinceEpoch,
+        );
         await prefs.setInt('session_active_tab', savedTabIndex);
       }
     } catch (e) {
@@ -1592,7 +1888,10 @@ class PosState extends ChangeNotifier {
       if (user != null) {
         await prefs.setString('session_user_id', user.id);
         await prefs.setString('session_user_json', jsonEncode(user.toJson()));
-        await prefs.setInt('session_last_active', DateTime.now().millisecondsSinceEpoch);
+        await prefs.setInt(
+          'session_last_active',
+          DateTime.now().millisecondsSinceEpoch,
+        );
         if (tabIndex != null) {
           await prefs.setInt('session_active_tab', tabIndex);
         }
@@ -1631,7 +1930,8 @@ class PosState extends ChangeNotifier {
     if (newBrandTagline != null) brandTagline = newBrandTagline;
     if (newAutoPrintReceipt != null) autoPrintReceipt = newAutoPrintReceipt;
     if (newCashDrawerKick != null) cashDrawerKick = newCashDrawerKick;
-    if (newRequirePinForReversal != null) requirePinForReversal = newRequirePinForReversal;
+    if (newRequirePinForReversal != null)
+      requirePinForReversal = newRequirePinForReversal;
     if (newPrinterPaperSize != null) printerPaperSize = newPrinterPaperSize;
     if (newServerUrl != null) serverUrl = newServerUrl;
 
@@ -1697,7 +1997,6 @@ class PosState extends ChangeNotifier {
         color: const Color(0xFFD97706),
       ),
     ];
-
   }
 
   void _initDefaultProducts() {
@@ -1813,7 +2112,6 @@ class PosState extends ChangeNotifier {
         tint: const Color(0xFFF0FDF4),
       ),
     ];
-
   }
 
   void _initSampleData({required bool includeProducts}) {
@@ -1842,7 +2140,10 @@ class PosState extends ChangeNotifier {
 
   // --- Cart Actions ---
 
-  bool addToCart(PosProduct product, {void Function(String reason)? onRefused}) {
+  bool addToCart(
+    PosProduct product, {
+    void Function(String reason)? onRefused,
+  }) {
     final line = CartLine(
       productId: product.id,
       name: product.displayName,
@@ -1854,7 +2155,11 @@ class PosState extends ChangeNotifier {
     return added;
   }
 
-  void changeQuantity(String productId, int delta, {void Function(String reason)? onRefused}) {
+  void changeQuantity(
+    String productId,
+    int delta, {
+    void Function(String reason)? onRefused,
+  }) {
     cart.changeQuantity(productId, delta, onRefused: onRefused);
     notifyListeners();
   }
@@ -1887,42 +2192,50 @@ class PosState extends ChangeNotifier {
     final now = DateTime.now();
 
     final items = cart.lines
-        .map((l) => SaleRecordItem(
-              productId: l.productId,
-              productName: l.name,
-              unitPrice: l.unitPrice,
-              quantity: l.quantity,
-              lineTotal: l.lineTotal,
-            ))
+        .map(
+          (l) => SaleRecordItem(
+            productId: l.productId,
+            productName: l.name,
+            unitPrice: l.unitPrice,
+            quantity: l.quantity,
+            lineTotal: l.lineTotal,
+          ),
+        )
         .toList();
 
     final saleSubtotal = cart.subtotal;
     final saleVat = cart.vatAmount;
 
     final saleCustomer = customer ?? selectedCustomer;
+    String? saleId;
     if (ApiService.instance.hasToken) {
       final response = await ApiService.instance.submitSale({
         'idempotencyKey': idempotencyKey,
         'clientRef': idempotencyKey,
         'method': method.apiValue,
+        'paymentReference': paymentReference,
         if (saleCustomer != null) 'customerId': saleCustomer.id,
         'lines': cart.lines
-            .map((line) => {
-                  'productId': line.productId,
-                  'quantity': line.quantity,
-                })
+            .map(
+              (line) => {
+                'productId': line.productId,
+                'quantity': line.quantity,
+              },
+            )
             .toList(),
-        if (cashTendered != null)
-          'cashTendered': cashTendered.minorUnits / 100,
+        if (cashTendered != null) 'cashTendered': cashTendered.minorUnits / 100,
       });
       if (response == null) {
-        throw PosException(ApiService.instance.lastError ?? 'Could not record the sale.');
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not record the sale.',
+        );
       }
       final data = response['data'] as Map<String, dynamic>?;
       if (data == null) {
         throw PosException('The shop API returned an invalid sale response.');
       }
       receiptNum = data['receiptNumber'] as String? ?? receiptNum;
+      saleId = data['saleId'] as String?;
     }
 
     // 1. Deduct shelf stock
@@ -1966,6 +2279,7 @@ class PosState extends ChangeNotifier {
 
     // 4. Create Immutable Sale Record
     final record = SaleRecord(
+      saleId: saleId,
       receiptNumber: receiptNum,
       timestamp: now,
       cashier: activeCashier,
@@ -1974,6 +2288,7 @@ class PosState extends ChangeNotifier {
       vatAmount: saleVat,
       paymentMethod: method,
       paymentReference: paymentReference,
+      paymentPending: method == SalePaymentMethod.mpesa,
       customer: saleCustomer,
       cashTendered: cashTendered,
       changeDue: changeDue,
@@ -1989,6 +2304,34 @@ class PosState extends ChangeNotifier {
     return record;
   }
 
+  Future<void> reconcileMpesaPayment(
+    SaleRecord sale,
+    String mpesaReceipt,
+  ) async {
+    if (!ApiService.instance.hasToken) {
+      throw PosException('Reconnect to the shop before reconciling M-Pesa.');
+    }
+    final saleId = sale.saleId;
+    if (saleId == null || saleId.isEmpty) {
+      throw PosException(
+        'Refresh sales history before reconciling this payment.',
+      );
+    }
+    final reconciled = await ApiService.instance.reconcileMpesaSale(
+      saleId,
+      mpesaReceipt.trim(),
+    );
+    if (!reconciled) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not reconcile this payment.',
+      );
+    }
+    sale.paymentPending = false;
+    sale.paymentReference = mpesaReceipt.trim();
+    notifyListeners();
+    await _persistAll();
+  }
+
   // --- Sale Reversal (ADR-0001 & ADR-0002) ---
 
   void reverseSale(SaleRecord sale, String reason) {
@@ -1999,12 +2342,16 @@ class PosState extends ChangeNotifier {
 
     // 1. Return stock to shelf
     for (final item in sale.items) {
-      final p = products.firstWhere((prod) => prod.id == item.productId, orElse: () => products.first);
+      final p = products.firstWhere(
+        (prod) => prod.id == item.productId,
+        orElse: () => products.first,
+      );
       p.stock += item.quantity;
     }
 
     // 2. Reverse customer debit if credit
-    if (sale.paymentMethod == SalePaymentMethod.credit && sale.customer != null) {
+    if (sale.paymentMethod == SalePaymentMethod.credit &&
+        sale.customer != null) {
       final cust = sale.customer!;
       final newBal = Money(
         cust.currentBalance.minorUnits >= sale.subtotal.minorUnits
@@ -2046,20 +2393,59 @@ class PosState extends ChangeNotifier {
 
   // --- Inventory Adjustments ---
 
-  void adjustStock(String productId, int delta, String reason) {
+  Future<void> adjustStock(
+    String productId,
+    int delta,
+    String reason, {
+    String? type,
+  }) async {
     final prod = products.firstWhere((p) => p.id == productId);
+    if (delta == 0) return;
+    if (reason.trim().isEmpty) {
+      throw PosException('Enter a reason for this stock adjustment.');
+    }
     final newStock = prod.stock + delta;
-    if (newStock < 0) return;
-    prod.stock = newStock;
+    if (newStock < 0) {
+      throw PosException('Stock cannot be adjusted below zero.');
+    }
+
+    var confirmedStock = newStock;
+    if (_isRemoteProductId(productId)) {
+      if (!ApiService.instance.hasToken) {
+        throw PosException('Reconnect to the shop before adjusting stock.');
+      }
+      final changed = await ApiService.instance.adjustStock(
+        productId,
+        delta,
+        type ?? (delta > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT'),
+        reason.trim(),
+      );
+      if (changed == null) {
+        throw PosException(
+          ApiService.instance.lastError ??
+              'The shop API could not save this stock adjustment.',
+        );
+      }
+      confirmedStock = changed;
+    }
+
+    prod.stock = confirmedStock;
     notifyListeners();
+    await _persistAll();
   }
 
   // --- Customer Credit Payment ---
 
-  void recordCustomerPayment(String customerId, Money amount, String reference) {
+  void recordCustomerPayment(
+    String customerId,
+    Money amount,
+    String reference,
+  ) {
     final cust = customers.firstWhere((c) => c.id == customerId);
     final newBal = Money(
-      cust.currentBalance.minorUnits >= amount.minorUnits ? cust.currentBalance.minorUnits - amount.minorUnits : 0,
+      cust.currentBalance.minorUnits >= amount.minorUnits
+          ? cust.currentBalance.minorUnits - amount.minorUnits
+          : 0,
     );
     cust.currentBalance = newBal;
     cust.ledger.insert(
@@ -2131,7 +2517,9 @@ class PosState extends ChangeNotifier {
   void closeShift(Money countedCash) {
     shift.isClosed = true;
     shift.closingCounted = countedCash;
-    shift.variance = Money(countedCash.minorUnits - shift.expectedCash.minorUnits);
+    shift.variance = Money(
+      countedCash.minorUnits - shift.expectedCash.minorUnits,
+    );
     notifyListeners();
   }
 }

@@ -68,6 +68,14 @@ class ApiService {
 
   /// Cashier login with PIN
   Future<Map<String, dynamic>?> login(String phone, String pin) async {
+    return _login({'phone': phone.replaceAll(RegExp(r'\D'), ''), 'pin': pin});
+  }
+
+  Future<Map<String, dynamic>?> loginWithUserId(String userId, String pin) {
+    return _login({'userId': userId, 'pin': pin});
+  }
+
+  Future<Map<String, dynamic>?> _login(Map<String, String> credentials) async {
     lastError = null;
     _authToken = null;
     _authTokenExpiresAt = null;
@@ -76,10 +84,7 @@ class ApiService {
           .post(
             Uri.parse('$baseUrl/auth/login'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'phone': phone.replaceAll(RegExp(r'\D'), ''),
-              'pin': pin,
-            }),
+            body: jsonEncode(credentials),
           )
           .timeout(const Duration(seconds: 5));
 
@@ -144,6 +149,28 @@ class ApiService {
     } catch (e) {
       lastError = 'Could not fetch staff accounts from the shop API.';
       debugPrint('API getStaffUsers error: $e');
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>?> getLoginUsers() async {
+    lastError = null;
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/auth/login-users'))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        return List<Map<String, dynamic>>.from(
+          decoded['data'] as List? ?? const [],
+        );
+      }
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not fetch sign-in accounts (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not fetch sign-in accounts from the shop API.';
+      debugPrint('API getLoginUsers error: $e');
     }
     return null;
   }
@@ -342,7 +369,7 @@ class ApiService {
   }
 
   /// Adjust product stock
-  Future<bool> adjustStock(
+  Future<int?> adjustStock(
     String productId,
     int delta,
     String type,
@@ -357,15 +384,22 @@ class ApiService {
             body: jsonEncode({'delta': delta, 'type': type, 'reason': reason}),
           )
           .timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return true;
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic> && decoded['newStock'] is num) {
+          return (decoded['newStock'] as num).toInt();
+        }
+        lastError = 'The shop API did not return the updated stock quantity.';
+        return null;
+      }
       lastError =
           _messageFromResponse(res.body) ??
           'Stock adjustment failed (${res.statusCode}).';
-      return false;
+      return null;
     } catch (e) {
       lastError = 'Could not adjust product stock on the shop API.';
       debugPrint('API adjustStock error: $e');
-      return false;
+      return null;
     }
   }
 
@@ -771,10 +805,12 @@ class ApiService {
   /// Delete a customer (only succeeds if balance is zero)
   Future<({bool ok, String? error})> deleteCustomer(String customerId) async {
     try {
-      final res = await http.delete(
-        Uri.parse('$baseUrl/customers/$customerId'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 5));
+      final res = await http
+          .delete(
+            Uri.parse('$baseUrl/customers/$customerId'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) return (ok: true, error: null);
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final msg = (body['error'] as Map?)?.containsKey('message') == true
@@ -849,6 +885,35 @@ class ApiService {
       debugPrint('API submitSale error: $e');
     }
     return null;
+  }
+
+  /// Confirm a manually received M-Pesa payment against its original pending sale.
+  Future<bool> reconcileMpesaSale(
+    String saleId,
+    String mpesaReceipt, {
+    String? note,
+  }) async {
+    lastError = null;
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/sales/$saleId/reconcile-payment'),
+            headers: _headers,
+            body: jsonEncode({
+              'mpesaReceipt': mpesaReceipt,
+              if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not reconcile M-Pesa payment (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not reach the shop API to reconcile this payment.';
+      debugPrint('API reconcileMpesaSale error: $e');
+    }
+    return false;
   }
 
   /// Reverse a sale (append-only reversing entries)
@@ -959,22 +1024,32 @@ class ApiService {
 
   Future<Map<String, dynamic>?> getDeliveryConfig() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/delivery/config'), headers: _headers)
+      final res = await http
+          .get(Uri.parse('$baseUrl/delivery/config'), headers: _headers)
           .timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200)
+        return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('API getDeliveryConfig error: $e');
     }
     return null;
   }
 
-  Future<bool> updateDeliveryConfig(double baseFee, double distanceTopupRate) async {
+  Future<bool> updateDeliveryConfig(
+    double baseFee,
+    double distanceTopupRate,
+  ) async {
     try {
-      final res = await http.put(
-        Uri.parse('$baseUrl/delivery/config'),
-        headers: _headers,
-        body: jsonEncode({'baseFee': baseFee, 'distanceTopupRate': distanceTopupRate}),
-      ).timeout(const Duration(seconds: 5));
+      final res = await http
+          .put(
+            Uri.parse('$baseUrl/delivery/config'),
+            headers: _headers,
+            body: jsonEncode({
+              'baseFee': baseFee,
+              'distanceTopupRate': distanceTopupRate,
+            }),
+          )
+          .timeout(const Duration(seconds: 5));
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('API updateDeliveryConfig error: $e');
@@ -984,41 +1059,60 @@ class ApiService {
 
   // ── Delivery orders ─────────────────────────────────────────────────
 
-  Future<Map<String, dynamic>?> createDeliveryOrder(Map<String, dynamic> payload) async {
+  Future<Map<String, dynamic>?> createDeliveryOrder(
+    Map<String, dynamic> payload,
+  ) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/delivery/orders'),
-        headers: _headers,
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 201) return jsonDecode(res.body) as Map<String, dynamic>;
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/delivery/orders'),
+            headers: _headers,
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 201)
+        return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('API createDeliveryOrder error: $e');
     }
     return null;
   }
 
-  Future<Map<String, dynamic>?> getDeliveryOrders({String? status, int page = 1}) async {
+  Future<Map<String, dynamic>?> getDeliveryOrders({
+    String? status,
+    int page = 1,
+  }) async {
     try {
       final params = <String, String>{'page': '$page', 'limit': '50'};
       if (status != null) params['status'] = status;
-      final uri = Uri.parse('$baseUrl/delivery/orders').replace(queryParameters: params);
-      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      final uri = Uri.parse(
+        '$baseUrl/delivery/orders',
+      ).replace(queryParameters: params);
+      final res = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200)
+        return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('API getDeliveryOrders error: $e');
     }
     return null;
   }
 
-  Future<Map<String, dynamic>?> assignRider(String orderId, String riderId) async {
+  Future<Map<String, dynamic>?> assignRider(
+    String orderId,
+    String riderId,
+  ) async {
     try {
-      final res = await http.patch(
-        Uri.parse('$baseUrl/delivery/orders/$orderId/assign'),
-        headers: _headers,
-        body: jsonEncode({'riderId': riderId}),
-      ).timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/delivery/orders/$orderId/assign'),
+            headers: _headers,
+            body: jsonEncode({'riderId': riderId}),
+          )
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200)
+        return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('API assignRider error: $e');
     }
@@ -1033,12 +1127,15 @@ class ApiService {
     try {
       final body = <String, dynamic>{'status': status};
       if (failureReason != null) body['failureReason'] = failureReason;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/delivery/orders/$orderId/status'),
-        headers: _headers,
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/delivery/orders/$orderId/status'),
+            headers: _headers,
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200)
+        return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('API updateDeliveryStatus error: $e');
     }
@@ -1047,11 +1144,13 @@ class ApiService {
 
   Future<bool> cancelDeliveryOrder(String orderId, String reason) async {
     try {
-      final res = await http.patch(
-        Uri.parse('$baseUrl/delivery/orders/$orderId/cancel'),
-        headers: _headers,
-        body: jsonEncode({'reason': reason}),
-      ).timeout(const Duration(seconds: 5));
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/delivery/orders/$orderId/cancel'),
+            headers: _headers,
+            body: jsonEncode({'reason': reason}),
+          )
+          .timeout(const Duration(seconds: 5));
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('API cancelDeliveryOrder error: $e');
@@ -1063,7 +1162,8 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>?> getRiders() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/delivery/riders'), headers: _headers)
+      final res = await http
+          .get(Uri.parse('$baseUrl/delivery/riders'), headers: _headers)
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         return List<Map<String, dynamic>>.from(jsonDecode(res.body) as List);
@@ -1074,13 +1174,19 @@ class ApiService {
     return null;
   }
 
-  Future<bool> initiateRiderPayout(String riderId, double amount, String mpesaPhone) async {
+  Future<bool> initiateRiderPayout(
+    String riderId,
+    double amount,
+    String mpesaPhone,
+  ) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/delivery/riders/$riderId/payout'),
-        headers: _headers,
-        body: jsonEncode({'amount': amount, 'mpesaPhone': mpesaPhone}),
-      ).timeout(const Duration(seconds: 10));
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/delivery/riders/$riderId/payout'),
+            headers: _headers,
+            body: jsonEncode({'amount': amount, 'mpesaPhone': mpesaPhone}),
+          )
+          .timeout(const Duration(seconds: 10));
       return res.statusCode == 201;
     } catch (e) {
       debugPrint('API initiateRiderPayout error: $e');
@@ -1092,7 +1198,8 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>?> getRiderOrders() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/delivery/rider/orders'), headers: _headers)
+      final res = await http
+          .get(Uri.parse('$baseUrl/delivery/rider/orders'), headers: _headers)
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         return List<Map<String, dynamic>>.from(jsonDecode(res.body) as List);
@@ -1105,9 +1212,11 @@ class ApiService {
 
   Future<Map<String, dynamic>?> getRiderEarnings() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/delivery/rider/earnings'), headers: _headers)
+      final res = await http
+          .get(Uri.parse('$baseUrl/delivery/rider/earnings'), headers: _headers)
           .timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200)
+        return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('API getRiderEarnings error: $e');
     }

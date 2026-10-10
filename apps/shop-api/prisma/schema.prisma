@@ -152,6 +152,7 @@ model User {
 
   cashSessions      CashSession[]
   sales             Sale[]
+  reconciledSalePayments SalePayment[] @relation("SalePaymentReconciledBy")
   cashMovements     CashMovement[]
   auditLogs         AuditLog[]
   approvalsGiven    Approval[]        @relation("ApprovedBy")
@@ -478,22 +479,29 @@ model SalePayment {
   method    PaymentMethod
   status    PaymentStatus @default(PENDING)
   amount    Decimal       @db.Decimal(14, 2)
+  cashTendered Decimal?   @db.Decimal(14, 2)
+  changeDue    Decimal?   @db.Decimal(14, 2)
 
   mpesaReceipt      String? @unique
   checkoutRequestId String?
   idempotencyKey    String  @unique
   resultCode        String?
   resultDesc        String?
+  reference         String?
   settledAt         DateTime?
+  reconciledById    String? @db.Uuid
+  reconciledAt      DateTime?
   /// Set when a late settlement forced a correcting entry.
   reversalOfId      String? @db.Uuid
   createdAt DateTime     @default(now())
   updatedAt DateTime     @updatedAt
 
-  sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale         Sale  @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  reconciledBy User? @relation("SalePaymentReconciledBy", fields: [reconciledById], references: [id], onDelete: Restrict)
 
   @@index([saleId])
   @@index([status])
+  @@index([reconciledById])
   @@map("sale_payments")
 }
 

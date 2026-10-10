@@ -10,7 +10,7 @@ packages:
     source: hosted
     version: "2.0.1"
   archive:
-    dependency: "direct main"
+    dependency: transitive
     description:
       name: archive
       sha256: "6c5bcd986e06b94e3c40244af471750840a3d2341d1f9763a1100a14add517b4"
@@ -146,7 +146,7 @@ packages:
     source: hosted
     version: "4.0.0"
   file_picker_web:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: file_picker_web
       sha256: "8d69eb18de3c028a49276d6ca317028a1f39fa17c3ec312e132bac8659c8775e"

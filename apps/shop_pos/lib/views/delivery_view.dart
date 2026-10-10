@@ -27,33 +27,30 @@ class _DeliveryViewState extends State<DeliveryView> {
       length: isManager ? 3 : 1,
       child: Scaffold(
         backgroundColor: AppColors.bg_canvas,
-        appBar: AppBar(
-          automaticallyImplyLeading: false,
-          backgroundColor: AppColors.bg_surface,
-          elevation: 0,
-          title: const Text(
-            'Delivery Management',
-            style: TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.bold,
-                color: AppColors.text_primary),
-          ),
-          bottom: TabBar(
-            labelColor: AppColors.accent_primary,
-            unselectedLabelColor: AppColors.text_tertiary,
-            indicatorColor: AppColors.accent_primary,
-            tabs: [
-              const Tab(text: 'Orders'),
-              if (isManager) const Tab(text: 'Riders'),
-              if (isManager) const Tab(text: 'Config'),
-            ],
-          ),
-        ),
-        body: TabBarView(
+        body: Column(
           children: [
-            _DeliveryOrdersTab(state: widget.state, isManager: isManager),
-            if (isManager) _RidersTab(state: widget.state),
-            if (isManager) _DeliveryConfigTab(state: widget.state),
+            Material(
+              color: AppColors.bg_surface,
+              child: TabBar(
+                labelColor: AppColors.accent_primary,
+                unselectedLabelColor: AppColors.text_tertiary,
+                indicatorColor: AppColors.accent_primary,
+                tabs: [
+                  const Tab(text: 'Orders'),
+                  if (isManager) const Tab(text: 'Riders'),
+                  if (isManager) const Tab(text: 'Config'),
+                ],
+              ),
+            ),
+            Expanded(
+              child: TabBarView(
+                children: [
+                  _DeliveryOrdersTab(state: widget.state, isManager: isManager),
+                  if (isManager) _RidersTab(state: widget.state),
+                  if (isManager) _DeliveryConfigTab(state: widget.state),
+                ],
+              ),
+            ),
           ],
         ),
       ),

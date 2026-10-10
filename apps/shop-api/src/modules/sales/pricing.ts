@@ -74,6 +74,8 @@ export type SaleRejection =
   | { kind: 'QUANTITY_NOT_POSITIVE'; productId: string; requested: Milli }
   | { kind: 'DUPLICATE_PRODUCT'; productId: string }
   | { kind: 'EMPTY_SALE' }
+  | { kind: 'MPESA_REFERENCE_REQUIRED' }
+  | { kind: 'CASH_TENDER_INSUFFICIENT' }
   | { kind: 'CUSTOMER_REQUIRED' }
   | { kind: 'CREDIT_ACCOUNT_UNAVAILABLE'; customerId: string }
   | { kind: 'CREDIT_FROZEN'; customerId: string }

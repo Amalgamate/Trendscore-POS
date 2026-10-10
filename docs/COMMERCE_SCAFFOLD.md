@@ -10,10 +10,13 @@ This repository now contains the first UI and application boundaries for:
 - `Social Commerce`: an owner/manager POS module listing official channel
   integration prerequisites and the future product-post workflow.
 
-These are scaffolds, not a live store. The storefront deliberately shows an
-empty catalog, unconfigured shop policies, and an unavailable checkout rather
-than fabricating stock, prices, payment success, customer contact details, or
-legal text. Its WhatsApp link appears only when a valid
+These are scaffolds, not a live store. The local storefront preview uses
+explicitly labeled sample products, illustrative prices, category/search
+controls, and a browser-persisted bag to demonstrate the customer journey.
+Sample items are not for sale. Checkout does not collect customer details,
+create orders, reserve stock, or accept payment. Real catalog data, shop
+policies, and customer contact details remain unconfigured rather than being
+fabricated. Its WhatsApp link appears only when a valid
 `NEXT_PUBLIC_STORE_WHATSAPP_NUMBER` is supplied. Production should resolve
 that number from the shop's server-side storefront configuration instead of a
 single global environment variable.
