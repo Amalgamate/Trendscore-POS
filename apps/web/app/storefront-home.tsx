@@ -36,6 +36,12 @@ export function StorefrontHome() {
           illustrative only.
         </div>
       )}
+      {catalogState === 'error' && (
+        <div className="preview-ribbon" role="alert">
+          <span aria-hidden="true">NOTICE</span>
+          The shop catalog is temporarily unavailable. Please try again later.
+        </div>
+      )}
 
       <section className="welcome-band" aria-labelledby="welcome-title">
       <div className="welcome-copy">
@@ -49,13 +55,23 @@ export function StorefrontHome() {
           </a>
         </div>
         <div className="welcome-aside" aria-label="Preview status">
-          <span className={`status-dot${catalogState === 'live' ? ' is-live' : ''}`} />
+          <span
+            className={`status-dot${catalogState === 'live' ? ' is-live' : ''}${catalogState === 'error' ? ' is-error' : ''}`}
+          />
           <div>
-            <strong>{catalogState === 'live' ? 'Published catalog' : 'Catalog preview'}</strong>
+            <strong>
+              {catalogState === 'live'
+                ? 'Published catalog'
+                : catalogState === 'error'
+                  ? 'Catalog unavailable'
+                  : 'Catalog preview'}
+            </strong>
             <p>
               {catalogState === 'live'
                 ? `${catalogProducts.length} published ${catalogProducts.length === 1 ? 'product' : 'products'}`
-                : 'Showing illustrative products; no orders or payments are submitted.'}
+                : catalogState === 'error'
+                  ? 'Published products could not be loaded. No sample products are being shown.'
+                  : 'Showing illustrative products; no orders or payments are submitted.'}
             </p>
           </div>
         </div>
@@ -105,6 +121,11 @@ export function StorefrontHome() {
 
         {catalogState === 'loading' ? (
           <div className="catalog-empty" role="status">Loading the shop catalog…</div>
+        ) : catalogState === 'error' ? (
+          <div className="catalog-empty" role="alert">
+            <h3>Products are temporarily unavailable</h3>
+            <p>Please try again later.</p>
+          </div>
         ) : filteredProducts.length ? (
           <div className="product-grid">
             {filteredProducts.map((product) => (

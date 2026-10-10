@@ -12,7 +12,7 @@ import {
 import { PREVIEW_PRODUCTS, type StoreProduct } from './store-data';
 
 type CartLine = { productId: string; quantity: number };
-type CatalogState = 'loading' | 'live' | 'sample';
+type CatalogState = 'loading' | 'live' | 'sample' | 'error';
 type CartContextValue = {
   products: StoreProduct[];
   catalogState: CatalogState;
@@ -97,8 +97,15 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
       })
       .catch((error: unknown) => {
         console.error('Could not load the published shop catalog.', error);
-        setProducts(PREVIEW_PRODUCTS.map((product) => ({ ...product, preview: true })));
-        setCatalogState('sample');
+        if (process.env.NODE_ENV !== 'production') {
+          setProducts(
+            PREVIEW_PRODUCTS.map((product) => ({ ...product, preview: true })),
+          );
+          setCatalogState('sample');
+        } else {
+          setProducts([]);
+          setCatalogState('error');
+        }
       });
   }, []);
 

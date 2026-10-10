@@ -127,6 +127,11 @@ a {
   line-height: 1.45;
 }
 
+.preview-ribbon[role='alert'] {
+  color: #7f1d1d;
+  background: #fef2f2;
+}
+
 .preview-ribbon span {
   flex: 0 0 auto;
   font-size: 9px;
@@ -246,6 +251,10 @@ a {
 
 .status-dot.is-live {
   background: #39d98a;
+}
+
+.status-dot.is-error {
+  background: #f87171;
 }
 
 .welcome-aside strong {

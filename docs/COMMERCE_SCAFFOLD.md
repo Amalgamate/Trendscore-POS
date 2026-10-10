@@ -24,10 +24,12 @@ single global environment variable.
 
 ## Integration sequence
 
-1. Configure production hosting and hostname routing for the separate Next.js
-   storefront. The POS/API deploy workflow does not currently deploy the web
-   app, and the public catalog API is scoped to the configured shop instance.
-   Do not accept an arbitrary business ID from a public request.
+1. Deploy the Next.js storefront at `webshop.trendscore.co.ke` and
+   `www.webshop.trendscore.co.ke`. The production workflow builds a dedicated
+   image, provisions Nginx routing and Let's Encrypt certificates, and proxies
+   the storefront's `/api` requests to the shop-specific API. DNS must point
+   both names to the deployment host before the workflow runs. Do not accept an
+   arbitrary business ID from a public request.
 2. Add stock reservations, commerce orders, idempotent order/payment attempts,
    append-only order status events, fulfillment, and reconciliation. Connect
    completed orders to POS stock, sales, and reports.
@@ -76,9 +78,8 @@ npm run dev --workspace @retail-os/storefront
 ```
 
 The storefront uses Next.js App Router for a separately deployable,
-server-rendered public website. The API's public catalog routes are under
-`/products/storefront`; production must route the storefront to the correct
-shop-specific API instance before the catalog is customer-accessible.
+server-rendered public website. In production, Nginx routes the storefront
+hostnames to this app and proxies `/api` to the configured shop API instance.
 
 ## Reference documentation checked
 

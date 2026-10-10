@@ -10,7 +10,7 @@ export function StoreHeader() {
     <header className="store-header">
       <Link className="wordmark" href="/" aria-label="Store home">
         <span className="wordmark-mark">S</span>
-        <span>ShopSmart <small>{catalogState === 'live' ? 'WEB SHOP' : 'PREVIEW'}</small></span>
+        <span>ShopSmart <small>{catalogState === 'sample' ? 'PREVIEW' : 'WEB SHOP'}</small></span>
       </Link>
       <nav aria-label="Main navigation">
         <Link href="/#products">Browse</Link>
