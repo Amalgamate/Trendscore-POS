@@ -60,7 +60,14 @@ async function main(): Promise<void> {
       where: { id: existing.id },
       data,
     });
-    console.log(JSON.stringify({ ok: true, created: false, resetPin, role: 'SUPER_ADMIN' }));
+    console.log(
+      JSON.stringify({
+        ok: true,
+        created: false,
+        resetPin,
+        role: 'SUPER_ADMIN',
+      }),
+    );
     return;
   }
 
