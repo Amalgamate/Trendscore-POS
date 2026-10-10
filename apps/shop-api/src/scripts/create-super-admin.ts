@@ -1,7 +1,10 @@
 /**
  * Ensure the platform administrator exists in this shop database.
- * The initial PIN is hashed here and marked for mandatory replacement before
- * any authenticated shop API route is usable. Re-runs never reset credentials.
+ *
+ * New account: created with the supplied initial PIN and mustChangePin = true,
+ * so the admin must set their own PIN at first login.
+ * Existing account: the PIN and mustChangePin are left untouched, so re-running
+ * this script never forces a PIN change or resets a PIN the admin already chose.
  */
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -34,43 +37,44 @@ async function main(): Promise<void> {
   }
 
   const phone = normalizePhone(rawPhone);
-  const existing = await prisma.user.findUnique({ where: { phone } });
-  if (existing?.isPlatformSuperAdmin) {
-    await prisma.user.update({
-      where: { id: existing.id },
-      data: { fullName: 'Retail OS Super Admin', role: 'OWNER', active: true },
-    });
-    console.log(JSON.stringify({ ok: true, created: false, role: 'OWNER' }));
-    return;
-  }
-
   const pinHash = await argon2.hash(initialPin, {
     type: argon2.argon2id,
     memoryCost: 19_456,
     timeCost: 2,
     parallelism: 1,
   });
+
+  const existing = await prisma.user.findUnique({ where: { phone } });
+  if (existing?.isPlatformSuperAdmin) {
+    // Existing admin: never touch pinHash or mustChangePin.
+    await prisma.user.update({
+      where: { id: existing.id },
+      data: { fullName: 'Retail OS Super Admin', role: 'SUPER_ADMIN', active: true },
+    });
+    console.log(JSON.stringify({ ok: true, created: false, role: 'SUPER_ADMIN' }));
+    return;
+  }
+
   await prisma.user.upsert({
     where: { phone },
     update: {
+      // Existing user being promoted: keep their PIN and do not force a change.
       fullName: 'Retail OS Super Admin',
-      pinHash,
-      role: 'OWNER',
+      role: 'SUPER_ADMIN',
       active: true,
-      mustChangePin: true,
       isPlatformSuperAdmin: true,
     },
     create: {
       fullName: 'Retail OS Super Admin',
       phone,
       pinHash,
-      role: 'OWNER',
+      role: 'SUPER_ADMIN',
       active: true,
       mustChangePin: true,
       isPlatformSuperAdmin: true,
     },
   });
-  console.log(JSON.stringify({ ok: true, created: true, role: 'OWNER' }));
+  console.log(JSON.stringify({ ok: true, created: true, role: 'SUPER_ADMIN' }));
 }
 
 main()

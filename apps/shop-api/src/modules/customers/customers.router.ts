@@ -118,6 +118,24 @@ export function customersRouter(businessId: string): Router {
     }
   });
 
+  // DELETE /customers/:id — only allowed when balance is zero
+  router.delete('/:id', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
+    try {
+      const customer = await prisma.customer.findFirst({
+        where: { id: req.params.id, businessId },
+      });
+      if (!customer) return sendError(res, 404, 'NOT_FOUND', 'Customer not found.');
+      if (Number(customer.balance) !== 0) {
+        return sendError(res, 409, 'BALANCE_NOT_ZERO', 'Cannot delete a customer with an outstanding balance. Clear the debt first.');
+      }
+      await prisma.customer.delete({ where: { id: req.params.id } });
+      return send200(res, { ok: true });
+    } catch (err: unknown) {
+      console.error('customers/delete error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to delete customer.');
+    }
+  });
+
   // PATCH /customers/:id
   router.patch('/:id', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
     const body = parseBody(UpdateCustomerSchema, req, res);

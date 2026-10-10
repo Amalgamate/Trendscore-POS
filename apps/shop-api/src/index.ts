@@ -10,6 +10,7 @@ import { customersRouter } from './modules/customers/customers.router';
 import { salesRouter } from './modules/sales/sales.router';
 import { categoriesRouter } from './modules/categories/categories.router';
 import { businessRouter } from './modules/business/business.router';
+import { deliveryRouter } from './modules/delivery/delivery.router';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const VERSION = process.env.APP_VERSION ?? 'dev';
@@ -52,6 +53,7 @@ if (BUSINESS_ID) {
   app.use('/customers', customersRouter(BUSINESS_ID));
   app.use('/sales', salesRouter(BUSINESS_ID));
   app.use('/business', businessRouter(BUSINESS_ID));
+  app.use('/delivery', deliveryRouter(BUSINESS_ID));
 } else {
   log.warn('BUSINESS_ID is not set — business routes are disabled. Set the env var to enable them.');
 }

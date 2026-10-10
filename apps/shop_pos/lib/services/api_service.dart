@@ -27,6 +27,25 @@ class ApiService {
         if (_authToken != null) 'Authorization': 'Bearer $_authToken',
       };
 
+  /// Resolves a shop code to a server URL by treating the code as the
+  /// subdomain slug on trendscore.co.ke.
+  ///
+  /// Examples:
+  ///   gutagala  → https://www.gutagala.trendscore.co.ke/api
+  ///   GUTAGALA  → https://www.gutagala.trendscore.co.ke/api  (lowercased)
+  ///
+  /// No lookup server needed — the code IS the subdomain.
+  /// When the control-plane resolve API is ready this can be swapped in.
+  Future<String> resolveShopCode(String code) async {
+    lastError = null;
+    final slug = code.toLowerCase().trim();
+    if (slug.isEmpty) {
+      lastError = 'Shop code cannot be empty.';
+      return '';
+    }
+    return 'https://www.$slug.trendscore.co.ke/api';
+  }
+
   /// Check server health
   Future<bool> checkHealth() async {
     try {
@@ -315,6 +334,25 @@ class ApiService {
     }
   }
 
+  /// Delete a customer (only succeeds if balance is zero)
+  Future<({bool ok, String? error})> deleteCustomer(String customerId) async {
+    try {
+      final res = await http.delete(
+        Uri.parse('$baseUrl/customers/$customerId'),
+        headers: _headers,
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return (ok: true, error: null);
+      final body = jsonDecode(res.body) as Map<String, dynamic>;
+      final msg = (body['error'] as Map?)?.containsKey('message') == true
+          ? body['error']['message'] as String
+          : 'Could not delete customer.';
+      return (ok: false, error: msg);
+    } catch (e) {
+      debugPrint('API deleteCustomer error: $e');
+      return (ok: false, error: 'Could not reach the server.');
+    }
+  }
+
   /// Fetch sales
   Future<List<Map<String, dynamic>>?> getSales() async {
     try {
@@ -431,6 +469,165 @@ class ApiService {
       }
     } catch (e) {
       debugPrint('API getDashboardReport error: $e');
+    }
+    return null;
+  }
+
+  // ── Delivery config ─────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>?> getDeliveryConfig() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/delivery/config'), headers: _headers)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('API getDeliveryConfig error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> updateDeliveryConfig(double baseFee, double distanceTopupRate) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/delivery/config'),
+        headers: _headers,
+        body: jsonEncode({'baseFee': baseFee, 'distanceTopupRate': distanceTopupRate}),
+      ).timeout(const Duration(seconds: 5));
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('API updateDeliveryConfig error: $e');
+      return false;
+    }
+  }
+
+  // ── Delivery orders ─────────────────────────────────────────────────
+
+  Future<Map<String, dynamic>?> createDeliveryOrder(Map<String, dynamic> payload) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/delivery/orders'),
+        headers: _headers,
+        body: jsonEncode(payload),
+      ).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 201) return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('API createDeliveryOrder error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> getDeliveryOrders({String? status, int page = 1}) async {
+    try {
+      final params = <String, String>{'page': '$page', 'limit': '50'};
+      if (status != null) params['status'] = status;
+      final uri = Uri.parse('$baseUrl/delivery/orders').replace(queryParameters: params);
+      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('API getDeliveryOrders error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> assignRider(String orderId, String riderId) async {
+    try {
+      final res = await http.patch(
+        Uri.parse('$baseUrl/delivery/orders/$orderId/assign'),
+        headers: _headers,
+        body: jsonEncode({'riderId': riderId}),
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('API assignRider error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> updateDeliveryStatus(
+    String orderId,
+    String status, {
+    String? failureReason,
+  }) async {
+    try {
+      final body = <String, dynamic>{'status': status};
+      if (failureReason != null) body['failureReason'] = failureReason;
+      final res = await http.patch(
+        Uri.parse('$baseUrl/delivery/orders/$orderId/status'),
+        headers: _headers,
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('API updateDeliveryStatus error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> cancelDeliveryOrder(String orderId, String reason) async {
+    try {
+      final res = await http.patch(
+        Uri.parse('$baseUrl/delivery/orders/$orderId/cancel'),
+        headers: _headers,
+        body: jsonEncode({'reason': reason}),
+      ).timeout(const Duration(seconds: 5));
+      return res.statusCode == 200;
+    } catch (e) {
+      debugPrint('API cancelDeliveryOrder error: $e');
+      return false;
+    }
+  }
+
+  // ── Rider management ────────────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>?> getRiders() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/delivery/riders'), headers: _headers)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        return List<Map<String, dynamic>>.from(jsonDecode(res.body) as List);
+      }
+    } catch (e) {
+      debugPrint('API getRiders error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> initiateRiderPayout(String riderId, double amount, String mpesaPhone) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/delivery/riders/$riderId/payout'),
+        headers: _headers,
+        body: jsonEncode({'amount': amount, 'mpesaPhone': mpesaPhone}),
+      ).timeout(const Duration(seconds: 10));
+      return res.statusCode == 201;
+    } catch (e) {
+      debugPrint('API initiateRiderPayout error: $e');
+      return false;
+    }
+  }
+
+  // ── Rider-scoped endpoints ───────────────────────────────────────────
+
+  Future<List<Map<String, dynamic>>?> getRiderOrders() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/delivery/rider/orders'), headers: _headers)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        return List<Map<String, dynamic>>.from(jsonDecode(res.body) as List);
+      }
+    } catch (e) {
+      debugPrint('API getRiderOrders error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> getRiderEarnings() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/delivery/rider/earnings'), headers: _headers)
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (e) {
+      debugPrint('API getRiderEarnings error: $e');
     }
     return null;
   }

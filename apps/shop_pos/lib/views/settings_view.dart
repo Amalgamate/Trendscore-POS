@@ -5,6 +5,7 @@ import '../theme/tokens.dart';
 import '../services/api_service.dart';
 import '../services/favicon_service.dart';
 import 'widgets/image_upload_widget.dart';
+import '../shared/icons.dart';
 
 /// POS Settings and Configuration screen.
 /// Light Premium Theme: Solid flat cards, Slate typography, Teal accents.
@@ -104,7 +105,7 @@ class _SettingsViewState extends State<SettingsView> {
         SnackBar(
           content: Row(
             children: const [
-              Icon(Icons.check_circle, color: Colors.white, size: 20),
+              Icon(AppIcons.checkCircle, color: Colors.white, size: 20),
               SizedBox(width: 10),
               Text('Settings and brand configuration saved successfully!'),
             ],
@@ -149,8 +150,18 @@ class _SettingsViewState extends State<SettingsView> {
     PosUserRole selectedRole = existingUser?.role ?? PosUserRole.cashier;
     bool obscurePin = true;
 
+    // Only super-admins can assign the SUPER_ADMIN role
+    final currentRole = widget.state.currentLoggedInUser?.role;
+    final assignableRoles = PosUserRole.values.where((r) {
+      if (r == PosUserRole.superAdmin) return currentRole == PosUserRole.superAdmin;
+      if (r == PosUserRole.rider) return false; // riders are system accounts
+      return true;
+    }).toList();
+
     Color roleColor(PosUserRole role) {
       switch (role) {
+        case PosUserRole.superAdmin:
+          return const Color(0xFFDC2626);
         case PosUserRole.owner:
           return const Color(0xFFD97706);
         case PosUserRole.manager:
@@ -159,6 +170,8 @@ class _SettingsViewState extends State<SettingsView> {
           return const Color(0xFF10B981);
         case PosUserRole.stockClerk:
           return const Color(0xFF2563EB);
+        case PosUserRole.rider:
+          return const Color(0xFFEA580C);
       }
     }
 
@@ -180,7 +193,7 @@ class _SettingsViewState extends State<SettingsView> {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Icon(
-                  existingUser == null ? Icons.person_add_alt_1 : Icons.manage_accounts,
+                  existingUser == null ? AppIcons.personAdd : AppIcons.manageAccounts,
                   color: AppColors.accent_primary,
                   size: 20,
                 ),
@@ -244,7 +257,7 @@ class _SettingsViewState extends State<SettingsView> {
                       fillColor: AppColors.bg_subtle,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
                       suffixIcon: IconButton(
-                        icon: Icon(obscurePin ? Icons.visibility_off : Icons.visibility, color: AppColors.text_tertiary, size: 18),
+                        icon: Icon(obscurePin ? AppIcons.visibilityOff : AppIcons.visibility, color: AppColors.text_tertiary, size: 18),
                         onPressed: () => setModalState(() => obscurePin = !obscurePin),
                       ),
                     ),
@@ -260,14 +273,14 @@ class _SettingsViewState extends State<SettingsView> {
                       fillColor: AppColors.bg_subtle,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
                     ),
-                    items: PosUserRole.values.map((r) {
+                    items: assignableRoles.map((r) {
                       return DropdownMenuItem(
                         value: r,
                         child: Row(
                           children: [
                             Container(width: 8, height: 8, decoration: BoxDecoration(shape: BoxShape.circle, color: roleColor(r))),
                             const SizedBox(width: 8),
-                            Text(r.name.toUpperCase()),
+                            Text(r.roleLabel),
                           ],
                         ),
                       );
@@ -358,6 +371,8 @@ class _SettingsViewState extends State<SettingsView> {
 
   Color _roleColor(PosUserRole role) {
     switch (role) {
+      case PosUserRole.superAdmin:
+        return const Color(0xFFDC2626);
       case PosUserRole.owner:
         return const Color(0xFFD97706);
       case PosUserRole.manager:
@@ -366,6 +381,8 @@ class _SettingsViewState extends State<SettingsView> {
         return const Color(0xFF10B981);
       case PosUserRole.stockClerk:
         return const Color(0xFF2563EB);
+      case PosUserRole.rider:
+        return const Color(0xFFEA580C);
     }
   }
 
@@ -396,7 +413,7 @@ class _SettingsViewState extends State<SettingsView> {
                   onPressed: _isSaving ? null : _saveAllSettings,
                   icon: _isSaving
                       ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.save_outlined, size: 18),
+                      : const Icon(AppIcons.save, size: 18),
           label: const Text('Save Changes'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.accent_primary,
@@ -412,7 +429,7 @@ class _SettingsViewState extends State<SettingsView> {
             if (_selectedSettingsSection == 0) ...[
             _buildSection(
               title: 'Brand Identity & Store Profile',
-              icon: Icons.storefront_outlined,
+              icon: AppIcons.storefront,
               children: [
                 const Text(
                   'Set your shop branding. This automatically customizes the login screen, receipt headers, and POS header navigation.',
@@ -496,7 +513,7 @@ class _SettingsViewState extends State<SettingsView> {
                               fillColor: AppColors.bg_subtle,
                               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
-                              prefixIcon: const Icon(Icons.link, size: 18, color: AppColors.accent_primary),
+                              prefixIcon: const Icon(AppIcons.link, size: 18, color: AppColors.accent_primary),
                             ),
                           ),
                           const SizedBox(height: 10),
@@ -533,7 +550,7 @@ class _SettingsViewState extends State<SettingsView> {
                           fillColor: AppColors.bg_subtle,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
-                          prefixIcon: const Icon(Icons.wallpaper, size: 20, color: AppColors.accent_primary),
+                          prefixIcon: const Icon(AppIcons.wallpaper, size: 20, color: AppColors.accent_primary),
                         ),
                       ),
                     ),
@@ -566,10 +583,10 @@ class _SettingsViewState extends State<SettingsView> {
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: const [
-                            Icon(Icons.photo_library_outlined, size: 16, color: AppColors.accent_primary),
+                            Icon(AppIcons.photoLibrary, size: 16, color: AppColors.accent_primary),
                             SizedBox(width: 6),
                             Text('Background Presets', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                            Icon(Icons.arrow_drop_down, size: 16),
+                            Icon(AppIcons.dropDown, size: 16),
                           ],
                         ),
                       ),
@@ -586,10 +603,10 @@ class _SettingsViewState extends State<SettingsView> {
             if (_selectedSettingsSection == 1) ...[
             _buildSection(
               title: 'Users, Roles & Staff Access Control',
-              icon: Icons.manage_accounts_outlined,
+              icon: AppIcons.manageAccounts,
               headerTrailing: FilledButton.icon(
                 onPressed: () => _showUserEditorModal(),
-                icon: const Icon(Icons.person_add_alt_1, size: 16),
+                icon: const Icon(AppIcons.personAdd, size: 16),
                 label: const Text('Add Staff Member'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.accent_primary,
@@ -681,11 +698,11 @@ class _SettingsViewState extends State<SettingsView> {
                               const SizedBox(height: 4),
                               Row(
                                 children: [
-                                  const Icon(Icons.phone_outlined, size: 12, color: AppColors.text_tertiary),
+                                  const Icon(AppIcons.phone, size: 12, color: AppColors.text_tertiary),
                                   const SizedBox(width: 4),
                                   Text(u.phone, style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
                                   const SizedBox(width: 16),
-                                  const Icon(Icons.vpn_key_outlined, size: 12, color: AppColors.text_tertiary),
+                                  const Icon(AppIcons.vpnKey, size: 12, color: AppColors.text_tertiary),
                                   const SizedBox(width: 4),
                                   Text('PIN: ${u.pin}', style: const TextStyle(fontSize: 12, color: AppColors.text_secondary, fontWeight: FontWeight.w600)),
                                 ],
@@ -724,13 +741,13 @@ class _SettingsViewState extends State<SettingsView> {
                         const SizedBox(width: 8),
                         IconButton(
                           tooltip: 'Edit User & PIN',
-                          icon: const Icon(Icons.edit_outlined, color: AppColors.text_secondary, size: 18),
+                          icon: const Icon(AppIcons.edit, color: AppColors.text_secondary, size: 18),
                           onPressed: () => _showUserEditorModal(existingUser: u),
                         ),
                         if (users.length > 1)
                           IconButton(
                             tooltip: 'Delete User',
-                            icon: const Icon(Icons.delete_outline, color: AppColors.status_danger, size: 18),
+                            icon: const Icon(AppIcons.delete, color: AppColors.status_danger, size: 18),
                             onPressed: () async {
                               try {
                                 await widget.state.deleteUser(u.id);
@@ -756,7 +773,7 @@ class _SettingsViewState extends State<SettingsView> {
             if (_selectedSettingsSection == 2) ...[
             _buildSection(
               title: 'Hardware & Peripherals',
-              icon: Icons.print_outlined,
+              icon: AppIcons.print,
               children: [
                 Row(
                   children: [
@@ -813,7 +830,7 @@ class _SettingsViewState extends State<SettingsView> {
             if (_selectedSettingsSection == 3) ...[
             _buildSection(
               title: 'Server & Cloud Synchronization',
-              icon: Icons.cloud_sync_outlined,
+              icon: AppIcons.cloudSync,
               children: [
                 Row(
                   children: [
@@ -827,7 +844,7 @@ class _SettingsViewState extends State<SettingsView> {
                           filled: true,
                           fillColor: AppColors.bg_subtle,
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: AppColors.border_subtle)),
-                          prefixIcon: const Icon(Icons.link, color: AppColors.accent_primary),
+                          prefixIcon: const Icon(AppIcons.link, color: AppColors.accent_primary),
                         ),
                       ),
                     ),
@@ -836,7 +853,7 @@ class _SettingsViewState extends State<SettingsView> {
                       onPressed: _isCheckingConnection ? null : _testConnection,
                       icon: _isCheckingConnection
                           ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                          : const Icon(Icons.wifi_tethering, size: 18),
+                          : const Icon(AppIcons.tethering, size: 18),
                       label: const Text('Test Ping'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.accent_primary,
@@ -878,7 +895,7 @@ class _SettingsViewState extends State<SettingsView> {
             if (_selectedSettingsSection == 4) ...[
             _buildSection(
               title: 'Data & Catalogue Management',
-              icon: Icons.storage_outlined,
+              icon: AppIcons.storage,
               children: [
                 Text(
                   '${widget.state.products.length} products in catalogue • ${widget.state.users.length} registered staff members.',
@@ -888,7 +905,7 @@ class _SettingsViewState extends State<SettingsView> {
                 Row(
                   children: [
                     OutlinedButton.icon(
-                      icon: const Icon(Icons.restart_alt, size: 16),
+                      icon: const Icon(AppIcons.restart, size: 16),
                       label: const Text('Reset Catalogue to Defaults'),
                       onPressed: () {
                         showDialog<void>(
@@ -914,7 +931,7 @@ class _SettingsViewState extends State<SettingsView> {
                     ),
                     const SizedBox(width: 12),
                     OutlinedButton.icon(
-                      icon: const Icon(Icons.people_outline, size: 16),
+                      icon: const Icon(AppIcons.people, size: 16),
                       label: const Text('Reset Staff Accounts'),
                       onPressed: () {
                         showDialog<void>(
@@ -954,7 +971,7 @@ class _SettingsViewState extends State<SettingsView> {
                   onPressed: _isSaving ? null : _saveAllSettings,
                   icon: _isSaving
                       ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Icon(Icons.check, size: 20),
+                      : const Icon(AppIcons.check, size: 20),
                   label: Text(_isSaving ? 'Saving Changes...' : 'Save Changes'),
                   style: FilledButton.styleFrom(
                     backgroundColor: AppColors.accent_primary,
@@ -999,11 +1016,11 @@ class _SettingsViewState extends State<SettingsView> {
 
   Widget _buildSettingsNavigation({bool compact = false}) {
     const sections = <({int id, String label, IconData icon})>[
-      (id: 0, label: 'Store & Branding', icon: Icons.storefront_outlined),
-      (id: 1, label: 'Staff & Access', icon: Icons.manage_accounts_outlined),
-      (id: 2, label: 'Devices & Receipts', icon: Icons.print_outlined),
-      (id: 3, label: 'Server & Sync', icon: Icons.cloud_sync_outlined),
-      (id: 4, label: 'Data & Recovery', icon: Icons.storage_outlined),
+      (id: 0, label: 'Store & Branding', icon: AppIcons.storefront),
+      (id: 1, label: 'Staff & Access', icon: AppIcons.manageAccounts),
+      (id: 2, label: 'Devices & Receipts', icon: AppIcons.print),
+      (id: 3, label: 'Server & Sync', icon: AppIcons.cloudSync),
+      (id: 4, label: 'Data & Recovery', icon: AppIcons.storage),
     ];
 
     if (compact) {
@@ -1047,7 +1064,7 @@ class _SettingsViewState extends State<SettingsView> {
             padding: EdgeInsets.fromLTRB(8, 2, 8, 14),
             child: Row(
               children: [
-                Icon(Icons.tune_rounded, color: AppColors.accent_primary, size: 20),
+                Icon(AppIcons.tune, color: AppColors.accent_primary, size: 20),
                 SizedBox(width: 9),
                 Text('Settings', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
               ],
@@ -1077,7 +1094,7 @@ class _SettingsViewState extends State<SettingsView> {
             child: const Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline, size: 16, color: AppColors.text_tertiary),
+                Icon(AppIcons.info, size: 16, color: AppColors.text_tertiary),
                 SizedBox(width: 8),
                 Expanded(child: Text('Store and terminal preferences save with Save Changes. Staff access updates immediately.', style: AppText.xs)),
               ],
@@ -1122,7 +1139,7 @@ class _SettingsViewState extends State<SettingsView> {
                     ),
                   ),
                 ),
-                if (selected) const Icon(Icons.chevron_right_rounded, size: 17, color: AppColors.accent_primary),
+                if (selected) const Icon(AppIcons.chevronRight, size: 17, color: AppColors.accent_primary),
               ],
             ),
           ),

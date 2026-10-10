@@ -6,7 +6,10 @@ import 'cart.dart';
 import 'pos_state.dart';
 import 'services/api_service.dart';
 import 'services/favicon_service.dart';
+import 'theme/app_theme.dart';
+import 'theme/theme_controller.dart';
 import 'theme/tokens.dart';
+import 'views/shop_code_view.dart';
 import 'views/cash_drawer_view.dart';
 import 'views/checkout_modal.dart';
 import 'views/customers_view.dart';
@@ -16,6 +19,9 @@ import 'views/login_view.dart';
 import 'views/reports_view.dart';
 import 'views/settings_view.dart';
 import 'views/purchase_orders_view.dart';
+import 'views/delivery_view.dart';
+import 'views/rider_home_view.dart';
+import 'shared/icons.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,20 +36,36 @@ void main() async {
   if (state.currentLoggedInUser != null) {
     state.catalogueSyncMessage = 'Local-only mode: lock the till and re-enter your PIN to sync the shop catalogue.';
   }
-  runApp(RetailPosApp(state: state));
+  final themeController = ThemeController();
+  await themeController.load();
+  runApp(RetailPosApp(state: state, themeController: themeController));
 }
 
 class RetailPosApp extends StatelessWidget {
-  const RetailPosApp({super.key, required this.state});
+  const RetailPosApp({super.key, required this.state, this.themeController});
 
   final PosState state;
 
+  /// Light / dark / system choice. Optional so tests can build the app bare.
+  final ThemeController? themeController;
+
   @override
   Widget build(BuildContext context) {
+    final controller = themeController;
+    if (controller == null) return _buildApp(ThemeMode.light);
+    return ListenableBuilder(
+      listenable: controller,
+      builder: (context, _) => _buildApp(controller.mode),
+    );
+  }
+
+  Widget _buildApp(ThemeMode mode) {
     return MaterialApp(
       title: 'ShopSmart Retail POS',
       debugShowCheckedModeBanner: false,
       theme: buildRetailOsTheme(),
+      darkTheme: buildRetailOsDarkTheme(),
+      themeMode: mode,
       home: PosShell(state: state),
     );
   }
@@ -68,7 +90,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isLocked = widget.state.currentLoggedInUser == null;
-    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 7);
+    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 8);
     _startInactivityTimer();
   }
 
@@ -106,10 +128,12 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   Set<int> _accessibleTabs(PosUser? user) {
     if (user == null) return const <int>{};
     return switch (user.role) {
-      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7},
-      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7},
-      PosUserRole.cashier => const <int>{0, 1, 4},
+      PosUserRole.superAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8},
+      PosUserRole.owner      => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8},
+      PosUserRole.manager    => const <int>{0, 1, 2, 3, 4, 5, 7, 8},
+      PosUserRole.cashier    => const <int>{0, 1, 4, 8},
       PosUserRole.stockClerk => const <int>{2, 7},
+      PosUserRole.rider      => const <int>{},
     };
   }
 
@@ -176,7 +200,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                         ),
                       ),
                       OutlinedButton.icon(
-                        icon: const Icon(Icons.lock_outline, size: 14, color: AppColors.status_danger),
+                        icon: const Icon(AppIcons.lock, size: 14, color: AppColors.status_danger),
                         label: const Text('Lock', style: TextStyle(color: AppColors.status_danger, fontSize: 12)),
                         style: OutlinedButton.styleFrom(
                           side: const BorderSide(color: AppColors.status_danger),
@@ -194,10 +218,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                 const SizedBox(height: 16),
                 const Text('More Operations', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.text_tertiary, letterSpacing: 0.5)),
                 const SizedBox(height: 8),
-                if (allowedTabs.contains(7)) _moreTile(Icons.local_shipping_outlined, 'Purchase & Supplier Orders', 7, ctx),
-                if (allowedTabs.contains(4)) _moreTile(Icons.account_balance_wallet_outlined, 'Cash Drawer & Shifts', 4, ctx),
-                if (allowedTabs.contains(5)) _moreTile(Icons.analytics_outlined, 'Reports & Analytics', 5, ctx),
-                if (allowedTabs.contains(6)) _moreTile(Icons.settings_outlined, 'Settings & Hardware', 6, ctx),
+                if (allowedTabs.contains(7)) _moreTile(AppIcons.shipping, 'Purchase & Supplier Orders', 7, ctx),
+                if (allowedTabs.contains(4)) _moreTile(AppIcons.wallet, 'Cash Drawer & Shifts', 4, ctx),
+                if (allowedTabs.contains(5)) _moreTile(AppIcons.analytics, 'Reports & Analytics', 5, ctx),
+                if (allowedTabs.contains(6)) _moreTile(AppIcons.settings, 'Settings & Hardware', 6, ctx),
               ],
             ),
           ),
@@ -210,7 +234,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     return ListTile(
       leading: Icon(icon, color: AppColors.accent_primary),
       title: Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
-      trailing: const Icon(Icons.chevron_right, size: 18, color: AppColors.text_tertiary),
+      trailing: const Icon(AppIcons.chevronRight, size: 18, color: AppColors.text_tertiary),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       onTap: () {
         Navigator.pop(ctx);
@@ -227,7 +251,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: const [
-            Icon(Icons.cloud_sync_outlined, color: AppColors.accent_primary, size: 24),
+            Icon(AppIcons.cloudSync, color: AppColors.accent_primary, size: 24),
             SizedBox(width: 10),
             Text('Offline & Cloud Sync Status', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
           ],
@@ -247,7 +271,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                 ),
                 child: Row(
                   children: const [
-                    Icon(Icons.check_circle, color: AppColors.status_success, size: 20),
+                    Icon(AppIcons.checkCircle, color: AppColors.status_success, size: 20),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -271,7 +295,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
           FilledButton.icon(
-            icon: const Icon(Icons.sync, size: 16),
+            icon: const Icon(AppIcons.sync, size: 16),
             label: const Text('Force Cloud Resync'),
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.accent_primary,
@@ -307,6 +331,17 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // First launch: no shop configured yet
+    if (widget.state.serverUrl.isEmpty) {
+      return ShopCodeView(
+        state: widget.state,
+        onConnected: () {
+          ApiService.instance.configure(widget.state.serverUrl);
+          setState(() {});
+        },
+      );
+    }
+
     if (_isLocked) {
       return LoginView(
         state: widget.state,
@@ -337,6 +372,11 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
           final screenWidth = MediaQuery.sizeOf(context).width;
           final isMobile = screenWidth < 768;
 
+          // Rider role: show dedicated dashboard, no POS access
+          if (currentUser?.role == PosUserRole.rider) {
+            return RiderHomeView(state: widget.state, onLogout: _lockTill);
+          }
+
           final views = [
             _PosTerminalView(
               state: widget.state,
@@ -349,6 +389,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             ReportsView(state: widget.state),
             SettingsView(state: widget.state),
             PurchaseOrdersView(state: widget.state),
+            // index 8 — Delivery management view
+            DeliveryView(state: widget.state),
           ];
 
           if (isMobile) {
@@ -467,10 +509,10 @@ class _MobileBottomNav extends StatelessWidget {
               for (final tab in visiblePrimary)
                 _mobileNavItem(
                   switch (tab) {
-                    0 => Icons.point_of_sale,
-                    1 => Icons.receipt_long_outlined,
-                    2 => Icons.inventory_2_outlined,
-                    _ => Icons.people_outline,
+                    0 => AppIcons.pos,
+                    1 => AppIcons.receiptLong,
+                    2 => AppIcons.inventory,
+                    _ => AppIcons.people,
                   },
                   switch (tab) {
                     0 => 'POS',
@@ -482,7 +524,7 @@ class _MobileBottomNav extends StatelessWidget {
                   activeIndex == tab,
                   () => onSelectTab(tab),
                 ),
-              _mobileNavItem(Icons.menu_rounded, 'More', 4, isMoreActive, onOpenMore),
+              _mobileNavItem(AppIcons.menu, 'More', 4, isMoreActive, onOpenMore),
             ],
           ),
         ),
@@ -563,10 +605,10 @@ class _NavigationSidebar extends StatelessWidget {
         fit: BoxFit.contain,
         width: 44,
         height: 44,
-        errorBuilder: (_, __, ___) => const Icon(Icons.storefront, color: Colors.white, size: 24),
+        errorBuilder: (_, __, ___) => const Icon(AppIcons.storefront, color: Colors.white, size: 24),
       );
     }
-    return const Icon(Icons.storefront, color: Colors.white, size: 24);
+    return const Icon(AppIcons.storefront, color: Colors.white, size: 24);
   }
 
   @override
@@ -591,32 +633,41 @@ class _NavigationSidebar extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: _buildLogo(),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 10),
 
-          // Nav Items
-          for (final item in <({int tab, IconData icon, String label})>[
-            (tab: 0, icon: Icons.point_of_sale, label: 'POS'),
-            (tab: 1, icon: Icons.receipt_long_outlined, label: 'Sales'),
-            (tab: 2, icon: Icons.inventory_2_outlined, label: 'Stock'),
-            (tab: 7, icon: Icons.local_shipping_outlined, label: 'Orders'),
-            (tab: 3, icon: Icons.people_outline, label: 'Credit'),
-            (tab: 4, icon: Icons.account_balance_wallet_outlined, label: 'Till'),
-            (tab: 5, icon: Icons.analytics_outlined, label: 'Reports'),
-            (tab: 6, icon: Icons.settings_outlined, label: 'Settings'),
-          ])
-            if (visibleTabs.contains(item.tab))
-              _NavIcon(
-                icon: item.icon,
-                label: item.label,
-                isSelected: activeIndex == item.tab,
-                onTap: () => onSelectTab(item.tab),
+          // Nav Items - scrollable when many tabs
+          Flexible(
+            child: SingleChildScrollView(
+              child: Column(
+                children: [
+                  for (final item in <({int tab, IconData icon, String label})>[
+                    (tab: 0, icon: AppIcons.pos, label: 'POS'),
+                    (tab: 1, icon: AppIcons.receiptLong, label: 'Sales'),
+                    (tab: 2, icon: AppIcons.inventory, label: 'Stock'),
+                    (tab: 7, icon: AppIcons.shipping, label: 'Orders'),
+                    (tab: 8, icon: AppIcons.shipping, label: 'Delivery'),
+                    (tab: 3, icon: AppIcons.people, label: 'Credit'),
+                    (tab: 4, icon: AppIcons.wallet, label: 'Till'),
+                    (tab: 5, icon: AppIcons.analytics, label: 'Reports'),
+                    (tab: 6, icon: AppIcons.settings, label: 'Settings'),
+                  ])
+                    if (visibleTabs.contains(item.tab))
+                      _NavIcon(
+                        icon: item.icon,
+                        label: item.label,
+                        isSelected: activeIndex == item.tab,
+                        onTap: () => onSelectTab(item.tab),
+                      ),
+                ],
               ),
+            ),
+          ),
 
-          const Spacer(),
+          const SizedBox(height: 8),
 
           // Offline Sync Status Icon
           Padding(
-            padding: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.only(bottom: 6),
             child: Tooltip(
               message: 'Local-First Sync Status: Online',
               child: InkWell(
@@ -630,7 +681,7 @@ class _NavigationSidebar extends StatelessWidget {
                     shape: BoxShape.circle,
                   ),
                   child: const Center(
-                    child: Icon(Icons.cloud_done_outlined, color: AppColors.status_success, size: 18),
+                    child: Icon(AppIcons.cloudDone, color: AppColors.status_success, size: 18),
                   ),
                 ),
               ),
@@ -639,11 +690,11 @@ class _NavigationSidebar extends StatelessWidget {
 
           // Lock Till Button
           Padding(
-            padding: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.only(bottom: 6),
             child: Tooltip(
               message: 'Lock Till',
               child: IconButton(
-                icon: const Icon(Icons.lock_outline, color: AppColors.text_tertiary, size: 20),
+                icon: const Icon(AppIcons.lock, color: AppColors.text_tertiary, size: 20),
                 onPressed: onLockTill,
               ),
             ),
@@ -651,7 +702,7 @@ class _NavigationSidebar extends StatelessWidget {
 
           // Cashier Profile Avatar
           Padding(
-            padding: const EdgeInsets.only(bottom: 18),
+            padding: const EdgeInsets.only(bottom: 12),
             child: Tooltip(
               message: '$activeCashier • ${roleDisplay ?? 'Staff'} (Tap to lock)',
               child: InkWell(
@@ -689,40 +740,48 @@ class _NavIcon extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Tooltip(
-        message: label,
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(10),
-          child: Container(
-            width: 56,
-            padding: const EdgeInsets.symmetric(vertical: 7),
-            decoration: BoxDecoration(
-              color: isSelected ? AppColors.accent_light : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              border: isSelected ? Border.all(color: AppColors.accent_primary.withValues(alpha: 0.3), width: 1) : null,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(
-                  icon,
-                  color: isSelected ? AppColors.accent_primary : AppColors.text_tertiary,
-                  size: 20,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                    color: isSelected ? AppColors.accent_primary : AppColors.text_tertiary,
+    return Tooltip(
+      message: label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          width: 80,
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          decoration: BoxDecoration(
+            color: isSelected ? AppColors.accent_light : Colors.transparent,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (isSelected)
+                Container(
+                  width: 28,
+                  height: 2,
+                  margin: const EdgeInsets.only(bottom: 4),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent_primary,
+                    borderRadius: BorderRadius.circular(2),
                   ),
+                )
+              else
+                const SizedBox(height: 6),
+              Icon(
+                icon,
+                color: isSelected ? AppColors.accent_primary : AppColors.text_tertiary,
+                size: isSelected ? 22 : 19,
+                weight: isSelected ? 700 : 400,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                label,
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                  color: isSelected ? AppColors.accent_primary : AppColors.text_tertiary,
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
@@ -839,7 +898,7 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
         ),
         title: Row(
           children: const [
-            Icon(Icons.qr_code_scanner, color: AppColors.accent_primary),
+            Icon(AppIcons.qrScanner, color: AppColors.accent_primary),
             SizedBox(width: 10),
             Text('Barcode Scanner Wedge', style: TextStyle(color: AppColors.text_primary, fontSize: 18, fontWeight: FontWeight.bold)),
           ],
@@ -862,7 +921,7 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: const [
-                      Icon(Icons.qr_code_2, size: 30, color: AppColors.accent_primary),
+                      Icon(AppIcons.qrCode, size: 30, color: AppColors.accent_primary),
                       SizedBox(width: 12),
                       Text('Ready to scan • USB HID Wedge Active', style: TextStyle(color: AppColors.accent_primary, fontSize: 13, fontWeight: FontWeight.w600)),
                     ],
@@ -884,7 +943,7 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                     borderSide: const BorderSide(color: AppColors.border_subtle),
                   ),
                   suffixIcon: IconButton(
-                    icon: const Icon(Icons.arrow_forward, color: AppColors.accent_primary),
+                    icon: const Icon(AppIcons.arrowForward, color: AppColors.accent_primary),
                     onPressed: () {
                       _handleQuickBarcode(barcodeController.text);
                       Navigator.pop(ctx);
@@ -1115,7 +1174,7 @@ class _TopBar extends StatelessWidget {
               ),
               child: Row(
                 children: [
-                  Icon(Icons.shopping_bag_outlined, size: 16, color: itemCount > 0 ? AppColors.accent_primary : AppColors.text_secondary),
+                  Icon(AppIcons.bag, size: 16, color: itemCount > 0 ? AppColors.accent_primary : AppColors.text_secondary),
                   const SizedBox(width: 6),
                   Text(
                     '$itemCount units',
@@ -1173,7 +1232,7 @@ class _MobileCartBanner extends StatelessWidget {
                   color: AppColors.accent_primary,
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 20),
+                child: const Icon(AppIcons.bag, color: Colors.white, size: 20),
               ),
               const SizedBox(width: 12),
               Column(
@@ -1193,7 +1252,7 @@ class _MobileCartBanner extends StatelessWidget {
               const Spacer(),
               ElevatedButton.icon(
                 onPressed: onCheckout,
-                icon: const Icon(Icons.arrow_forward, size: 16),
+                icon: const Icon(AppIcons.arrowForward, size: 16),
                 label: const Text('Pay'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accent_primary,
@@ -1264,13 +1323,13 @@ class _Catalog extends StatelessWidget {
                       onChanged: onSearch,
                       decoration: InputDecoration(
                         hintText: 'Search catalog or SKU...',
-                        prefixIcon: const Icon(Icons.search, size: 18),
+                        prefixIcon: const Icon(AppIcons.search, size: 18),
                         filled: true,
                         fillColor: Colors.white,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
                         suffixIcon: IconButton(
-                          icon: const Icon(Icons.qr_code_scanner, color: AppColors.accent_primary),
+                          icon: const Icon(AppIcons.qrScanner, color: AppColors.accent_primary),
                           onPressed: onScan,
                         ),
                       ),
@@ -1288,7 +1347,7 @@ class _Catalog extends StatelessWidget {
                       onChanged: onSearch,
                       decoration: InputDecoration(
                         hintText: 'Search catalog by product name or SKU...',
-                        prefixIcon: const Icon(Icons.search, size: 20),
+                        prefixIcon: const Icon(AppIcons.search, size: 20),
                         filled: true,
                         fillColor: Colors.white,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1305,13 +1364,13 @@ class _Catalog extends StatelessWidget {
                       onSubmitted: onBarcodeSubmit,
                       decoration: InputDecoration(
                         hintText: 'Direct Barcode / Scan...',
-                        prefixIcon: const Icon(Icons.barcode_reader, size: 18, color: AppColors.accent_primary),
+                        prefixIcon: const Icon(AppIcons.barcodeReader, size: 18, color: AppColors.accent_primary),
                         filled: true,
                         fillColor: Colors.white,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
                         suffixIcon: IconButton(
-                          icon: const Icon(Icons.add_shopping_cart, size: 18, color: AppColors.accent_primary),
+                          icon: const Icon(AppIcons.addToCart, size: 18, color: AppColors.accent_primary),
                           onPressed: () => onBarcodeSubmit(barcodeInput.text),
                         ),
                       ),
@@ -1319,7 +1378,7 @@ class _Catalog extends StatelessWidget {
                   ),
                   const SizedBox(width: 10),
                   OutlinedButton.icon(
-                    icon: const Icon(Icons.qr_code_scanner, size: 18),
+                    icon: const Icon(AppIcons.qrScanner, size: 18),
                     label: const Text('HID Wedge'),
                     onPressed: onScan,
                     style: OutlinedButton.styleFrom(
@@ -1346,7 +1405,7 @@ class _Catalog extends StatelessWidget {
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.bolt, size: 14, color: Color(0xFFD97706)),
+                      Icon(AppIcons.bolt, size: 14, color: Color(0xFFD97706)),
                       SizedBox(width: 4),
                       Text('Fast Picks:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF92400E))),
                     ],
@@ -1761,7 +1820,7 @@ class _ProductTileState extends State<_ProductTile> {
                                 boxShadow: const [BoxShadow(color: Color(0x1A000000), blurRadius: 4)],
                               ),
                               child: Icon(
-                                Icons.info_outline,
+                                AppIcons.info,
                                 size: 16,
                                 color: _pinnedInfo ? Colors.white : AppColors.text_secondary,
                               ),
@@ -1818,7 +1877,7 @@ class _ProductTileState extends State<_ProductTile> {
                                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 13),
                                   )
                                 : Icon(
-                                    Icons.add,
+                                    AppIcons.add,
                                     size: 18,
                                     color: out
                                         ? AppColors.text_tertiary
@@ -1969,7 +2028,7 @@ class _ProductCardState extends State<_ProductCard> {
                         shape: BoxShape.circle,
                       ),
                       child: Icon(
-                        Icons.add,
+                        AppIcons.add,
                         color: product.isOutOfStock
                             ? AppColors.text_tertiary
                             : (_hovered ? Colors.white : AppColors.accent_primary),
@@ -2064,7 +2123,7 @@ class _CartPanel extends StatelessWidget {
                 ),
                 if (cart.isNotEmpty)
                   IconButton(
-                    icon: const Icon(Icons.delete_sweep_outlined, size: 20, color: AppColors.status_danger),
+                    icon: const Icon(AppIcons.deleteSweep, size: 20, color: AppColors.status_danger),
                     tooltip: 'Clear Basket',
                     onPressed: state.clearCart,
                   ),
@@ -2081,7 +2140,7 @@ class _CartPanel extends StatelessWidget {
               child: Row(
                 children: [
                   Icon(
-                    state.selectedCustomer != null ? Icons.person : Icons.person_add_outlined,
+                    state.selectedCustomer != null ? AppIcons.person : AppIcons.personAdd,
                     size: 18,
                     color: state.selectedCustomer != null ? const Color(0xFFD97706) : AppColors.text_tertiary,
                   ),
@@ -2097,7 +2156,7 @@ class _CartPanel extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  const Icon(Icons.chevron_right, size: 16, color: AppColors.text_tertiary),
+                  const Icon(AppIcons.chevronRight, size: 16, color: AppColors.text_tertiary),
                 ],
               ),
             ),
@@ -2114,7 +2173,7 @@ class _CartPanel extends StatelessWidget {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.shopping_cart_outlined, size: 48, color: AppColors.border_strong),
+                          Icon(AppIcons.cart, size: 48, color: AppColors.border_strong),
                           SizedBox(height: 12),
                           Text('Basket is empty', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.text_secondary)),
                           SizedBox(height: 4),
@@ -2217,7 +2276,7 @@ class _CartPanel extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 FilledButton.icon(
-                  icon: const Icon(Icons.payment, size: 20),
+                  icon: const Icon(AppIcons.creditCard, size: 20),
                   label: Text('CHARGE KES ${cart.subtotal.formatted}'),
                   onPressed: cart.canCheckout ? onCheckout : null,
                   style: FilledButton.styleFrom(
@@ -2264,7 +2323,7 @@ class _QtyStepper extends StatelessWidget {
             borderRadius: const BorderRadius.horizontal(left: Radius.circular(5)),
             child: const Padding(
               padding: EdgeInsets.all(5),
-              child: Icon(Icons.remove, size: 14),
+              child: Icon(AppIcons.remove, size: 14),
             ),
           ),
           Padding(
@@ -2284,7 +2343,7 @@ class _QtyStepper extends StatelessWidget {
             borderRadius: const BorderRadius.horizontal(right: Radius.circular(5)),
             child: const Padding(
               padding: EdgeInsets.all(5),
-              child: Icon(Icons.add, size: 14),
+              child: Icon(AppIcons.add, size: 14),
             ),
           ),
         ],
