@@ -259,8 +259,12 @@ model Product {
   businessId String   @db.Uuid
   categoryId String?  @db.Uuid
   name       String
+  description String? @db.Text
+  notes      String?  @db.Text
   sku        String?
   barcode    String?
+  groupId    String?
+  variantLabel String?
   /// Denormalised for fast POS lookup; authoritative value is the
   /// product_cost below at the time of purchase.
   costPrice  Decimal  @default(0) @db.Decimal(14, 2)
@@ -270,6 +274,8 @@ model Product {
   stock      Decimal  @default(0) @db.Decimal(14, 3)
   lowStockThreshold Decimal @default(5) @db.Decimal(14, 3)
   active     Boolean  @default(true)
+  isPublished Boolean @default(false)
+  publishedAt DateTime?
   /// Set when an offline sync drives stock negative. Must be resolved by a
   /// manager — we never silently clamp to zero.
   varianceFlag Boolean @default(false)
@@ -282,12 +288,29 @@ model Product {
   saleItems    SaleItem[]
   purchaseItems PurchaseItem[]
   refundItems  RefundItem[]
+  images       ProductImage[]
 
   @@unique([businessId, sku])
   @@unique([barcode])
   @@index([businessId, active])
+  @@index([businessId, isPublished, active])
   @@index([businessId, name])
   @@map("products")
+}
+
+model ProductImage {
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String   @db.Uuid
+  imageData String   @db.Text
+  altText   String?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, position])
+  @@index([productId])
+  @@map("product_images")
 }
 
 // ---------------------------------------------------------------- customers

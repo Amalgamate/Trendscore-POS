@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../cart.dart';
 import '../pos_state.dart';
 import '../theme/tokens.dart';
+import 'widgets/product_editor_dialog.dart';
 import 'widgets/image_upload_widget.dart';
 import '../shared/icons.dart';
 
@@ -78,7 +79,25 @@ class _InventoryViewState extends State<InventoryView> {
     }).toList();
   }
 
-  void _showProductEditor({PosProduct? product}) {
+  Future<void> _showProductEditor({PosProduct? product}) async {
+    final message = await showProductEditor(
+      context,
+      widget.state,
+      product: product,
+    );
+    if (!mounted || message == null) return;
+    if (product != null) {
+      _selectedProduct = widget.state.products
+          .where((item) => item.id == product.id)
+          .firstOrNull;
+    }
+    setState(() {});
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _showProductEditorLegacy({PosProduct? product}) {
     final isEdit = product != null;
     final categories = _allCategories.skip(1).toList();
     final nameCtrl = TextEditingController(text: product?.name ?? '');
@@ -2106,6 +2125,17 @@ class _ProductRowState extends State<_ProductRow> {
                                 'INACTIVE',
                                 const Color(0xFF9CA3AF),
                                 const Color(0xFFF3F4F6),
+                              ),
+                            ],
+                            if (p.isPublished) ...[
+                              const SizedBox(width: 6),
+                              Tooltip(
+                                message: 'Published to the customer web shop',
+                                child: _Badge(
+                                  'WEB',
+                                  const Color(0xFF16835D),
+                                  const Color(0xFFE8F6EF),
+                                ),
                               ),
                             ],
                           ],

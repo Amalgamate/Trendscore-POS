@@ -21,8 +21,14 @@ const ListProductsQuerySchema = z.object({
 
 const CreateProductSchema = z.object({
   name: z.string().min(1).max(200),
+  description: z.string().max(5000).nullable().optional(),
+  notes: z.string().max(5000).nullable().optional(),
   sku: z.string().max(100).optional(),
   barcode: z.string().max(100).optional(),
+  groupId: z.string().max(100).optional(),
+  variantLabel: z.string().max(100).optional(),
+  imageBase64: z.string().max(1_000_000).nullable().optional(),
+  isPublished: z.boolean().default(false),
   categoryId: z.string().uuid().optional(),
   salePrice: z.number().positive(),
   costPrice: z.number().nonnegative().default(0),
@@ -34,7 +40,15 @@ const CreateProductSchema = z.object({
 
 const UpdateProductSchema = CreateProductSchema.partial()
   .omit({ initialStock: true })
-  .extend({ active: z.boolean().optional() });
+  .extend({
+    active: z.boolean().optional(),
+    imageBase64: z.string().max(1_000_000).nullable().optional(),
+  });
+
+const productRelations = {
+  category: { select: { id: true, name: true, colorHex: true } },
+  images: { orderBy: { position: 'asc' as const }, take: 1 },
+};
 
 const ImportProductsSchema = z.object({
   products: z.array(z.object({
@@ -59,6 +73,62 @@ const StockAdjustSchema = z.object({
 
 export function productsRouter(businessId: string): Router {
   const router = ExpressRouter();
+
+  // GET /products/storefront/:id/image — serve one published product image.
+  router.get('/storefront/:id/image', async (req, res) => {
+    try {
+      const product = await prisma.product.findFirst({
+        where: {
+          id: req.params.id,
+          businessId,
+          active: true,
+          isPublished: true,
+        },
+        include: { images: { where: { position: 0 }, take: 1 } },
+      });
+      const imageData = product?.images[0]?.imageData;
+      const match = imageData?.match(/^data:image\/(jpeg|png|webp);base64,([A-Za-z0-9+/]+=*)$/);
+      const imageType = match?.[1];
+      const encodedImage = match?.[2];
+      if (!imageType || !encodedImage) {
+        return sendError(res, 404, 'NOT_FOUND', 'Published product image not found.');
+      }
+      res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300');
+      return res.type(`image/${imageType}`).send(Buffer.from(encodedImage, 'base64'));
+    } catch (err) {
+      console.error('products/storefront image error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch product image.');
+    }
+  });
+
+  // GET /products/storefront — publish only safe catalog fields publicly.
+  router.get('/storefront', async (_req, res) => {
+    try {
+      const products = await prisma.product.findMany({
+        where: { businessId, active: true, isPublished: true },
+        include: productRelations,
+        orderBy: [{ category: { sortOrder: 'asc' } }, { name: 'asc' }],
+      });
+      return send200(res, {
+        data: products.map((product) => ({
+          id: product.id,
+          name: product.name,
+          variantLabel: product.variantLabel,
+          category: product.category?.name ?? 'Other',
+          description: product.description,
+          salePrice: Number(product.salePrice),
+          unit: product.unit,
+          available: Number(product.stock) > 0,
+          imageUrl: product.images[0]
+            ? `products/storefront/${product.id}/image`
+            : null,
+        })),
+      });
+    } catch (err) {
+      console.error('products/storefront error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch published products.');
+    }
+  });
 
   // GET /products
   router.get('/', requireAuth, async (req, res) => {
@@ -88,7 +158,7 @@ export function productsRouter(businessId: string): Router {
       const [products, total] = await Promise.all([
         prisma.product.findMany({
           where,
-          include: { category: { select: { id: true, name: true, colorHex: true } } },
+          include: productRelations,
           orderBy: [{ category: { sortOrder: 'asc' } }, { name: 'asc' }],
           skip: (page - 1) * limit,
           take: limit,
@@ -111,7 +181,7 @@ export function productsRouter(businessId: string): Router {
     try {
       const product = await prisma.product.findFirst({
         where: { barcode: req.params.barcode, businessId, active: true },
-        include: { category: { select: { id: true, name: true, colorHex: true } } },
+        include: productRelations,
       });
       if (!product) return sendError(res, 404, 'NOT_FOUND', 'No active product with that barcode.');
       return send200(res, mapProduct(product));
@@ -126,7 +196,7 @@ export function productsRouter(businessId: string): Router {
     try {
       const product = await prisma.product.findFirst({
         where: { id: req.params.id, businessId },
-        include: { category: { select: { id: true, name: true, colorHex: true } } },
+        include: productRelations,
       });
       if (!product) return sendError(res, 404, 'NOT_FOUND', 'Product not found.');
       return send200(res, mapProduct(product));
@@ -141,31 +211,41 @@ export function productsRouter(businessId: string): Router {
     const body = parseBody(CreateProductSchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;
+    if (body.isPublished && !['OWNER', 'MANAGER', 'SUPER_ADMIN'].includes(auth.role)) {
+      return sendError(res, 403, 'FORBIDDEN', 'Only an owner or manager can publish products to the web shop.');
+    }
 
     const initialStock = body.initialStock ?? 0;
     const costPrice = body.costPrice ?? 0;
     const vatRate = body.vatRate ?? 0.16;
     const unit = body.unit ?? 'pc';
     const lowStockThreshold = body.lowStockThreshold ?? 5;
+    const { imageBase64, ...productData } = body;
 
     try {
       const product = await prisma.$transaction(async (tx) => {
         const p = await tx.product.create({
           data: {
             businessId,
-            name: body.name,
-            sku: body.sku,
-            barcode: body.barcode,
-            categoryId: body.categoryId,
-            salePrice: body.salePrice,
+            ...productData,
             costPrice,
             vatRate,
             unit,
             stock: initialStock,
             lowStockThreshold,
+            publishedAt: body.isPublished ? new Date() : null,
           },
-          include: { category: { select: { id: true, name: true, colorHex: true } } },
+          include: productRelations,
         });
+        if (imageBase64) {
+          await tx.productImage.create({
+            data: {
+              productId: p.id,
+              imageData: imageBase64,
+              altText: p.name,
+            },
+          });
+        }
 
         if (initialStock > 0) {
           await tx.stockMovement.create({
@@ -180,7 +260,12 @@ export function productsRouter(businessId: string): Router {
             },
           });
         }
-        return p;
+        return imageBase64
+          ? tx.product.findUniqueOrThrow({
+              where: { id: p.id },
+              include: productRelations,
+            })
+          : p;
       });
 
       return send201(res, mapProduct(product));
@@ -261,19 +346,61 @@ export function productsRouter(businessId: string): Router {
   router.patch('/:id', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     const body = parseBody(UpdateProductSchema, req, res);
     if (!body) return;
+    const auth = res.locals.auth;
 
     try {
       // Ownership check — ensure this product belongs to the routed business.
       const existing = await prisma.product.findFirst({
         where: { id: req.params.id, businessId },
-        select: { id: true },
+        select: { id: true, isPublished: true, publishedAt: true },
       });
       if (!existing) return sendError(res, 404, 'NOT_FOUND', 'Product not found.');
+      if (
+        body.isPublished !== undefined &&
+        body.isPublished !== existing.isPublished &&
+        !['OWNER', 'MANAGER', 'SUPER_ADMIN'].includes(auth.role)
+      ) {
+        return sendError(res, 403, 'FORBIDDEN', 'Only an owner or manager can change web-shop publication.');
+      }
 
-      const product = await prisma.product.update({
-        where: { id: existing.id },
-        data: body,
-        include: { category: { select: { id: true, name: true, colorHex: true } } },
+      const { imageBase64, ...productData } = body;
+      const product = await prisma.$transaction(async (tx) => {
+        const updated = await tx.product.update({
+          where: { id: existing.id },
+          data: {
+            ...productData,
+            ...(body.isPublished === undefined
+              ? {}
+              : {
+                  publishedAt: body.isPublished
+                    ? existing.publishedAt ?? new Date()
+                    : null,
+                }),
+          },
+          include: productRelations,
+        });
+        if (imageBase64 !== undefined) {
+          if (imageBase64 === null) {
+            await tx.productImage.deleteMany({ where: { productId: existing.id } });
+          } else {
+            await tx.productImage.upsert({
+              where: { productId_position: { productId: existing.id, position: 0 } },
+              create: {
+                productId: existing.id,
+                imageData: imageBase64,
+                altText: updated.name,
+              },
+              update: {
+                imageData: imageBase64,
+                altText: updated.name,
+              },
+            });
+          }
+        }
+        return tx.product.findUniqueOrThrow({
+          where: { id: existing.id },
+          include: productRelations,
+        });
       });
       return send200(res, mapProduct(product));
     } catch (err: unknown) {
@@ -361,8 +488,13 @@ function mapProduct(p: any) {
   return {
     id: p.id,
     name: p.name,
+    description: p.description,
+    notes: p.notes,
     sku: p.sku,
     barcode: p.barcode,
+    groupId: p.groupId,
+    variantLabel: p.variantLabel,
+    imageBase64: p.images?.[0]?.imageData ?? null,
     category: p.category,
     salePrice: Number(p.salePrice),
     costPrice: Number(p.costPrice),
@@ -371,6 +503,8 @@ function mapProduct(p: any) {
     stock: Number(p.stock),
     lowStockThreshold: Number(p.lowStockThreshold),
     active: p.active,
+    isPublished: p.isPublished,
+    publishedAt: p.publishedAt,
     varianceFlag: p.varianceFlag,
     createdAt: p.createdAt,
     updatedAt: p.updatedAt,

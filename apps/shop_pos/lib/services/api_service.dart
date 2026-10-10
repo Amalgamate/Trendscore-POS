@@ -878,13 +878,43 @@ class ApiService {
         }
       }
       lastError =
-          _messageFromResponse(res.body) ??
+          _saleErrorFromResponse(res.body) ??
           'Could not record the sale (${res.statusCode}).';
     } catch (e) {
       lastError = 'Could not record the sale on the shop API.';
       debugPrint('API submitSale error: $e');
     }
     return null;
+  }
+
+  String? _saleErrorFromResponse(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) return null;
+      final error = decoded['error'];
+      if (error is! Map<String, dynamic>) {
+        return decoded['message'] as String?;
+      }
+
+      final message = error['message'] as String?;
+      final details = error['details'];
+      if (message == 'Request body is invalid' && details is List) {
+        final issues = details
+            .whereType<Map>()
+            .map((issue) {
+              final path = issue['path'] as String?;
+              final issueMessage = issue['message'] as String?;
+              if (path == null || issueMessage == null) return null;
+              return '$path: $issueMessage';
+            })
+            .whereType<String>()
+            .toList();
+        if (issues.isNotEmpty) return '$message (${issues.join('; ')})';
+      }
+      return message;
+    } catch (_) {
+      return null;
+    }
   }
 
   /// Confirm a manually received M-Pesa payment against its original pending sale.

@@ -101,10 +101,13 @@ class PosProduct {
     this.costPrice,
     required this.stock,
     this.lowStockThreshold = 10,
+    this.description,
     required this.icon,
     required this.tint,
     this.taxRateBasisPoints = defaultVatRateBasisPoints,
     this.isActive = true,
+    this.isPublished = false,
+    this.publishedAt,
     this.notes,
     this.imageBase64,
     this.groupId,
@@ -120,10 +123,13 @@ class PosProduct {
   Money? costPrice;
   int stock;
   int lowStockThreshold;
+  String? description;
   final IconData icon;
   final Color tint;
   final int taxRateBasisPoints;
   bool isActive;
+  bool isPublished;
+  DateTime? publishedAt;
   String? notes;
 
   /// Base64-encoded 1:1 JPEG product image (data URI), or null if none.
@@ -160,10 +166,13 @@ class PosProduct {
     Money? costPrice,
     int? stock,
     int? lowStockThreshold,
+    Object? description = _sentinel,
     IconData? icon,
     Color? tint,
     int? taxRateBasisPoints,
     bool? isActive,
+    bool? isPublished,
+    Object? publishedAt = _sentinel,
     String? notes,
     Object? imageBase64 = _sentinel,
     Object? groupId = _sentinel,
@@ -179,10 +188,17 @@ class PosProduct {
       costPrice: costPrice ?? this.costPrice,
       stock: stock ?? this.stock,
       lowStockThreshold: lowStockThreshold ?? this.lowStockThreshold,
+      description: description == _sentinel
+          ? this.description
+          : description as String?,
       icon: icon ?? this.icon,
       tint: tint ?? this.tint,
       taxRateBasisPoints: taxRateBasisPoints ?? this.taxRateBasisPoints,
       isActive: isActive ?? this.isActive,
+      isPublished: isPublished ?? this.isPublished,
+      publishedAt: publishedAt == _sentinel
+          ? this.publishedAt
+          : publishedAt as DateTime?,
       notes: notes ?? this.notes,
       imageBase64: imageBase64 == _sentinel
           ? this.imageBase64
@@ -206,11 +222,14 @@ class PosProduct {
     'costPriceMinor': costPrice?.minorUnits,
     'stock': stock,
     'lowStockThreshold': lowStockThreshold,
+    'description': description,
     'iconCode': icon.codePoint,
     'iconFontFamily': icon.fontFamily,
     'tint': tint.toARGB32(),
     'taxRateBasisPoints': taxRateBasisPoints,
     'isActive': isActive,
+    'isPublished': isPublished,
+    'publishedAt': publishedAt?.toIso8601String(),
     'notes': notes,
     'imageBase64': imageBase64,
     'groupId': groupId,
@@ -229,11 +248,16 @@ class PosProduct {
         : null,
     stock: json['stock'] as int? ?? 0,
     lowStockThreshold: json['lowStockThreshold'] as int? ?? 10,
+    description: json['description'] as String?,
     icon: _iconFromCode(json['iconCode'] as int?),
     tint: Color(json['tint'] as int? ?? 0xFFF1F5F9),
     taxRateBasisPoints:
         json['taxRateBasisPoints'] as int? ?? defaultVatRateBasisPoints,
     isActive: json['isActive'] as bool? ?? true,
+    isPublished: json['isPublished'] as bool? ?? false,
+    publishedAt: json['publishedAt'] is String
+        ? DateTime.tryParse(json['publishedAt'] as String)
+        : null,
     notes: json['notes'] as String?,
     imageBase64: json['imageBase64'] as String?,
     groupId: json['groupId'] as String?,
@@ -1217,6 +1241,26 @@ class PosState extends ChangeNotifier {
         }
       }
 
+      final syncedBySku = {
+        for (final product in syncedProducts)
+          product.sku.toLowerCase(): product,
+      };
+      final cartReplacements = <String, CartLine>{};
+      for (final local in products) {
+        if (_isRemoteProductId(local.id) || _isBundledDemoProduct(local.id)) {
+          continue;
+        }
+        final synced = syncedBySku[local.sku.toLowerCase()];
+        if (synced == null || synced.id == local.id) continue;
+        cartReplacements[local.id] = CartLine(
+          productId: synced.id,
+          name: synced.displayName,
+          unitPrice: synced.unitPrice,
+          stock: synced.stock,
+        );
+      }
+      cart.remapProducts(cartReplacements);
+
       products = [...syncedProducts, ...remainingLocal];
       _syncCategoriesWithProducts();
       await _persistAll();
@@ -1317,7 +1361,13 @@ class PosState extends ChangeNotifier {
 
   Map<String, dynamic> _productPayload(PosProduct product) => {
     'name': product.name,
+    'description': product.description,
+    'notes': product.notes,
     'sku': product.sku,
+    if (product.groupId != null) 'groupId': product.groupId,
+    if (product.variantLabel != null) 'variantLabel': product.variantLabel,
+    'imageBase64': product.imageBase64,
+    'isPublished': product.isPublished,
     if (product.barcode != null && product.barcode!.isNotEmpty)
       'barcode': product.barcode,
     'category': product.category,
@@ -1362,6 +1412,9 @@ class PosState extends ChangeNotifier {
                   fallback?.lowStockThreshold ??
                   10)
               .toInt(),
+      description: remote.containsKey('description')
+          ? remote['description'] as String?
+          : fallback?.description,
       icon: localCategory?.icon ?? fallback?.icon ?? AppIcons.inventory,
       tint: categoryColor != null
           ? Color(categoryColor)
@@ -1370,10 +1423,19 @@ class PosState extends ChangeNotifier {
           ? (fallback?.taxRateBasisPoints ?? defaultVatRateBasisPoints)
           : (vat * 10000).round(),
       isActive: remote['active'] as bool? ?? fallback?.isActive ?? true,
-      notes: fallback?.notes,
-      imageBase64: fallback?.imageBase64,
-      groupId: fallback?.groupId,
-      variantLabel: fallback?.variantLabel,
+      isPublished:
+          remote['isPublished'] as bool? ?? fallback?.isPublished ?? false,
+      publishedAt: remote['publishedAt'] is String
+          ? DateTime.tryParse(remote['publishedAt'] as String)
+          : fallback?.publishedAt,
+      notes: remote.containsKey('notes')
+          ? remote['notes'] as String?
+          : fallback?.notes,
+      imageBase64: remote.containsKey('imageBase64')
+          ? remote['imageBase64'] as String?
+          : fallback?.imageBase64,
+      groupId: remote['groupId'] as String? ?? fallback?.groupId,
+      variantLabel: remote['variantLabel'] as String? ?? fallback?.variantLabel,
     );
   }
 
@@ -1446,10 +1508,38 @@ class PosState extends ChangeNotifier {
     required Set<String> originalIds,
   }) async {
     final backup = List<PosProduct>.from(products);
-    final keepIds = variants.map((v) => v.id).toSet();
+    var savedVariants = variants;
+
+    if (ApiService.instance.hasToken) {
+      final synced = <PosProduct>[];
+      for (final variant in variants) {
+        final existing = products
+            .where((product) => product.id == variant.id)
+            .firstOrNull;
+        final remote = existing == null || !_isRemoteProductId(variant.id)
+            ? await _createRemoteProduct(variant)
+            : await _updateRemoteProduct(variant, existing);
+        synced.add(_productFromApi(remote, fallback: variant));
+      }
+
+      final keepIds = synced.map((variant) => variant.id).toSet();
+      for (final id in originalIds.difference(keepIds)) {
+        if (!_isRemoteProductId(id)) continue;
+        final deactivated = await ApiService.instance.deactivateProduct(id);
+        if (!deactivated) {
+          throw PosException(
+            ApiService.instance.lastError ??
+                'Could not remove a variant from the shop catalog.',
+          );
+        }
+      }
+      savedVariants = synced;
+    }
+
+    final keepIds = savedVariants.map((v) => v.id).toSet();
 
     final fresh = <PosProduct>[];
-    for (final v in variants) {
+    for (final v in savedVariants) {
       final idx = products.indexWhere((p) => p.id == v.id);
       if (idx == -1) {
         fresh.add(v);
@@ -2187,6 +2277,28 @@ class PosState extends ChangeNotifier {
   }) async {
     assert(cart.canCheckout, 'Cart must be non-empty and within stock limits');
 
+    final saleCustomer = customer ?? selectedCustomer;
+    if (ApiService.instance.hasToken) {
+      if (catalogueSyncing) {
+        throw PosException(
+          'The catalogue is still refreshing. Wait a moment, then try the sale again.',
+        );
+      }
+      final unsyncedLine = cart.lines
+          .where((line) => !_isRemoteProductId(line.productId))
+          .firstOrNull;
+      if (unsyncedLine != null) {
+        throw PosException(
+          '${unsyncedLine.name} has not synced to the shop yet. Refresh the catalogue before selling it.',
+        );
+      }
+      if (saleCustomer != null && !_isRemoteProductId(saleCustomer.id)) {
+        throw PosException(
+          'The selected customer has not synced to the shop. Refresh customers and select them again.',
+        );
+      }
+    }
+
     _receiptCounter++;
     var receiptNum = 'RCP-2026-$_receiptCounter';
     final now = DateTime.now();
@@ -2206,7 +2318,6 @@ class PosState extends ChangeNotifier {
     final saleSubtotal = cart.subtotal;
     final saleVat = cart.vatAmount;
 
-    final saleCustomer = customer ?? selectedCustomer;
     String? saleId;
     if (ApiService.instance.hasToken) {
       final response = await ApiService.instance.submitSale({

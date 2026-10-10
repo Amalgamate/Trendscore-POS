@@ -8,9 +8,14 @@ export type StoreCategory =
 export type StoreProduct = {
   id: string;
   name: string;
-  category: Exclude<StoreCategory, 'All'>;
+  variantLabel?: string | null;
+  category: string;
   description: string;
-  previewPrice: number;
+  salePrice: number;
+  unit?: string;
+  available: boolean;
+  imageUrl?: string | null;
+  preview?: boolean;
   color: string;
   mark: string;
 };
@@ -29,7 +34,8 @@ export const PREVIEW_PRODUCTS: StoreProduct[] = [
     name: 'Woven market tote',
     category: 'Accessories',
     description: 'A roomy everyday carry for market days.',
-    previewPrice: 850,
+    salePrice: 850,
+    available: true,
     color: 'sand',
     mark: 'TOTE',
   },
@@ -38,7 +44,8 @@ export const PREVIEW_PRODUCTS: StoreProduct[] = [
     name: 'Stoneware coffee cup',
     category: 'Home',
     description: 'A simple cup for a slower morning.',
-    previewPrice: 620,
+    salePrice: 620,
+    available: true,
     color: 'clay',
     mark: 'HOME',
   },
@@ -47,7 +54,8 @@ export const PREVIEW_PRODUCTS: StoreProduct[] = [
     name: 'Wildflower honey',
     category: 'Pantry',
     description: 'A small-batch pantry staple, shown as a preview item.',
-    previewPrice: 540,
+    salePrice: 540,
+    available: true,
     color: 'honey',
     mark: 'PANTRY',
   },
@@ -56,7 +64,8 @@ export const PREVIEW_PRODUCTS: StoreProduct[] = [
     name: 'Daily care set',
     category: 'Personal care',
     description: 'A considered set for your everyday routine.',
-    previewPrice: 1250,
+    salePrice: 1250,
+    available: true,
     color: 'sage',
     mark: 'CARE',
   },
@@ -65,7 +74,8 @@ export const PREVIEW_PRODUCTS: StoreProduct[] = [
     name: 'Canvas weekender',
     category: 'Accessories',
     description: 'A versatile bag for short trips and long days.',
-    previewPrice: 2400,
+    salePrice: 2400,
+    available: true,
     color: 'blue',
     mark: 'CARRY',
   },
@@ -74,12 +84,13 @@ export const PREVIEW_PRODUCTS: StoreProduct[] = [
     name: 'Linen table runner',
     category: 'Home',
     description: 'An easy layer for a shared table.',
-    previewPrice: 1100,
+    salePrice: 1100,
+    available: true,
     color: 'rose',
     mark: 'HOME',
   },
 ];
 
-export function formatPreviewPrice(amount: number) {
+export function formatStorePrice(amount: number) {
   return `KES ${new Intl.NumberFormat('en-KE').format(amount)}`;
 }

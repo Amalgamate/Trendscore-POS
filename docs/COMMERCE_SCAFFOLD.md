@@ -5,37 +5,36 @@ This repository now contains the first UI and application boundaries for:
 - `apps/web`: a separate Next.js customer storefront (`/`, `/cart`,
   `/checkout`, and `/policies`).
 - `Website Builder`: an owner/manager POS module with industry selection,
-  store-launch checklist, product publishing, delivery, policies, and checkout
-  setup placeholders.
+  store-launch checklist, delivery, policies, and checkout setup placeholders.
 - `Social Commerce`: an owner/manager POS module listing official channel
   integration prerequisites and the future product-post workflow.
 
-These are scaffolds, not a live store. The local storefront preview uses
-explicitly labeled sample products, illustrative prices, category/search
-controls, and a browser-persisted bag to demonstrate the customer journey.
-Sample items are not for sale. Checkout does not collect customer details,
-create orders, reserve stock, or accept payment. Real catalog data, shop
-policies, and customer contact details remain unconfigured rather than being
-fabricated. Its WhatsApp link appears only when a valid
+The POS product workspace and public catalog connection are implemented. Owners
+and managers can save product descriptions, images, variants, and web-shop
+publication status. The public API returns only published, active products and
+does not expose cost or exact stock; the storefront shows a simple availability
+status. The local storefront preview uses explicitly labeled sample products
+only when the API is unreachable. Checkout does not collect customer details,
+create orders, reserve stock, or accept payment. Real shop policies and customer
+contact details remain unconfigured rather than being fabricated. Its WhatsApp
+link appears only when a valid
 `NEXT_PUBLIC_STORE_WHATSAPP_NUMBER` is supplied. Production should resolve
 that number from the shop's server-side storefront configuration instead of a
 single global environment variable.
 
 ## Integration sequence
 
-1. Add hosted product media, product publication settings, and server-side
-   product variants. The POS has local image/variant fields, but the shop API
-   product model does not yet expose product images or variant groups.
-2. Add safe public catalog and shop-profile endpoints, with hostname/slug
-   routing performed by trusted server infrastructure. Do not accept an
-   arbitrary business ID from a public request.
-3. Add stock reservations, commerce orders, idempotent order/payment attempts,
+1. Configure production hosting and hostname routing for the separate Next.js
+   storefront. The POS/API deploy workflow does not currently deploy the web
+   app, and the public catalog API is scoped to the configured shop instance.
+   Do not accept an arbitrary business ID from a public request.
+2. Add stock reservations, commerce orders, idempotent order/payment attempts,
    append-only order status events, fulfillment, and reconciliation. Connect
    completed orders to POS stock, sales, and reports.
-4. Replace test-only M-Pesa behavior with the official Safaricom Daraja
+3. Replace test-only M-Pesa behavior with the official Safaricom Daraja
    provider. Validate signed/verified callbacks and reconcile uncertain or
    delayed results before marking an order paid.
-5. Add per-shop official OAuth connections, encrypted token storage, webhook
+4. Add per-shop official OAuth connections, encrypted token storage, webhook
    processing, revocation, and job queues for publishing and retry handling.
    Implement only API capabilities approved for the ShopSmart app and the
    customer's account.
@@ -68,14 +67,18 @@ commit them. Store integration credentials in server-side secret storage.
 
 ## Local storefront development
 
-Install the workspace dependencies from the repository root, then run:
+Install the workspace dependencies from the repository root, set
+`NEXT_PUBLIC_SHOP_API_BASE_URL` to the shop API base URL when the storefront is
+not served behind a same-origin `/api` proxy, then run:
 
 ```powershell
 npm run dev --workspace @retail-os/storefront
 ```
 
-The scaffold currently uses Next.js App Router for a separately deployable,
-server-rendered public website. It is not connected to the shop API yet.
+The storefront uses Next.js App Router for a separately deployable,
+server-rendered public website. The API's public catalog routes are under
+`/products/storefront`; production must route the storefront to the correct
+shop-specific API instance before the catalog is customer-accessible.
 
 ## Reference documentation checked
 

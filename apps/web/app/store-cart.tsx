@@ -9,10 +9,13 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { PREVIEW_PRODUCTS } from './store-data';
+import { PREVIEW_PRODUCTS, type StoreProduct } from './store-data';
 
 type CartLine = { productId: string; quantity: number };
+type CatalogState = 'loading' | 'live' | 'sample';
 type CartContextValue = {
+  products: StoreProduct[];
+  catalogState: CatalogState;
   items: CartLine[];
   itemCount: number;
   subtotal: number;
@@ -23,15 +26,84 @@ type CartContextValue = {
   remove: (productId: string) => void;
 };
 
-const storageKey = 'shopsmart-storefront-preview-cart';
+const storageKey = 'shopsmart-storefront-cart';
 const CartContext = createContext<CartContextValue | null>(null);
 
 export function StoreCartProvider({ children }: { children: ReactNode }) {
+  const [products, setProducts] = useState<StoreProduct[]>([]);
+  const [catalogState, setCatalogState] = useState<CatalogState>('loading');
   const [items, setItems] = useState<CartLine[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [storageError, setStorageError] = useState(false);
 
   useEffect(() => {
+    const apiBase = process.env.NEXT_PUBLIC_SHOP_API_BASE_URL ?? '/api';
+    fetch(`${apiBase.replace(/\/+$/, '')}/products/storefront`, {
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`Store catalog request failed (${response.status}).`);
+        const payload: unknown = await response.json();
+        if (
+          typeof payload !== 'object' ||
+          payload === null ||
+          !('data' in payload) ||
+          !Array.isArray(payload.data)
+        ) {
+          throw new Error('Store catalog response has an invalid shape.');
+        }
+        const catalog = payload.data.map((entry): StoreProduct => {
+          if (
+            typeof entry !== 'object' ||
+            entry === null ||
+            !('id' in entry) ||
+            typeof entry.id !== 'string' ||
+            !('name' in entry) ||
+            typeof entry.name !== 'string' ||
+            !('category' in entry) ||
+            typeof entry.category !== 'string' ||
+            !('salePrice' in entry) ||
+            typeof entry.salePrice !== 'number' ||
+            !('available' in entry) ||
+            typeof entry.available !== 'boolean'
+          ) {
+            throw new Error('Store catalog contains an invalid product.');
+          }
+          return {
+            id: entry.id,
+            name: entry.name,
+            variantLabel:
+              'variantLabel' in entry && typeof entry.variantLabel === 'string'
+                ? entry.variantLabel
+                : null,
+            category: entry.category,
+            description:
+              'description' in entry && typeof entry.description === 'string'
+                ? entry.description
+                : '',
+            salePrice: entry.salePrice,
+            unit: 'unit' in entry && typeof entry.unit === 'string' ? entry.unit : 'pc',
+            available: entry.available,
+            imageUrl:
+              'imageUrl' in entry && typeof entry.imageUrl === 'string'
+                ? `${apiBase.replace(/\/+$/, '')}/${entry.imageUrl.replace(/^\/+/, '')}`
+                : null,
+            color: 'sage',
+            mark: entry.category.toUpperCase(),
+          };
+        });
+        setProducts(catalog);
+        setCatalogState('live');
+      })
+      .catch((error: unknown) => {
+        console.error('Could not load the published shop catalog.', error);
+        setProducts(PREVIEW_PRODUCTS.map((product) => ({ ...product, preview: true })));
+        setCatalogState('sample');
+      });
+  }, []);
+
+  useEffect(() => {
+    if (catalogState === 'loading') return;
     try {
       const raw = window.localStorage.getItem(storageKey);
       if (raw) {
@@ -43,7 +115,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
               typeof line?.productId === 'string' &&
               Number.isInteger(line?.quantity) &&
               line.quantity > 0 &&
-              PREVIEW_PRODUCTS.some((product) => product.id === line.productId),
+              products.some((product) => product.id === line.productId),
           )
         ) {
           setItems(parsed);
@@ -57,7 +129,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
     } finally {
       setHydrated(true);
     }
-  }, []);
+  }, [catalogState, products]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -102,10 +174,12 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
   const value = useMemo(() => {
     const itemCount = items.reduce((sum, line) => sum + line.quantity, 0);
     const subtotal = items.reduce((sum, line) => {
-      const product = PREVIEW_PRODUCTS.find((item) => item.id === line.productId);
-      return sum + (product?.previewPrice ?? 0) * line.quantity;
+      const product = products.find((item) => item.id === line.productId);
+      return sum + (product?.salePrice ?? 0) * line.quantity;
     }, 0);
     return {
+      products,
+      catalogState,
       items,
       itemCount,
       subtotal,
@@ -115,7 +189,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
       setQuantity,
       remove,
     };
-  }, [items, hydrated, storageError, add, setQuantity, remove]);
+  }, [products, catalogState, items, hydrated, storageError, add, setQuantity, remove]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }
