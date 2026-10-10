@@ -142,6 +142,125 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     await widget.state.syncCatalogueFromApi();
   }
 
+  Widget _userProfileAction(PosUser? user, {required bool compact}) {
+    final name = user?.fullName ?? widget.state.activeCashier;
+    final role = user?.roleDisplay ?? 'Staff';
+    final initials = user?.initials ??
+        (name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?');
+
+    return PopupMenuButton<String>(
+      tooltip: 'User profile and sign out',
+      onSelected: (action) {
+        if (action == 'sign_out') _lockTill();
+      },
+      itemBuilder: (context) => [
+        PopupMenuItem<String>(
+          enabled: false,
+          child: SizedBox(
+            width: 220,
+            child: Row(
+              children: [
+                CircleAvatar(
+                  backgroundColor: AppColors.accent_light,
+                  foregroundColor: AppColors.accent_primary,
+                  child: Text(initials),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.text_primary,
+                        ),
+                      ),
+                      Text(
+                        role,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.text_tertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const PopupMenuDivider(),
+        const PopupMenuItem<String>(
+          value: 'sign_out',
+          child: ListTile(
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            leading: Icon(AppIcons.lock, color: AppColors.status_danger),
+            title: Text('Lock and sign out'),
+          ),
+        ),
+      ],
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 12, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircleAvatar(
+              radius: 17,
+              backgroundColor: AppColors.accent_light,
+              foregroundColor: AppColors.accent_primary,
+              child: Text(
+                initials,
+                style: const TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            if (!compact) ...[
+              const SizedBox(width: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 150),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.text_primary,
+                      ),
+                    ),
+                    Text(
+                      role,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 4),
+              const Icon(Icons.expand_more, size: 18),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
   void _lockTill() {
     _inactivityTimer?.cancel();
     widget.state.logout();
@@ -184,7 +303,6 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
 
   void _showMoreSheet(
     BuildContext context,
-    PosUser? currentUser,
     Set<int> allowedTabs,
   ) {
     showModalBottomSheet<void>(
@@ -201,85 +319,6 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // User Banner
-                Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: AppColors.bg_canvas,
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppColors.border_subtle),
-                  ),
-                  child: Row(
-                    children: [
-                      CircleAvatar(
-                        radius: 20,
-                        backgroundColor: AppColors.accent_light,
-                        child: Text(
-                          currentUser?.initials ?? 'JM',
-                          style: const TextStyle(
-                            color: AppColors.accent_primary,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              currentUser?.fullName ??
-                                  widget.state.activeCashier,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 15,
-                                color: AppColors.text_primary,
-                              ),
-                            ),
-                            Text(
-                              currentUser?.roleDisplay ?? 'Staff',
-                              style: const TextStyle(
-                                fontSize: 12,
-                                color: AppColors.text_tertiary,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      OutlinedButton.icon(
-                        icon: const Icon(
-                          AppIcons.lock,
-                          size: 14,
-                          color: AppColors.status_danger,
-                        ),
-                        label: const Text(
-                          'Lock',
-                          style: TextStyle(
-                            color: AppColors.status_danger,
-                            fontSize: 12,
-                          ),
-                        ),
-                        style: OutlinedButton.styleFrom(
-                          side: const BorderSide(
-                            color: AppColors.status_danger,
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 10,
-                            vertical: 8,
-                          ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        onPressed: () {
-                          Navigator.pop(ctx);
-                          _lockTill();
-                        },
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(height: 16),
                 const Text(
                   'More Operations',
                   style: TextStyle(
@@ -551,11 +590,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                       _showSyncDiagnostics(context);
                     },
                   ),
-                  IconButton(
-                    tooltip: 'Lock till',
-                    icon: const Icon(AppIcons.lock),
-                    onPressed: _lockTill,
-                  ),
+                  _userProfileAction(currentUser, compact: true),
                 ],
               ),
               body: SafeArea(
@@ -581,10 +616,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                 onSelectTab: _selectTab,
                 onOpenMore: () {
                   _onUserInteraction();
-                  _showMoreSheet(context, currentUser, allowedTabs);
+                  _showMoreSheet(context, allowedTabs);
                 },
-                activeCashier:
-                    currentUser?.fullName ?? widget.state.activeCashier,
               ),
             );
           }
@@ -593,6 +626,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             appBar: AppBar(
               automaticallyImplyLeading: false,
               title: Text(activePageTitle),
+              actions: [_userProfileAction(currentUser, compact: false)],
             ),
             body: Row(
               children: [
@@ -601,15 +635,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                   activeIndex: _activeTabIndex,
                   visibleTabs: allowedTabs,
                   onSelectTab: _selectTab,
-                  onLockTill: _lockTill,
                   onOpenSync: () {
                     _onUserInteraction();
                     _showSyncDiagnostics(context);
                   },
-                  activeCashier:
-                      currentUser?.fullName ?? widget.state.activeCashier,
-                  roleDisplay: currentUser?.roleDisplay ?? 'Staff',
-                  initials: currentUser?.initials,
                   logoBase64: widget.state.brandLogoBase64,
                   logoUrl: widget.state.brandLogoUrl,
                 ),
@@ -657,14 +686,12 @@ class _MobileBottomNav extends StatelessWidget {
     required this.visibleTabs,
     required this.onSelectTab,
     required this.onOpenMore,
-    required this.activeCashier,
   });
 
   final int activeIndex;
   final Set<int> visibleTabs;
   final ValueChanged<int> onSelectTab;
   final VoidCallback onOpenMore;
-  final String activeCashier;
 
   @override
   Widget build(BuildContext context) {
@@ -768,11 +795,7 @@ class _NavigationSidebar extends StatelessWidget {
     required this.activeIndex,
     required this.visibleTabs,
     required this.onSelectTab,
-    required this.onLockTill,
     required this.onOpenSync,
-    required this.activeCashier,
-    this.roleDisplay,
-    this.initials,
     this.logoBase64,
     this.logoUrl,
   });
@@ -780,11 +803,7 @@ class _NavigationSidebar extends StatelessWidget {
   final int activeIndex;
   final Set<int> visibleTabs;
   final ValueChanged<int> onSelectTab;
-  final VoidCallback onLockTill;
   final VoidCallback onOpenSync;
-  final String activeCashier;
-  final String? roleDisplay;
-  final String? initials;
   final String? logoBase64;
   final String? logoUrl;
 
@@ -865,11 +884,9 @@ class _NavigationSidebar extends StatelessWidget {
             ),
           ),
 
-          const SizedBox(height: 8),
-
-          // Offline Sync Status Icon
+          const Spacer(),
           Padding(
-            padding: const EdgeInsets.only(bottom: 6),
+            padding: const EdgeInsets.only(bottom: 12),
             child: Tooltip(
               message: 'Local-First Sync Status: Online',
               child: InkWell(
@@ -887,50 +904,6 @@ class _NavigationSidebar extends StatelessWidget {
                       AppIcons.cloudDone,
                       color: AppColors.status_success,
                       size: 18,
-                    ),
-                  ),
-                ),
-              ),
-            ),
-          ),
-
-          // Lock Till Button
-          Padding(
-            padding: const EdgeInsets.only(bottom: 6),
-            child: Tooltip(
-              message: 'Lock Till',
-              child: IconButton(
-                icon: const Icon(
-                  AppIcons.lock,
-                  color: AppColors.text_tertiary,
-                  size: 20,
-                ),
-                onPressed: onLockTill,
-              ),
-            ),
-          ),
-
-          // Cashier Profile Avatar
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: Tooltip(
-              message:
-                  '$activeCashier • ${roleDisplay ?? 'Staff'} (Tap to lock)',
-              child: InkWell(
-                onTap: onLockTill,
-                borderRadius: BorderRadius.circular(18),
-                child: CircleAvatar(
-                  radius: 18,
-                  backgroundColor: AppColors.accent_light,
-                  child: Text(
-                    initials ??
-                        (activeCashier.isNotEmpty
-                            ? activeCashier.substring(0, 2).toUpperCase()
-                            : 'JM'),
-                    style: const TextStyle(
-                      color: AppColors.accent_primary,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ),
