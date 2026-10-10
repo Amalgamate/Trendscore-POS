@@ -1,15 +1,27 @@
+'use client';
+
 import Link from 'next/link';
+import Image from 'next/image';
+import { useStoreCart } from './store-cart';
 
 export function StoreFooter() {
+  const { storefrontProfile } = useStoreCart();
+
   return (
     <footer className="store-footer">
       <div className="footer-main">
         <div>
           <Link className="wordmark footer-wordmark" href="/">
-            <span className="wordmark-mark">S</span>
+            <Image
+              className="wordmark-logo"
+              src="/shopsmart-leaf.svg"
+              alt=""
+              width={28}
+              height={28}
+            />
             <span>ShopSmart</span>
           </Link>
-          <p>One catalog, managed by the shop with ShopSmart.</p>
+          <p>Online catalog for {storefrontProfile.storeName}.</p>
         </div>
         <nav className="policy-links" aria-label="Store policies">
           <Link href="/policies#delivery">Delivery</Link>
@@ -20,7 +32,9 @@ export function StoreFooter() {
       </div>
       <div className="footer-bottom">
         <span>Online ordering is not enabled yet.</span>
-        <span>© {new Date().getFullYear()} ShopSmart</span>
+        <span>
+          © {new Date().getFullYear()} {storefrontProfile.storeName}
+        </span>
       </div>
     </footer>
   );

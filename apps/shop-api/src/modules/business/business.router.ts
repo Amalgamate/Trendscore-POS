@@ -4,9 +4,37 @@
 import type { Router } from 'express';
 import { Router as ExpressRouter } from 'express';
 import { z } from 'zod';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { parseBody, send200, sendError } from '../../lib/http';
 import { requireAuth, requireRole } from '../../lib/auth.middleware';
+
+const StorefrontSettingsSchema = z.object({
+  storeName: z.string().trim().min(1).max(200),
+  description: z.string().max(2000),
+  phone: z.string().max(40),
+  email: z.union([z.string().email(), z.literal('')]),
+  address: z.string().max(300),
+  county: z.string().max(100),
+  logoUrl: z.union([
+    z.string().url().refine((value) => value.startsWith('https://')),
+    z.literal(''),
+  ]),
+  openingHours: z.string().max(2000),
+  deliveryEnabled: z.boolean(),
+  deliveryDetails: z.string().max(3000),
+  pickupEnabled: z.boolean(),
+  pickupDetails: z.string().max(3000),
+  policies: z.object({
+    delivery: z.string().max(8000),
+    returns: z.string().max(8000),
+    privacy: z.string().max(8000),
+    terms: z.string().max(8000),
+  }),
+});
+
+type StorefrontSettings = z.infer<typeof StorefrontSettingsSchema>;
+const storefrontSettingKey = 'storefront_profile';
 
 const UpdateBusinessSchema = z.object({
   name: z.string().min(1).max(200).optional(),
@@ -25,6 +53,82 @@ const UpsertSettingSchema = z.object({
 
 export function businessRouter(businessId: string): Router {
   const router = ExpressRouter();
+
+  // Public storefront profile contains only information explicitly configured
+  // for publication; internal POS contact details remain private by default.
+  router.get('/storefront', async (_req, res) => {
+    try {
+      const business = await prisma.business.findUniqueOrThrow({
+        where: { id: businessId },
+        include: {
+          settings: { where: { key: storefrontSettingKey }, take: 1 },
+        },
+      });
+      const profile = readStorefrontSettings(
+        business.name,
+        business.settings[0]?.value,
+      );
+      res.setHeader('Cache-Control', 'public, max-age=60, s-maxage=60');
+      return send200(res, { data: profile });
+    } catch (err) {
+      console.error('business/storefront error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch storefront profile.');
+    }
+  });
+
+  // GET /business/storefront/settings
+  router.get(
+    '/storefront/settings',
+    requireAuth,
+    requireRole('OWNER', 'MANAGER'),
+    async (_req, res) => {
+      try {
+        const business = await prisma.business.findUniqueOrThrow({
+          where: { id: businessId },
+          include: {
+            settings: { where: { key: storefrontSettingKey }, take: 1 },
+          },
+        });
+        return send200(res, {
+          data: readStorefrontSettings(
+            business.name,
+            business.settings[0]?.value,
+          ),
+        });
+      } catch (err) {
+        console.error('business/storefront settings get error:', err);
+        return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch storefront settings.');
+      }
+    },
+  );
+
+  // PUT /business/storefront/settings
+  router.put(
+    '/storefront/settings',
+    requireAuth,
+    requireRole('OWNER', 'MANAGER'),
+    async (req, res) => {
+      const body = parseBody(StorefrontSettingsSchema, req, res);
+      if (!body) return;
+      try {
+        const value: Prisma.InputJsonObject = {
+          ...body,
+          policies: body.policies,
+        };
+        await prisma.businessSetting.upsert({
+          where: {
+            businessId_key: { businessId, key: storefrontSettingKey },
+          },
+          update: { value },
+          create: { businessId, key: storefrontSettingKey, value },
+        });
+        return send200(res, { data: body });
+      } catch (err) {
+        console.error('business/storefront settings update error:', err);
+        return sendError(res, 500, 'SERVER_ERROR', 'Failed to update storefront settings.');
+      }
+    },
+  );
 
   // GET /business
   router.get('/', requireAuth, async (req, res) => {
@@ -184,4 +288,32 @@ export function businessRouter(businessId: string): Router {
   });
 
   return router;
+}
+
+function readStorefrontSettings(
+  businessName: string,
+  savedValue: Prisma.JsonValue | undefined,
+): StorefrontSettings {
+  const defaults: StorefrontSettings = {
+    storeName: businessName,
+    description: '',
+    phone: '',
+    email: '',
+    address: '',
+    county: '',
+    logoUrl: '',
+    openingHours: '',
+    deliveryEnabled: false,
+    deliveryDetails: '',
+    pickupEnabled: false,
+    pickupDetails: '',
+    policies: { delivery: '', returns: '', privacy: '', terms: '' },
+  };
+  if (savedValue === undefined) return defaults;
+
+  const result = StorefrontSettingsSchema.safeParse(savedValue);
+  if (!result.success) {
+    throw new Error('Saved storefront settings have an invalid shape.');
+  }
+  return result.data;
 }

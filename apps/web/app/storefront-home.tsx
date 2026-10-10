@@ -8,7 +8,12 @@ export function StorefrontHome() {
   const [category, setCategory] = useState('All');
   const [query, setQuery] = useState('');
   const [addedProduct, setAddedProduct] = useState<string | null>(null);
-  const { add, products: catalogProducts, catalogState } = useStoreCart();
+  const {
+    add,
+    products: catalogProducts,
+    catalogState,
+    storefrontProfile,
+  } = useStoreCart();
   const categories = useMemo(
     () => ['All', ...new Set(catalogProducts.map((product) => product.category))],
     [catalogProducts],
@@ -45,10 +50,12 @@ export function StorefrontHome() {
 
       <section className="welcome-band" aria-labelledby="welcome-title">
       <div className="welcome-copy">
-        <h1 id="welcome-title">Shop the Gutagala catalog.</h1>
+        <h1 id="welcome-title">
+          Shop the {storefrontProfile.storeName} catalog.
+        </h1>
           <p>
-            Explore products selected by the shop. Availability is checked
-            against the live catalog; online ordering is not enabled yet.
+            {storefrontProfile.description ||
+              'Explore products selected by the shop. Availability is checked against the live catalog; online ordering is not enabled yet.'}
           </p>
           <a className="button button-primary" href="#products">
             Browse products
@@ -194,6 +201,8 @@ export function StorefrontHome() {
         )}
       </section>
 
+      <StoreDetails />
+
       <section className="store-next-step" aria-labelledby="next-step-title">
         <div>
           <p className="eyebrow">ONE CATALOG, ONE STOCK POSITION</p>
@@ -205,5 +214,77 @@ export function StorefrontHome() {
         </p>
       </section>
     </main>
+  );
+}
+
+function StoreDetails() {
+  const { storefrontProfile: profile } = useStoreCart();
+  const address = [profile.address, profile.county].filter(Boolean).join(', ');
+  const hasDetails = Boolean(
+    profile.logoUrl ||
+      profile.phone ||
+      profile.email ||
+      address ||
+      profile.openingHours ||
+      (profile.deliveryEnabled && profile.deliveryDetails) ||
+      (profile.pickupEnabled && profile.pickupDetails),
+  );
+
+  if (!hasDetails) return null;
+
+  return (
+    <section className="store-details" aria-labelledby="store-details-title">
+      <div className="store-details-heading">
+        {profile.logoUrl && (
+          <img
+            className="store-details-logo"
+            src={profile.logoUrl}
+            alt={`${profile.storeName} logo`}
+          />
+        )}
+        <div>
+          <p className="eyebrow">VISIT OR CONTACT THE SHOP</p>
+          <h2 id="store-details-title">{profile.storeName}</h2>
+        </div>
+      </div>
+      <div className="store-details-grid">
+        {address && (
+          <div>
+            <h3>Address</h3>
+            <p>{address}</p>
+          </div>
+        )}
+        {profile.phone && (
+          <div>
+            <h3>Phone</h3>
+            <p><a href={`tel:${profile.phone}`}>{profile.phone}</a></p>
+          </div>
+        )}
+        {profile.email && (
+          <div>
+            <h3>Email</h3>
+            <p><a href={`mailto:${profile.email}`}>{profile.email}</a></p>
+          </div>
+        )}
+        {profile.openingHours && (
+          <div>
+            <h3>Opening hours</h3>
+            <p className="store-details-multiline">{profile.openingHours}</p>
+          </div>
+        )}
+        {profile.deliveryEnabled && profile.deliveryDetails && (
+          <div>
+            <h3>Delivery</h3>
+            <p className="store-details-multiline">{profile.deliveryDetails}</p>
+          </div>
+        )}
+        {profile.pickupEnabled && profile.pickupDetails && (
+          <div>
+            <h3>Store pickup</h3>
+            <p className="store-details-multiline">{profile.pickupDetails}</p>
+          </div>
+        )}
+      </div>
+    </section>
   );
 }

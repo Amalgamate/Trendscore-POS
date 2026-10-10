@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../pos_state.dart';
+import '../services/api_service.dart';
 import '../theme/tokens.dart';
 
 class WebsiteBuilderView extends StatefulWidget {
@@ -12,231 +13,177 @@ class WebsiteBuilderView extends StatefulWidget {
 }
 
 class _WebsiteBuilderViewState extends State<WebsiteBuilderView> {
-  static const _industries = <String>[
-    'General retail',
-    'Fashion & footwear',
-    'Electronics',
-    'Grocery & convenience',
-    'Home & furniture',
-    'Beauty & personal care',
-    'Health & pharmacy',
-    'Hardware & building',
-    'Food service',
-    'Automotive & parts',
-    'Other',
-  ];
+  final _formKey = GlobalKey<FormState>();
+  final Map<String, TextEditingController> _controllers = {
+    'storeName': TextEditingController(),
+    'description': TextEditingController(),
+    'phone': TextEditingController(),
+    'email': TextEditingController(),
+    'address': TextEditingController(),
+    'county': TextEditingController(),
+    'logoUrl': TextEditingController(),
+    'openingHours': TextEditingController(),
+    'deliveryDetails': TextEditingController(),
+    'pickupDetails': TextEditingController(),
+    'policyDelivery': TextEditingController(),
+    'policyReturns': TextEditingController(),
+    'policyPrivacy': TextEditingController(),
+    'policyTerms': TextEditingController(),
+  };
 
-  String _industry = _industries.first;
+  bool _loading = true;
+  bool _saving = false;
+  bool _deliveryEnabled = false;
+  bool _pickupEnabled = false;
+  String? _error;
 
   @override
-  Widget build(BuildContext context) {
-    final sections = <({IconData icon, String title, String detail})>[
-      (
-        icon: Icons.storefront_outlined,
-        title: 'Store profile',
-        detail: 'Shop name, brand, contact details, and public URL',
-      ),
-      (
-        icon: Icons.category_outlined,
-        title: 'Industry & catalog',
-        detail: 'Choose product attributes and stock tracking for your trade',
-      ),
-      (
-        icon: Icons.inventory_2_outlined,
-        title: 'Published products',
-        detail: 'Select POS products and keep online availability in sync',
-      ),
-      (
-        icon: Icons.local_shipping_outlined,
-        title: 'Delivery & pickup',
-        detail: 'Set collection options, delivery areas, and fees',
-      ),
-      (
-        icon: Icons.policy_outlined,
-        title: 'Policies & footer',
-        detail: 'Add your approved returns, delivery, privacy, and terms copy',
-      ),
-      (
-        icon: Icons.payments_outlined,
-        title: 'Checkout',
-        detail: 'Connect verified M-Pesa checkout before accepting payment',
-      ),
-    ];
+  void initState() {
+    super.initState();
+    _loadSettings();
+  }
 
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final narrow = constraints.maxWidth < 760;
-        return SingleChildScrollView(
-          padding: EdgeInsets.all(narrow ? 16 : 28),
-          child: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 1180),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _StoreStatus(shopName: widget.state.shopName),
-                  const SizedBox(height: 20),
-                  if (narrow)
-                    Column(
-                      children: [
-                        _industrySetup(),
-                        const SizedBox(height: 16),
-                        _setupChecklist(sections),
-                      ],
-                    )
-                  else
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Expanded(flex: 5, child: _industrySetup()),
-                        const SizedBox(width: 18),
-                        Expanded(flex: 6, child: _setupChecklist(sections)),
-                      ],
-                    ),
-                  const SizedBox(height: 18),
-                  _ScaffoldNotice(
-                    icon: Icons.info_outline,
-                    message:
-                        'This setup is a scaffold. Saving settings, publishing products, and accepting orders will be enabled when the shop API and payment integrations are connected.',
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  Future<void> _loadSettings() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    final settings = await ApiService.instance.getStorefrontSettings();
+    if (!mounted) return;
+    if (settings == null) {
+      setState(() {
+        _loading = false;
+        _error =
+            ApiService.instance.lastError ??
+            'Could not load the storefront settings.';
+      });
+      return;
+    }
+
+    final policies = settings['policies'] is Map
+        ? Map<String, dynamic>.from(settings['policies'] as Map)
+        : const <String, dynamic>{};
+    void setText(String key, Object? value) {
+      _controllers[key]?.text = value is String ? value : '';
+    }
+
+    setState(() {
+      for (final key in [
+        'storeName',
+        'description',
+        'phone',
+        'email',
+        'address',
+        'county',
+        'logoUrl',
+        'openingHours',
+        'deliveryDetails',
+        'pickupDetails',
+      ]) {
+        setText(key, settings[key]);
+      }
+      setText('policyDelivery', policies['delivery']);
+      setText('policyReturns', policies['returns']);
+      setText('policyPrivacy', policies['privacy']);
+      setText('policyTerms', policies['terms']);
+      _deliveryEnabled = settings['deliveryEnabled'] == true;
+      _pickupEnabled = settings['pickupEnabled'] == true;
+      _loading = false;
+    });
+  }
+
+  Future<void> _saveSettings() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    final settings = <String, dynamic>{
+      'storeName': _controllers['storeName']!.text.trim(),
+      'description': _controllers['description']!.text.trim(),
+      'phone': _controllers['phone']!.text.trim(),
+      'email': _controllers['email']!.text.trim(),
+      'address': _controllers['address']!.text.trim(),
+      'county': _controllers['county']!.text.trim(),
+      'logoUrl': _controllers['logoUrl']!.text.trim(),
+      'openingHours': _controllers['openingHours']!.text.trim(),
+      'deliveryEnabled': _deliveryEnabled,
+      'deliveryDetails': _controllers['deliveryDetails']!.text.trim(),
+      'pickupEnabled': _pickupEnabled,
+      'pickupDetails': _controllers['pickupDetails']!.text.trim(),
+      'policies': {
+        'delivery': _controllers['policyDelivery']!.text.trim(),
+        'returns': _controllers['policyReturns']!.text.trim(),
+        'privacy': _controllers['policyPrivacy']!.text.trim(),
+        'terms': _controllers['policyTerms']!.text.trim(),
       },
-    );
+    };
+    final saved = await ApiService.instance.updateStorefrontSettings(settings);
+    if (!mounted) return;
+    setState(() {
+      _saving = false;
+      if (!saved) {
+        _error =
+            ApiService.instance.lastError ??
+            'Could not save the storefront settings.';
+      }
+    });
+    if (saved) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Storefront settings saved.')),
+      );
+    }
   }
 
-  Widget _industrySetup() {
-    return _Panel(
-      title: 'Start with your kind of business',
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text(
-            'We will tailor product details and stock workflows to your industry. You can change this later.',
-            style: TextStyle(
-              color: AppColors.text_secondary,
-              fontSize: 13,
-              height: 1.45,
-            ),
-          ),
-          const SizedBox(height: 18),
-          DropdownButtonFormField<String>(
-            initialValue: _industry,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Business industry',
-              border: OutlineInputBorder(),
-            ),
-            items: [
-              for (final industry in _industries)
-                DropdownMenuItem(
-                  value: industry,
-                  child: Text(industry, maxLines: 1, overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            onChanged: (value) {
-              if (value != null) setState(() => _industry = value);
-            },
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'Selected: $_industry',
-            style: const TextStyle(
-              color: AppColors.accent_primary,
-              fontSize: 13,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Industry templates will suggest fields such as size and colour for fashion, or model and warranty for electronics. Products remain in the shared POS catalog.',
-            style: TextStyle(
-              color: AppColors.text_tertiary,
-              fontSize: 12,
-              height: 1.45,
-            ),
-          ),
-        ],
+  TextEditingController _controller(String key) => _controllers[key]!;
+
+  Widget _field(
+    String key,
+    String label, {
+    String? hint,
+    int maxLines = 1,
+    String? Function(String?)? validator,
+    TextInputType? keyboardType,
+  }) {
+    return TextFormField(
+      controller: _controller(key),
+      decoration: InputDecoration(
+        labelText: label,
+        hintText: hint,
+        border: const OutlineInputBorder(),
+        alignLabelWithHint: maxLines > 1,
       ),
+      maxLines: maxLines,
+      maxLength: switch (key) {
+        'storeName' => 200,
+        'description' => 2000,
+        'openingHours' => 2000,
+        'deliveryDetails' || 'pickupDetails' => 3000,
+        'policyDelivery' ||
+        'policyReturns' ||
+        'policyPrivacy' ||
+        'policyTerms' => 8000,
+        'address' => 300,
+        'county' => 100,
+        'phone' => 40,
+        _ => null,
+      },
+      keyboardType: keyboardType,
+      validator: validator,
     );
   }
 
-  Widget _setupChecklist(
-    List<({IconData icon, String title, String detail})> sections,
-  ) {
-    return _Panel(
-      title: 'Store launch checklist',
-      child: Column(
-        children: [
-          for (final section in sections)
-            _ChecklistRow(
-              icon: section.icon,
-              title: section.title,
-              detail: section.detail,
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _StoreStatus extends StatelessWidget {
-  const _StoreStatus({required this.shopName});
-
-  final String shopName;
-
-  @override
-  Widget build(BuildContext context) {
-    final status = Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Icon(Icons.circle, size: 9, color: AppColors.status_warning),
-        const SizedBox(width: 8),
-        const Text(
-          'Not published',
-          style: TextStyle(
-            color: AppColors.text_secondary,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-
-    return Row(
-      children: [
-        Expanded(
-          child: Text(
-            shopName.isEmpty ? 'Your online store' : shopName,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: AppColors.text_primary,
-              fontSize: 20,
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-        ),
-        const SizedBox(width: 16),
-        status,
-      ],
-    );
-  }
-}
-
-class _Panel extends StatelessWidget {
-  const _Panel({required this.title, required this.child});
-
-  final String title;
-  final Widget child;
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _section(String title, String description, List<Widget> children) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.bg_surface,
         border: Border.all(color: AppColors.border_subtle),
@@ -249,104 +196,283 @@ class _Panel extends StatelessWidget {
             title,
             style: const TextStyle(
               color: AppColors.text_primary,
-              fontSize: 15,
+              fontSize: 16,
               fontWeight: FontWeight.w700,
             ),
           ),
-          const SizedBox(height: 14),
-          child,
-        ],
-      ),
-    );
-  }
-}
-
-class _ChecklistRow extends StatelessWidget {
-  const _ChecklistRow({
-    required this.icon,
-    required this.title,
-    required this.detail,
-  });
-
-  final IconData icon;
-  final String title;
-  final String detail;
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 13),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: AppColors.accent_primary, size: 19),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.text_primary,
-                  ),
-                ),
-                const SizedBox(height: 3),
-                Text(
-                  detail,
-                  style: const TextStyle(
-                    fontSize: 11.5,
-                    height: 1.35,
-                    color: AppColors.text_tertiary,
-                  ),
-                ),
-                const SizedBox(height: 5),
-                const Text(
-                  'Setup needed',
-                  style: TextStyle(
-                    color: AppColors.text_tertiary,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
+          const SizedBox(height: 4),
+          Text(
+            description,
+            style: const TextStyle(
+              color: AppColors.text_secondary,
+              fontSize: 12,
+              height: 1.45,
             ),
           ),
+          const SizedBox(height: 18),
+          ...children,
         ],
       ),
     );
   }
-}
-
-class _ScaffoldNotice extends StatelessWidget {
-  const _ScaffoldNotice({required this.icon, required this.message});
-
-  final IconData icon;
-  final String message;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: AppColors.bg_subtle,
-        borderRadius: BorderRadius.circular(10),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: AppColors.text_secondary, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              message,
-              style: const TextStyle(
-                color: AppColors.text_secondary,
-                fontSize: 12,
-                height: 1.4,
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final compact = constraints.maxWidth < 760;
+        return SingleChildScrollView(
+          padding: EdgeInsets.all(compact ? 16 : 28),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 920),
+              child: _loading
+                  ? const Padding(
+                      padding: EdgeInsets.all(48),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  : _error != null
+                  ? _loadError()
+                  : _settingsForm(compact),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _loadError() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Storefront settings',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.status_danger.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Row(
+            children: [
+              Expanded(child: Text(_error!)),
+              TextButton.icon(
+                onPressed: _loadSettings,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Retry'),
               ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _settingsForm(bool compact) {
+    return Form(
+      key: _formKey,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'Storefront settings',
+            style: TextStyle(
+              color: AppColors.text_primary,
+              fontSize: compact ? 22 : 26,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 6),
+          const Text(
+            'Choose what customers can see on your online store. Contact details are private until you add them here.',
+            style: TextStyle(
+              color: AppColors.text_secondary,
+              fontSize: 13,
+              height: 1.5,
+            ),
+          ),
+          const SizedBox(height: 20),
+          _section(
+            'Store profile',
+            'These details appear on your public storefront. Leave a contact field blank to keep it private.',
+            [
+              _field(
+                'storeName',
+                'Store name',
+                validator: (value) => value == null || value.trim().isEmpty
+                    ? 'Enter a store name.'
+                    : null,
+              ),
+              const SizedBox(height: 14),
+              _field(
+                'description',
+                'Short description',
+                hint: 'A few words about your shop',
+                maxLines: 3,
+              ),
+              const SizedBox(height: 14),
+              if (compact) ...[
+                _field(
+                  'phone',
+                  'Public phone number',
+                  keyboardType: TextInputType.phone,
+                ),
+                const SizedBox(height: 14),
+                _field(
+                  'email',
+                  'Public email',
+                  keyboardType: TextInputType.emailAddress,
+                  validator: (value) {
+                    if (value == null || value.isEmpty) return null;
+                    return RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value)
+                        ? null
+                        : 'Enter a valid email address.';
+                  },
+                ),
+              ] else
+                Row(
+                  children: [
+                    Expanded(
+                      child: _field(
+                        'phone',
+                        'Public phone number',
+                        keyboardType: TextInputType.phone,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: _field(
+                        'email',
+                        'Public email',
+                        keyboardType: TextInputType.emailAddress,
+                        validator: (value) {
+                          if (value == null || value.isEmpty) return null;
+                          return RegExp(
+                                r'^[^@\s]+@[^@\s]+\.[^@\s]+$',
+                              ).hasMatch(value)
+                              ? null
+                              : 'Enter a valid email address.';
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 14),
+              _field('address', 'Public shop address'),
+              const SizedBox(height: 14),
+              if (compact)
+                _field('county', 'County')
+              else
+                _field('county', 'County'),
+              const SizedBox(height: 14),
+              _field(
+                'logoUrl',
+                'Store logo URL (optional)',
+                hint: 'https://…',
+                keyboardType: TextInputType.url,
+                validator: (value) {
+                  if (value == null || value.isEmpty) return null;
+                  final uri = Uri.tryParse(value);
+                  return uri != null &&
+                          uri.scheme == 'https' &&
+                          uri.host.isNotEmpty
+                      ? null
+                      : 'Use a valid HTTPS image URL.';
+                },
+              ),
+              const SizedBox(height: 14),
+              _field(
+                'openingHours',
+                'Opening hours',
+                hint: 'For example, Monday to Saturday, 8:00 am–6:00 pm',
+                maxLines: 3,
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          _section(
+            'Delivery & pickup information',
+            'Describe current arrangements for customers. This does not enable online checkout or calculate fees.',
+            [
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Offer delivery'),
+                value: _deliveryEnabled,
+                onChanged: (value) => setState(() => _deliveryEnabled = value),
+              ),
+              if (_deliveryEnabled) ...[
+                const SizedBox(height: 8),
+                _field(
+                  'deliveryDetails',
+                  'Delivery details',
+                  hint: 'Areas served, timings, and any customer instructions',
+                  maxLines: 4,
+                ),
+              ],
+              const SizedBox(height: 10),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Offer store pickup'),
+                value: _pickupEnabled,
+                onChanged: (value) => setState(() => _pickupEnabled = value),
+              ),
+              if (_pickupEnabled) ...[
+                const SizedBox(height: 8),
+                _field(
+                  'pickupDetails',
+                  'Pickup details',
+                  hint: 'Collection location, hours, and instructions',
+                  maxLines: 4,
+                ),
+              ],
+            ],
+          ),
+          const SizedBox(height: 16),
+          _section(
+            'Customer policies',
+            'Only enter wording approved by your shop. Empty policies will be clearly marked as not provided.',
+            [
+              _field('policyDelivery', 'Delivery policy', maxLines: 5),
+              const SizedBox(height: 14),
+              _field('policyReturns', 'Returns & refunds policy', maxLines: 5),
+              const SizedBox(height: 14),
+              _field('policyPrivacy', 'Privacy policy', maxLines: 5),
+              const SizedBox(height: 14),
+              _field('policyTerms', 'Terms of sale', maxLines: 5),
+            ],
+          ),
+          if (_error != null) ...[
+            const SizedBox(height: 16),
+            Text(
+              _error!,
+              style: const TextStyle(color: AppColors.status_danger),
+            ),
+          ],
+          const SizedBox(height: 20),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: FilledButton.icon(
+              onPressed: _saving ? null : _saveSettings,
+              icon: _saving
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: Text(_saving ? 'Saving…' : 'Save storefront settings'),
+            ),
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'Online ordering remains unavailable until checkout and verified payment are connected.',
+            style: TextStyle(
+              color: AppColors.text_tertiary,
+              fontSize: 12,
+              height: 1.4,
             ),
           ),
         ],

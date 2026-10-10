@@ -19,6 +19,7 @@ import 'views/reports_view.dart';
 import 'views/settings_view.dart';
 import 'views/purchase_orders_view.dart';
 import 'views/delivery_view.dart';
+import 'views/website_builder_view.dart';
 import 'views/rider_home_view.dart';
 import 'shared/icons.dart';
 
@@ -93,7 +94,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isLocked = widget.state.currentLoggedInUser == null;
-    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 8);
+    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 9);
     _startInactivityTimer();
   }
 
@@ -371,9 +372,9 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   Set<int> _accessibleTabs(PosUser? user) {
     if (user == null) return const <int>{};
     return switch (user.role) {
-      PosUserRole.superAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8},
-      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8},
-      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8},
+      PosUserRole.superAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
+      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8, 9},
       PosUserRole.cashier => const <int>{0, 1, 4, 8},
       PosUserRole.stockClerk => const <int>{2, 7},
       PosUserRole.rider => const <int>{},
@@ -436,6 +437,13 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                   _moreTile(AppIcons.wallet, 'Cash Drawer & Shifts', 4, ctx),
                 if (allowedTabs.contains(5))
                   _moreTile(AppIcons.analytics, 'Reports & Analytics', 5, ctx),
+                if (allowedTabs.contains(9))
+                  _moreTile(
+                    Icons.storefront_rounded,
+                    'Storefront settings',
+                    9,
+                    ctx,
+                  ),
               ],
             ),
           ),
@@ -646,6 +654,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             6 => 'Settings',
             7 => 'Orders',
             8 => 'Delivery',
+            9 => 'Storefront',
             _ => 'ShopSmart POS',
           };
 
@@ -668,6 +677,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             PurchaseOrdersView(state: widget.state),
             // index 8 — Delivery management view
             DeliveryView(state: widget.state),
+            WebsiteBuilderView(state: widget.state),
           ];
 
           if (isMobile) {
@@ -967,6 +977,11 @@ class _NavigationSidebar extends StatelessWidget {
                     (tab: 3, icon: AppIcons.people, label: 'Credit'),
                     (tab: 4, icon: AppIcons.wallet, label: 'Till'),
                     (tab: 5, icon: AppIcons.analytics, label: 'Reports'),
+                    (
+                      tab: 9,
+                      icon: Icons.storefront_rounded,
+                      label: 'Storefront',
+                    ),
                   ])
                     if (visibleTabs.contains(item.tab))
                       _NavIcon(
