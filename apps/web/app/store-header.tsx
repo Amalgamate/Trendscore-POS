@@ -1,16 +1,24 @@
 'use client';
 
+import Image from 'next/image';
 import Link from 'next/link';
 import { useStoreCart } from './store-cart';
 
 export function StoreHeader() {
-  const { itemCount, hydrated, catalogState } = useStoreCart();
+  const { itemCount, hydrated } = useStoreCart();
 
   return (
     <header className="store-header">
       <Link className="wordmark" href="/" aria-label="Store home">
-        <span className="wordmark-mark">S</span>
-        <span>ShopSmart <small>{catalogState === 'sample' ? 'PREVIEW' : 'WEB SHOP'}</small></span>
+        <Image
+          className="wordmark-logo"
+          src="/shopsmart-leaf.svg"
+          alt=""
+          width={34}
+          height={34}
+          priority
+        />
+        <span>ShopSmart</span>
       </Link>
       <nav aria-label="Main navigation">
         <Link href="/#products">Browse</Link>

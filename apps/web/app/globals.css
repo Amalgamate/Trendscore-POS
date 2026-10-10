@@ -50,24 +50,10 @@ a {
   letter-spacing: -0.025em;
 }
 
-.wordmark-mark {
+.wordmark-logo {
   width: 34px;
   height: 34px;
-  display: grid;
-  place-items: center;
-  color: #fff;
-  background: var(--teal);
-  border-radius: 9px;
-  font-size: 17px;
-}
-
-.wordmark small {
-  display: block;
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 9px;
-  font-weight: 750;
-  letter-spacing: 0.12em;
+  flex: 0 0 auto;
 }
 
 .store-header nav,
@@ -147,7 +133,12 @@ a {
   gap: 40px;
   padding: 58px clamp(20px, 10vw, 144px);
   color: #fff;
-  background: var(--navy);
+  background-color: var(--navy);
+  background-image:
+    linear-gradient(90deg, rgba(10, 22, 40, 0.96) 0%, rgba(10, 22, 40, 0.86) 42%, rgba(10, 22, 40, 0.48) 100%),
+    url("/cashier_banner.jpg");
+  background-position: center;
+  background-size: cover;
 }
 
 .welcome-copy {
@@ -1157,6 +1148,9 @@ a {
     flex-direction: column;
     gap: 24px;
     padding: 45px 22px 28px;
+    background-image:
+      linear-gradient(180deg, rgba(10, 22, 40, 0.76) 0%, rgba(10, 22, 40, 0.9) 52%, rgba(10, 22, 40, 0.98) 100%),
+      url("/cashier_banner.jpg");
   }
 
   .welcome-aside {
