@@ -169,7 +169,7 @@ class _LoginViewState extends State<LoginView> {
   Future<void> _verifyPin() async {
     final phone = _user.phone.isNotEmpty ? _user.phone : _phoneController.text.trim();
     if (phone.replaceAll(RegExp(r'\D'), '').length < 9 || _pin.length < 4) {
-      setState(() => _errorMsg = 'Select your account and enter your PIN.');
+      setState(() => _errorMsg = (kIsWeb || _users.isEmpty) ? 'Enter your phone number and 4-6 digit PIN.' : 'Select your account and enter your PIN.');
       return;
     }
     setState(() => _isLoading = true);
@@ -779,7 +779,7 @@ class _LoginViewState extends State<LoginView> {
 
               // 3. Supporting Text
               const Text(
-                'Select your account above, then enter your PIN.',
+                kIsWeb || _users.isEmpty ? 'Use the phone number and PIN assigned to your staff account.' : 'Select your account above, then enter your PIN.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12.5,
