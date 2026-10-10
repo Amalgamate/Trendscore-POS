@@ -1879,7 +1879,7 @@ class PosState extends ChangeNotifier {
     PosCustomer? customer,
     Money? cashTendered,
     Money? changeDue,
-  }) {
+  }) async {
     assert(cart.canCheckout, 'Cart must be non-empty and within stock limits');
 
     _receiptCounter++;
