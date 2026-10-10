@@ -28,6 +28,14 @@ void main() {
 
     expect(find.text('Credit'), findsOneWidget);
     expect(find.text('Settings'), findsNothing);
+    final navigationViewport = tester.getRect(
+      find.byKey(const ValueKey('sidebar-navigation-scroll-view')),
+    );
+    expect(
+      navigationViewport.height,
+      greaterThan(600),
+      reason: 'the navigation should use the available sidebar height',
+    );
     for (final label in [
       'POS',
       'Sales',
