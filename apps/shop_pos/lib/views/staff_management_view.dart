@@ -77,8 +77,8 @@ class _StaffManagementViewState extends State<StaffManagementView> {
                     items: PosUserRole.values
                         .where((role) {
                           final actor = widget.state.currentLoggedInUser?.role;
-                          if (role == PosUserRole.systemAdmin) {
-                            return actor == PosUserRole.systemAdmin;
+                          if (role == PosUserRole.superAdmin) {
+                            return actor == PosUserRole.superAdmin;
                           }
                           if (actor == PosUserRole.manager &&
                               role == PosUserRole.owner) {
@@ -186,19 +186,21 @@ class _StaffManagementViewState extends State<StaffManagementView> {
   );
 
   static Color _roleColor(PosUserRole role) => switch (role) {
-    PosUserRole.systemAdmin => const Color(0xFFDC2626),
+    PosUserRole.superAdmin => const Color(0xFFDC2626),
     PosUserRole.owner => const Color(0xFFD97706),
     PosUserRole.manager => const Color(0xFF7C3AED),
     PosUserRole.cashier => const Color(0xFF10B981),
     PosUserRole.stockClerk => const Color(0xFF2563EB),
+    PosUserRole.rider => const Color(0xFFEA580C),
   };
 
   static String _roleLabel(PosUserRole role) => switch (role) {
-    PosUserRole.systemAdmin => 'SYSTEM ADMIN',
+    PosUserRole.superAdmin => 'SUPER ADMIN',
     PosUserRole.owner => 'OWNER',
     PosUserRole.manager => 'MANAGER',
     PosUserRole.cashier => 'CASHIER',
     PosUserRole.stockClerk => 'STOCK CLERK',
+    PosUserRole.rider => 'RIDER',
   };
 
   void _showError(String message) {

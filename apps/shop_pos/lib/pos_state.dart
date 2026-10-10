@@ -398,6 +398,8 @@ class PosCustomer {
     required this.phone,
     required this.creditLimit,
     required this.currentBalance,
+    this.status = 'ACTIVE',
+    this.creditFrozen = false,
     List<CustomerLedgerEntry>? history,
   }) : ledger = history ?? [];
 
@@ -406,6 +408,8 @@ class PosCustomer {
   final String phone;
   final Money creditLimit;
   Money currentBalance;
+  final String status;
+  final bool creditFrozen;
   final List<CustomerLedgerEntry> ledger;
 
   Money get availableCredit =>
@@ -436,6 +440,8 @@ class PosCustomer {
       phone: json['phone'] as String? ?? '',
       creditLimit: Money(((json['creditLimit'] as num) * 100).round()),
       currentBalance: Money(((json['balance'] as num) * 100).round()),
+      status: json['status'] as String? ?? 'ACTIVE',
+      creditFrozen: json['creditFrozen'] as bool? ?? false,
       history: history,
     );
   }
@@ -1866,16 +1872,18 @@ class PosState extends ChangeNotifier {
 
   // --- Sale Checkout ---
 
-  SaleRecord completeSale({
+  Future<SaleRecord> completeSale({
     required SalePaymentMethod method,
     required String paymentReference,
+    required String idempotencyKey,
+    PosCustomer? customer,
     Money? cashTendered,
     Money? changeDue,
   }) {
     assert(cart.canCheckout, 'Cart must be non-empty and within stock limits');
 
     _receiptCounter++;
-    final receiptNum = 'RCP-2026-$_receiptCounter';
+    var receiptNum = 'RCP-2026-$_receiptCounter';
     final now = DateTime.now();
 
     final items = cart.lines
@@ -1891,6 +1899,32 @@ class PosState extends ChangeNotifier {
     final saleSubtotal = cart.subtotal;
     final saleVat = cart.vatAmount;
 
+    final saleCustomer = customer ?? selectedCustomer;
+    if (ApiService.instance.hasToken) {
+      final response = await ApiService.instance.submitSale({
+        'idempotencyKey': idempotencyKey,
+        'clientRef': idempotencyKey,
+        'method': method.apiValue,
+        if (saleCustomer != null) 'customerId': saleCustomer.id,
+        'lines': cart.lines
+            .map((line) => {
+                  'productId': line.productId,
+                  'quantity': line.quantity,
+                })
+            .toList(),
+        if (cashTendered != null)
+          'cashTendered': cashTendered.minorUnits / 100,
+      });
+      if (response == null) {
+        throw PosException(ApiService.instance.lastError ?? 'Could not record the sale.');
+      }
+      final data = response['data'] as Map<String, dynamic>?;
+      if (data == null) {
+        throw PosException('The shop API returned an invalid sale response.');
+      }
+      receiptNum = data['receiptNumber'] as String? ?? receiptNum;
+    }
+
     // 1. Deduct shelf stock
     for (final line in cart.lines) {
       final product = products.firstWhere((p) => p.id == line.productId);
@@ -1898,10 +1932,10 @@ class PosState extends ChangeNotifier {
     }
 
     // 2. If Credit, append to Customer Credit Ledger
-    if (method == SalePaymentMethod.credit && selectedCustomer != null) {
-      final newBalance = selectedCustomer!.currentBalance + saleSubtotal;
-      selectedCustomer!.currentBalance = newBalance;
-      selectedCustomer!.ledger.insert(
+    if (method == SalePaymentMethod.credit && saleCustomer != null) {
+      final newBalance = saleCustomer.currentBalance + saleSubtotal;
+      saleCustomer.currentBalance = newBalance;
+      saleCustomer.ledger.insert(
         0,
         CustomerLedgerEntry(
           id: 'led_sale_${now.millisecondsSinceEpoch}',
@@ -1940,7 +1974,7 @@ class PosState extends ChangeNotifier {
       vatAmount: saleVat,
       paymentMethod: method,
       paymentReference: paymentReference,
-      customer: selectedCustomer,
+      customer: saleCustomer,
       cashTendered: cashTendered,
       changeDue: changeDue,
     );

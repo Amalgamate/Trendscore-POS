@@ -25,7 +25,7 @@ class _PurchaseOrdersViewState extends State<PurchaseOrdersView> {
     return ApiService.instance.hasToken &&
         (role == PosUserRole.owner ||
             role == PosUserRole.manager ||
-            role == PosUserRole.systemAdmin);
+            role == PosUserRole.superAdmin);
   }
 
   @override
