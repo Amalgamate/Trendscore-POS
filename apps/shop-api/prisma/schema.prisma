@@ -303,6 +303,7 @@ model Customer {
   /// Denormalised running total. CustomerLedger is authoritative; this is
   /// a cache rebuilt from the ledger whenever the two disagree.
   balance     Decimal  @default(0) @db.Decimal(14, 2)
+  creditFrozen Boolean @default(false)
   status      String   @default("ACTIVE")
   notes       String?
   createdAt   DateTime @default(now())
@@ -312,10 +313,27 @@ model Customer {
   sales     Sale[]
   ledger    CustomerLedger[]
   payments  CustomerPayment[]
+  documents CustomerDocument[]
 
   @@index([businessId, status])
   @@index([phone])
   @@map("customers")
+}
+
+model CustomerDocument {
+  id          String   @id @default(uuid()) @db.Uuid
+  customerId  String   @db.Uuid
+  fileName    String
+  contentType String
+  size        Int
+  data        Bytes
+  createdAt   DateTime @default(now())
+  createdById String?  @db.Uuid
+
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+
+  @@index([customerId, createdAt])
+  @@map("customer_documents")
 }
 
 /// APPEND-ONLY. Debits increase what the customer owes, credits reduce it.
@@ -371,13 +389,14 @@ model Supplier {
   email      String?
   address    String?
   balance    Decimal  @default(0) @db.Decimal(14, 2)
+  active     Boolean  @default(true)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
   business  Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
   purchases Purchase[]
 
-  @@index([businessId])
+  @@index([businessId, active])
   @@map("suppliers")
 }
 
