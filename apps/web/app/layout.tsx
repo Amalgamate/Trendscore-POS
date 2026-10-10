@@ -6,9 +6,9 @@ import { WhatsAppButton } from './whatsapp-button';
 import { StoreCartProvider } from './store-cart';
 
 export const metadata: Metadata = {
-  title: 'ShopSmart Storefront Preview',
+  title: 'Gutagala Web Shop | ShopSmart',
   description:
-    'Explore a sample ShopSmart storefront. Sample products and prices are illustrative; ordering is not enabled.',
+    'Browse products published by Gutagala. Online ordering is not enabled yet.',
   icons: {
     icon: '/icon.svg',
     apple: '/apple-icon.png',

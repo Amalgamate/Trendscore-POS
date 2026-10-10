@@ -3,10 +3,12 @@ set -euo pipefail
 
 POS_IMAGE="${1:?POS image reference required}"
 API_IMAGE="${2:?shop-api image reference required}"
-DOMAIN="${3:?domain required}"
-EMAIL="${4:?certificate email required}"
-DEPLOY_ID="${5:?deploy id required}"
-ADMIN_CONFIG="${6:?temporary super-admin credential file required}"
+WEB_IMAGE="${3:?storefront image reference required}"
+DOMAIN="${4:?POS domain required}"
+SHOP_DOMAIN="${5:?storefront domain required}"
+EMAIL="${6:?certificate email required}"
+DEPLOY_ID="${7:?deploy id required}"
+ADMIN_CONFIG="${8:?temporary super-admin credential file required}"
 DOCKER_CONFIG="${DOCKER_CONFIG:?temporary Docker config required}"
 BASE_DIR=/opt/retailpos-live
 NETWORK=retailpos-live-net
@@ -14,7 +16,10 @@ POSTGRES=retailpos-live-postgres
 
 [[ "$POS_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-zA-Z0-9._-]+$ ]] || { echo "Invalid POS image reference" >&2; exit 2; }
 [[ "$API_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-zA-Z0-9._-]+$ ]] || { echo "Invalid API image reference" >&2; exit 2; }
+[[ "$WEB_IMAGE" =~ ^ghcr\.io/[a-z0-9._/-]+:[a-zA-Z0-9._-]+$ ]] || { echo "Invalid storefront image reference" >&2; exit 2; }
 [[ "$DOMAIN" =~ ^[a-z0-9.-]+$ ]] || { echo "Invalid domain" >&2; exit 2; }
+[[ "$SHOP_DOMAIN" =~ ^[a-z0-9.-]+$ ]] || { echo "Invalid storefront domain" >&2; exit 2; }
+[[ "$DOMAIN" != "$SHOP_DOMAIN" ]] || { echo "POS and storefront domains must be different" >&2; exit 2; }
 [[ "$EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]] || { echo "Invalid certificate email" >&2; exit 2; }
 [[ "$DEPLOY_ID" =~ ^[a-zA-Z0-9_-]+$ ]] || { echo "Invalid deploy id" >&2; exit 2; }
 [[ -r "$ADMIN_CONFIG" ]] || { echo "Temporary super-admin credential file is missing" >&2; exit 2; }
@@ -85,6 +90,7 @@ chmod 400 "$ADMIN_CONFIG"
 rm -f "$ADMIN_CONFIG"
 
 "${DOCKER[@]}" pull "$POS_IMAGE"
+"${DOCKER[@]}" pull "$WEB_IMAGE"
 USED="$( { ss -ltnH 2>/dev/null | awk '{n=split($4,a,":"); print a[n]}'; "${DOCKER[@]}" ps -aq | xargs -r "${DOCKER[@]}" inspect --format '{{range $p, $bindings := .HostConfig.PortBindings}}{{range $bindings}}{{.HostPort}}{{"\n"}}{{end}}{{end}}' 2>/dev/null; } | sort -u )"
 find_port() {
   local start="$1" end="$2" candidate
@@ -99,9 +105,11 @@ find_port() {
 }
 API_PORT="$(find_port 5100 5599)" || { echo "No free shop API port in 5100-5599" >&2; exit 1; }
 POS_PORT="$(find_port 4500 4999)" || { echo "No free POS port in 4500-4999" >&2; exit 1; }
+WEB_PORT="$(find_port 5600 5999)" || { echo "No free storefront port in 5600-5999" >&2; exit 1; }
 
 API_NAME="retailpos-api-${DEPLOY_ID}"
 POS_NAME="retailpos-${DEPLOY_ID}"
+WEB_NAME="retailpos-web-${DEPLOY_ID}"
 "${DOCKER[@]}" run -d --name "$API_NAME" --restart unless-stopped \
   --label retailos.app=shop-api --label "retailos.domain=$DOMAIN" \
   --network "$NETWORK" -p "127.0.0.1:${API_PORT}:4000" \
@@ -111,10 +119,15 @@ POS_NAME="retailpos-${DEPLOY_ID}"
 "${DOCKER[@]}" run -d --name "$POS_NAME" --restart unless-stopped \
   --label retailos.app=shop-pos --label "retailos.domain=$DOMAIN" \
   -p "127.0.0.1:${POS_PORT}:8080" "$POS_IMAGE" >/dev/null
+"${DOCKER[@]}" run -d --name "$WEB_NAME" --restart unless-stopped \
+  --label retailos.app=shop-web --label "retailos.domain=$SHOP_DOMAIN" \
+  --network "$NETWORK" -p "127.0.0.1:${WEB_PORT}:3000" "$WEB_IMAGE" >/dev/null
 
 healthy=false
 for attempt in $(seq 1 30); do
-  if curl -fsS "http://127.0.0.1:${API_PORT}/health" >/dev/null && curl -fsS "http://127.0.0.1:${POS_PORT}/" >/dev/null; then
+  if curl -fsS "http://127.0.0.1:${API_PORT}/health" >/dev/null \
+    && curl -fsS "http://127.0.0.1:${POS_PORT}/" >/dev/null \
+    && curl -fsS "http://127.0.0.1:${WEB_PORT}/" >/dev/null; then
     healthy=true
     break
   fi
@@ -123,8 +136,9 @@ done
 if [[ "$healthy" != true ]]; then
   "${DOCKER[@]}" logs "$API_NAME" || true
   "${DOCKER[@]}" logs "$POS_NAME" || true
-  "${DOCKER[@]}" rm -f "$API_NAME" "$POS_NAME" || true
-  echo "POS or shop API container did not become healthy" >&2
+  "${DOCKER[@]}" logs "$WEB_NAME" || true
+  "${DOCKER[@]}" rm -f "$API_NAME" "$POS_NAME" "$WEB_NAME" || true
+  echo "POS, shop API, or storefront container did not become healthy" >&2
   exit 1
 fi
 
@@ -164,6 +178,27 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 }
+server {
+    listen 80;
+    listen [::]:80;
+    server_name $SHOP_DOMAIN www.$SHOP_DOMAIN;
+    location ^~ /api/ {
+        proxy_pass http://127.0.0.1:$API_PORT/;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+    location / {
+        proxy_pass http://127.0.0.1:$WEB_PORT;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
 EOF
 sudo ln -sfn "$SITE" "/etc/nginx/sites-enabled/$DOMAIN"
 sudo nginx -t
@@ -174,8 +209,14 @@ if ! command -v certbot >/dev/null 2>&1; then
   sudo apt-get install -y certbot python3-certbot-nginx
 fi
 sudo certbot --nginx --non-interactive --agree-tos --email "$EMAIL" --redirect -d "$DOMAIN"
+sudo certbot --nginx --non-interactive --agree-tos --email "$EMAIL" --redirect \
+  -d "$SHOP_DOMAIN" -d "www.$SHOP_DOMAIN"
 curl -fsSI --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/"
 curl -fsS --resolve "$DOMAIN:443:127.0.0.1" "https://$DOMAIN/api/health" >/dev/null
+for host in "$SHOP_DOMAIN" "www.$SHOP_DOMAIN"; do
+  curl -fsSI --resolve "$host:443:127.0.0.1" "https://$host/"
+  curl -fsS --resolve "$host:443:127.0.0.1" "https://$host/api/products/storefront" >/dev/null
+done
 
 # Retain the previous release until both services and HTTPS are verified.
 while IFS= read -r previous; do
@@ -184,5 +225,8 @@ done < <("${DOCKER[@]}" ps -a --filter "label=retailos.app=shop-pos" --filter "l
 while IFS= read -r previous; do
   [[ -z "$previous" || "$previous" == "$API_NAME" ]] || "${DOCKER[@]}" rm -f "$previous"
 done < <("${DOCKER[@]}" ps -a --filter "label=retailos.app=shop-api" --filter "label=retailos.domain=$DOMAIN" --format '{{.Names}}')
+while IFS= read -r previous; do
+  [[ -z "$previous" || "$previous" == "$WEB_NAME" ]] || "${DOCKER[@]}" rm -f "$previous"
+done < <("${DOCKER[@]}" ps -a --filter "label=retailos.app=shop-web" --filter "label=retailos.domain=$SHOP_DOMAIN" --format '{{.Names}}')
 
-echo "POS and shop API deployed: https://$DOMAIN (POS 127.0.0.1:$POS_PORT, API 127.0.0.1:$API_PORT)"
+echo "POS and shop API deployed: https://$DOMAIN; storefront deployed: https://$SHOP_DOMAIN and https://www.$SHOP_DOMAIN"

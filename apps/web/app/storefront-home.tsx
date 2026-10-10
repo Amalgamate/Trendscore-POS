@@ -1,52 +1,78 @@
 'use client';
 
 import { useMemo, useState } from 'react';
-import { PREVIEW_PRODUCTS, STORE_CATEGORIES, formatPreviewPrice } from './store-data';
+import { formatStorePrice } from './store-data';
 import { useStoreCart } from './store-cart';
 
 export function StorefrontHome() {
-  const [category, setCategory] = useState<(typeof STORE_CATEGORIES)[number]>('All');
+  const [category, setCategory] = useState('All');
   const [query, setQuery] = useState('');
   const [addedProduct, setAddedProduct] = useState<string | null>(null);
-  const { add } = useStoreCart();
+  const { add, products: catalogProducts, catalogState } = useStoreCart();
+  const categories = useMemo(
+    () => ['All', ...new Set(catalogProducts.map((product) => product.category))],
+    [catalogProducts],
+  );
 
-  const products = useMemo(() => {
+  const filteredProducts = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    return PREVIEW_PRODUCTS.filter((product) => {
+    return catalogProducts.filter((product) => {
       const matchesCategory = category === 'All' || product.category === category;
       const matchesQuery =
         !normalizedQuery ||
-        `${product.name} ${product.category} ${product.description}`
+        `${product.name} ${product.variantLabel ?? ''} ${product.category} ${product.description}`
           .toLowerCase()
           .includes(normalizedQuery);
       return matchesCategory && matchesQuery;
     });
-  }, [category, query]);
+  }, [category, query, catalogProducts]);
 
   return (
     <main>
-      <div className="preview-ribbon" role="status">
-        <span aria-hidden="true">PREVIEW</span>
-        Sample products and prices are illustrative only — this store is not
-        taking orders.
-      </div>
+      {catalogState === 'sample' && (
+        <div className="preview-ribbon" role="status">
+          <span aria-hidden="true">PREVIEW</span>
+          Live catalog is not connected. These sample products and prices are
+          illustrative only.
+        </div>
+      )}
+      {catalogState === 'error' && (
+        <div className="preview-ribbon" role="alert">
+          <span aria-hidden="true">NOTICE</span>
+          The shop catalog is temporarily unavailable. Please try again later.
+        </div>
+      )}
 
       <section className="welcome-band" aria-labelledby="welcome-title">
       <div className="welcome-copy">
-        <h1 id="welcome-title">A little more room to shop.</h1>
+        <h1 id="welcome-title">Shop the Gutagala catalog.</h1>
           <p>
-            Browse a sample storefront and try the bag. Real products, stock,
-            and checkout will connect to the shop when setup is complete.
+            Explore products selected by the shop. Availability is checked
+            against the live catalog; online ordering is not enabled yet.
           </p>
           <a className="button button-primary" href="#products">
-            Browse the preview
+            Browse products
           </a>
         </div>
         <div className="welcome-aside" aria-label="Preview status">
-          <span className="status-dot" />
+          <span
+            className={`status-dot${catalogState === 'live' ? ' is-live' : ''}${catalogState === 'error' ? ' is-error' : ''}`}
+          />
           <div>
-            <strong>Preview mode</strong>
-            <p>Sample items only. No orders or payments are submitted.</p>
+            <strong>
+              {catalogState === 'live'
+                ? 'Published catalog'
+                : catalogState === 'error'
+                  ? 'Catalog unavailable'
+                  : 'Catalog preview'}
+            </strong>
+            <p>
+              {catalogState === 'live'
+                ? `${catalogProducts.length} published ${catalogProducts.length === 1 ? 'product' : 'products'}`
+                : catalogState === 'error'
+                  ? 'Published products could not be loaded. No sample products are being shown.'
+                  : 'Showing illustrative products; no orders or payments are submitted.'}
+            </p>
           </div>
         </div>
       </section>
@@ -54,8 +80,8 @@ export function StorefrontHome() {
       <section className="catalog-section" id="products" aria-labelledby="catalog-title">
         <div className="catalog-intro">
           <div>
-            <h2 id="catalog-title">A sample of what a shop can offer</h2>
-            <p>These example products demonstrate how the online catalog can work.</p>
+            <h2 id="catalog-title">Products selected for the web shop</h2>
+            <p>Product availability and prices come from the shop catalog.</p>
           </div>
           <label className="search-field">
             <span className="search-icon" aria-hidden="true">
@@ -64,19 +90,19 @@ export function StorefrontHome() {
                 <path d="m16 16 4.2 4.2" />
               </svg>
             </span>
-            <span className="visually-hidden">Search sample products</span>
+            <span className="visually-hidden">Search products</span>
             <input
               type="search"
               value={query}
               onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search the preview"
+              placeholder="Search products"
             />
           </label>
         </div>
 
         <div className="catalog-toolbar">
-          <div className="category-list" aria-label="Filter sample products">
-            {STORE_CATEGORIES.map((item) => (
+          <div className="category-list" aria-label="Filter products">
+            {categories.map((item) => (
               <button
                 className={`category-chip${category === item ? ' is-active' : ''}`}
                 key={item}
@@ -89,43 +115,61 @@ export function StorefrontHome() {
             ))}
           </div>
           <span className="result-count">
-            {products.length} sample {products.length === 1 ? 'item' : 'items'}
+            {filteredProducts.length} {filteredProducts.length === 1 ? 'item' : 'items'}
           </span>
         </div>
 
-        {products.length ? (
+        {catalogState === 'loading' ? (
+          <div className="catalog-empty" role="status">Loading the shop catalog…</div>
+        ) : catalogState === 'error' ? (
+          <div className="catalog-empty" role="alert">
+            <h3>Products are temporarily unavailable</h3>
+            <p>Please try again later.</p>
+          </div>
+        ) : filteredProducts.length ? (
           <div className="product-grid">
-            {products.map((product) => (
+            {filteredProducts.map((product) => (
               <article className="product-item" key={product.id}>
                 <div className={`product-art art-${product.color}`} aria-hidden="true">
-                  <span className="art-orbit" />
-                  <span className="art-object">{product.mark.slice(0, 1)}</span>
-                  <span className="art-label">{product.mark}</span>
-                  <span className="sample-stamp">SAMPLE</span>
+                  {product.imageUrl ? (
+                    <img src={product.imageUrl} alt="" />
+                  ) : (
+                    <>
+                      <span className="art-orbit" />
+                      <span className="art-object">{product.mark.slice(0, 1)}</span>
+                      <span className="art-label">{product.mark}</span>
+                      {product.preview && <span className="sample-stamp">SAMPLE</span>}
+                    </>
+                  )}
                 </div>
                 <div className="product-copy">
                   <div className="product-meta">
                     <span>{product.category}</span>
-                    <span>Preview item</span>
+                    <span>{product.available ? 'Available' : 'Out of stock'}</span>
                   </div>
-                  <h3>{product.name}</h3>
-                  <p>{product.description}</p>
+                  <h3>{product.name}{product.variantLabel ? ` · ${product.variantLabel}` : ''}</h3>
+                  <p>{product.description || ' '}</p>
                   <div className="product-buy-row">
                     <div>
-                      <span className="price-caption">Illustrative price</span>
-                      <strong>{formatPreviewPrice(product.previewPrice)}</strong>
+                      <span className="price-caption">Price</span>
+                      <strong>{formatStorePrice(product.salePrice)}</strong>
                     </div>
                     <button
                       className="add-button"
                       type="button"
+                      disabled={!product.available}
                       onClick={() => {
                         add(product.id);
                         setAddedProduct(product.id);
                         window.setTimeout(() => setAddedProduct(null), 1600);
                       }}
-                      aria-label={`Add sample ${product.name} to preview bag`}
+                      aria-label={`Add ${product.name} to bag`}
                     >
-                      {addedProduct === product.id ? 'Added' : 'Add to bag'}
+                      {!product.available
+                        ? 'Unavailable'
+                        : addedProduct === product.id
+                          ? 'Added'
+                          : 'Add to bag'}
                     </button>
                   </div>
                 </div>
@@ -134,8 +178,8 @@ export function StorefrontHome() {
           </div>
         ) : (
           <div className="catalog-empty" role="status">
-            <h3>No sample items match that search</h3>
-            <p>Try another name or choose a different category.</p>
+            <h3>{catalogProducts.length ? 'No products match that search' : 'No products are published yet'}</h3>
+            <p>{catalogProducts.length ? 'Try another name or choose a different category.' : 'The shop has not published web-shop products yet.'}</p>
             <button
               className="button button-secondary"
               type="button"
@@ -156,8 +200,8 @@ export function StorefrontHome() {
           <h2 id="next-step-title">Your online shop starts with your POS.</h2>
         </div>
         <p>
-          Once storefront publishing is connected, the shop&apos;s own product
-          details and availability can replace these sample items.
+          This catalog comes from the shop&apos;s POS. Online orders remain
+          unavailable until delivery and verified payment checkout are ready.
         </p>
       </section>
     </main>

@@ -195,6 +195,35 @@ class Cart {
 
   void remove(String productId) => _lines.remove(productId);
 
+  /// Rebinds basket lines to the current catalogue after a local product is
+  /// synchronized and receives its server ID. The replacement line supplies
+  /// the authoritative name, price, and stock while preserving quantity.
+  void remapProducts(Map<String, CartLine> replacements) {
+    if (replacements.isEmpty) return;
+
+    final remapped = <String, CartLine>{};
+    for (final line in _lines.values) {
+      final replacement = replacements[line.productId];
+      final product = replacement ?? line;
+      final existing = remapped[product.productId];
+      if (existing == null) {
+        remapped[product.productId] = CartLine(
+          productId: product.productId,
+          name: product.name,
+          unitPrice: product.unitPrice,
+          stock: product.stock,
+          quantity: line.quantity,
+        );
+      } else {
+        existing.quantity += line.quantity;
+      }
+    }
+
+    _lines
+      ..clear()
+      ..addAll(remapped);
+  }
+
   /// True when there is something to charge and every line is within stock.
   ///
   /// Checked before the payment prompt rather than after, so an oversell is
@@ -259,4 +288,3 @@ class Cart {
     return true;
   }
 }
-
