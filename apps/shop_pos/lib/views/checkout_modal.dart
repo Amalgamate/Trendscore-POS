@@ -8,16 +8,25 @@ import 'receipt_dialog.dart';
 
 /// Modal bottom sheet or dialog for payment execution.
 class CheckoutModal extends StatefulWidget {
-  const CheckoutModal({super.key, required this.state, required this.onSaleCompleted});
+  const CheckoutModal({
+    super.key,
+    required this.state,
+    required this.onSaleCompleted,
+  });
 
   final PosState state;
   final VoidCallback onSaleCompleted;
 
-  static void show(BuildContext context, PosState state, {required VoidCallback onSaleCompleted}) {
+  static void show(
+    BuildContext context,
+    PosState state, {
+    required VoidCallback onSaleCompleted,
+  }) {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => CheckoutModal(state: state, onSaleCompleted: onSaleCompleted),
+      builder: (context) =>
+          CheckoutModal(state: state, onSaleCompleted: onSaleCompleted),
     );
   }
 
@@ -40,6 +49,9 @@ class _CheckoutModalState extends State<CheckoutModal> {
 
   // Credit State
   PosCustomer? _selectedCreditCustomer;
+  bool _saleSubmitting = false;
+  final int _saleKeySeed = DateTime.now().microsecondsSinceEpoch;
+  final Map<String, String> _saleIdempotencyKeys = {};
 
   @override
   void initState() {
@@ -47,7 +59,8 @@ class _CheckoutModalState extends State<CheckoutModal> {
     _selectedCreditCustomer = widget.state.selectedCustomer;
     // Set default cash tendered to exact amount
     _cashTenderedMinor = widget.state.cart.subtotal.minorUnits;
-    _cashController.text = (widget.state.cart.subtotal.minorUnits ~/ 100).toString();
+    _cashController.text = (widget.state.cart.subtotal.minorUnits ~/ 100)
+        .toString();
   }
 
   @override
@@ -61,18 +74,21 @@ class _CheckoutModalState extends State<CheckoutModal> {
   void _executeMpesaPush() {
     setState(() {
       _mpesaLoading = true;
-      _mpesaStatusText = 'Sending STK Push prompt to ${_phoneController.text}...';
+      _mpesaStatusText =
+          'Sending STK Push prompt to ${_phoneController.text}...';
     });
 
     _mpesaTimer = Timer(const Duration(milliseconds: 1400), () {
       if (!mounted) return;
       setState(() {
-        _mpesaStatusText = 'PIN prompt displayed on phone. Awaiting customer confirmation...';
+        _mpesaStatusText =
+            'PIN prompt displayed on phone. Awaiting customer confirmation...';
       });
 
       _mpesaTimer = Timer(const Duration(milliseconds: 1600), () {
         if (!mounted) return;
-        final refCode = 'QDH${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
+        final refCode =
+            'QDH${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
         setState(() {
           _mpesaLoading = false;
           _mpesaStatusText = 'Payment Received! Receipt: $refCode';
@@ -90,7 +106,9 @@ class _CheckoutModalState extends State<CheckoutModal> {
     final subtotal = widget.state.cart.subtotal;
     if (_cashTenderedMinor < subtotal.minorUnits) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Cash tendered cannot be less than sale total!')),
+        const SnackBar(
+          content: Text('Cash tendered cannot be less than sale total!'),
+        ),
       );
       return;
     }
@@ -108,16 +126,33 @@ class _CheckoutModalState extends State<CheckoutModal> {
     final cust = _selectedCreditCustomer;
     if (cust == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a customer for credit sale!')),
+        const SnackBar(
+          content: Text('Please select a customer for credit sale!'),
+        ),
       );
       return;
     }
 
     final subtotal = widget.state.cart.subtotal;
-    if (cust.currentBalance.minorUnits + subtotal.minorUnits > cust.creditLimit.minorUnits) {
+    if (cust.status != 'ACTIVE' || cust.creditFrozen) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Credit limit exceeded! Customer available credit is KES ${cust.availableCredit.formatted}'),
+          content: Text(
+            cust.creditFrozen
+                ? 'Credit is frozen for ${cust.name}. Choose another payment method.'
+                : 'This customer credit account is not active.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (cust.currentBalance.minorUnits + subtotal.minorUnits >
+        cust.creditLimit.minorUnits) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Credit limit exceeded! Customer available credit is KES ${cust.availableCredit.formatted}',
+          ),
         ),
       );
       return;
@@ -134,16 +169,55 @@ class _CheckoutModalState extends State<CheckoutModal> {
     required String reference,
     Money? cashTendered,
     Money? changeDue,
-  }) {
-    final sale = widget.state.completeSale(
-      method: method,
-      paymentReference: reference,
-      cashTendered: cashTendered,
-      changeDue: changeDue,
+  }) async {
+    if (_saleSubmitting) return;
+    final customer = method == SalePaymentMethod.credit
+        ? _selectedCreditCustomer
+        : null;
+    final requestKey = [
+      method.apiValue,
+      customer?.id ?? '',
+      ...widget.state.cart.lines.map(
+        (line) => '${line.productId}:${line.quantity}',
+      ),
+    ].join('|');
+    final idempotencyKey = _saleIdempotencyKeys.putIfAbsent(
+      requestKey,
+      () =>
+          'pos-$_saleKeySeed-${identityHashCode(this)}-${_saleIdempotencyKeys.length + 1}',
     );
 
-    Navigator.of(context).pop(); // close payment modal
-    ReceiptDialog.show(context, sale, onNewSale: widget.onSaleCompleted, state: widget.state);
+    setState(() => _saleSubmitting = true);
+    try {
+      final sale = await widget.state.completeSale(
+        method: method,
+        paymentReference: reference,
+        idempotencyKey: idempotencyKey,
+        customer: customer,
+        cashTendered: cashTendered,
+        changeDue: changeDue,
+      );
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ReceiptDialog.show(
+        context,
+        sale,
+        onNewSale: widget.onSaleCompleted,
+        state: widget.state,
+      );
+    } on PosException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Sale was not recorded: $error')));
+    } finally {
+      if (mounted) setState(() => _saleSubmitting = false);
+    }
   }
 
   @override
@@ -166,22 +240,38 @@ class _CheckoutModalState extends State<CheckoutModal> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Complete Sale', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    const Text(
+                      'Complete Sale',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     Text(
                       '${widget.state.cart.itemCount} items · VAT Included (16%)',
-                      style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.text_tertiary,
+                      ),
                     ),
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.bg_subtle,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     'KES ${subtotal.formatted}',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.accent_primary),
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.accent_primary,
+                    ),
                   ),
                 ),
               ],
@@ -193,29 +283,39 @@ class _CheckoutModalState extends State<CheckoutModal> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                _MethodTab(
-                  label: 'M-Pesa Express',
-                  icon: Icons.phone_android,
-                  activeColor: const Color(0xFF16A34A),
-                  isSelected: _method == SalePaymentMethod.mpesa,
-                  onTap: () => setState(() => _method = SalePaymentMethod.mpesa),
-                ),
-                const SizedBox(width: 8),
-                _MethodTab(
-                  label: 'Cash Tender',
-                  icon: Icons.payments_outlined,
-                  activeColor: AppColors.accent_primary,
-                  isSelected: _method == SalePaymentMethod.cash,
-                  onTap: () => setState(() => _method = SalePaymentMethod.cash),
-                ),
-                const SizedBox(width: 8),
-                _MethodTab(
-                  label: 'Customer Credit',
-                  icon: Icons.account_balance_outlined,
-                  activeColor: const Color(0xFFD97706),
-                  isSelected: _method == SalePaymentMethod.credit,
-                  onTap: () => setState(() => _method = SalePaymentMethod.credit),
-                ),
+                  _MethodTab(
+                    label: 'M-Pesa Express',
+                    icon: Icons.phone_android,
+                    activeColor: const Color(0xFF16A34A),
+                    isSelected: _method == SalePaymentMethod.mpesa,
+                    onTap: _saleSubmitting
+                        ? () {}
+                        : () =>
+                              setState(() => _method = SalePaymentMethod.mpesa),
+                  ),
+                  const SizedBox(width: 8),
+                  _MethodTab(
+                    label: 'Cash Tender',
+                    icon: Icons.payments_outlined,
+                    activeColor: AppColors.accent_primary,
+                    isSelected: _method == SalePaymentMethod.cash,
+                    onTap: _saleSubmitting
+                        ? () {}
+                        : () =>
+                              setState(() => _method = SalePaymentMethod.cash),
+                  ),
+                  const SizedBox(width: 8),
+                  _MethodTab(
+                    label: 'Customer Credit',
+                    icon: Icons.account_balance_outlined,
+                    activeColor: const Color(0xFFD97706),
+                    isSelected: _method == SalePaymentMethod.credit,
+                    onTap: _saleSubmitting
+                        ? () {}
+                        : () => setState(
+                            () => _method = SalePaymentMethod.credit,
+                          ),
+                  ),
                 ],
               ),
             ),
@@ -233,10 +333,14 @@ class _CheckoutModalState extends State<CheckoutModal> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _mpesaLoading ? null : () => Navigator.of(context).pop(),
+                    onPressed: _mpesaLoading
+                        ? null
+                        : () => Navigator.of(context).pop(),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
                     ),
                     child: const Text('Cancel & Return to Cart'),
                   ),
@@ -266,18 +370,28 @@ class _CheckoutModalState extends State<CheckoutModal> {
                 width: 32,
                 height: 32,
                 alignment: Alignment.center,
-                decoration: const BoxDecoration(color: Color(0xFF16A34A), shape: BoxShape.circle),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF16A34A),
+                  shape: BoxShape.circle,
+                ),
                 child: const Icon(Icons.check, color: Colors.white, size: 18),
               ),
               const SizedBox(width: 10),
               const Text(
                 'Lipa na M-Pesa STK Push',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF166534)),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Color(0xFF166534),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 14),
-          const Text('Customer Phone Number (Safaricom):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+          const Text(
+            'Customer Phone Number (Safaricom):',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          ),
           const SizedBox(height: 6),
           TextField(
             controller: _phoneController,
@@ -287,28 +401,52 @@ class _CheckoutModalState extends State<CheckoutModal> {
               hintText: '07XX XXX XXX or 2547XX...',
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF86EFAC))),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+                borderSide: const BorderSide(color: Color(0xFF86EFAC)),
+              ),
             ),
           ),
           const SizedBox(height: 14),
           if (_mpesaLoading) ...[
             Row(
               children: [
-                const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF16A34A))),
+                const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: Color(0xFF16A34A),
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: Text(_mpesaStatusText, style: const TextStyle(fontSize: 12, color: Color(0xFF166534), fontWeight: FontWeight.w500))),
+                Expanded(
+                  child: Text(
+                    _mpesaStatusText,
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: Color(0xFF166534),
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
               ],
             ),
           ] else ...[
             FilledButton.icon(
               icon: const Icon(Icons.send_outlined, size: 18),
               label: Text('Send STK Prompt for KES ${subtotal.formatted}'),
-              onPressed: _executeMpesaPush,
+              onPressed: _saleSubmitting ? null : _executeMpesaPush,
               style: FilledButton.styleFrom(
                 backgroundColor: const Color(0xFF16A34A),
                 padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
               ),
             ),
           ],
@@ -318,7 +456,9 @@ class _CheckoutModalState extends State<CheckoutModal> {
   }
 
   Widget _buildCashTab(Money subtotal) {
-    final changeDue = _cashTenderedMinor >= subtotal.minorUnits ? Money(_cashTenderedMinor - subtotal.minorUnits) : const Money(0);
+    final changeDue = _cashTenderedMinor >= subtotal.minorUnits
+        ? Money(_cashTenderedMinor - subtotal.minorUnits)
+        : const Money(0);
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -333,8 +473,17 @@ class _CheckoutModalState extends State<CheckoutModal> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Tendered Cash (KES):', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-              Text('Total Due: KES ${subtotal.formatted}', style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
+              const Text(
+                'Tendered Cash (KES):',
+                style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+              ),
+              Text(
+                'Total Due: KES ${subtotal.formatted}',
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: AppColors.text_tertiary,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -349,8 +498,13 @@ class _CheckoutModalState extends State<CheckoutModal> {
               prefixText: 'KES ',
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
           ),
           const SizedBox(height: 12),
@@ -364,7 +518,8 @@ class _CheckoutModalState extends State<CheckoutModal> {
                 onPressed: () {
                   setState(() {
                     _cashTenderedMinor = subtotal.minorUnits;
-                    _cashController.text = ((subtotal.minorUnits + 99) ~/ 100).toString();
+                    _cashController.text = ((subtotal.minorUnits + 99) ~/ 100)
+                        .toString();
                   });
                 },
               ),
@@ -374,7 +529,8 @@ class _CheckoutModalState extends State<CheckoutModal> {
                   onPressed: () {
                     setState(() {
                       _cashTenderedMinor += denom * 100;
-                      _cashController.text = (_cashTenderedMinor ~/ 100).toString();
+                      _cashController.text = (_cashTenderedMinor ~/ 100)
+                          .toString();
                     });
                   },
                 );
@@ -387,21 +543,33 @@ class _CheckoutModalState extends State<CheckoutModal> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const Text('Change Due:', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+              const Text(
+                'Change Due:',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
               Text(
                 'KES ${changeDue.formatted}',
-                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.status_success),
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: AppColors.status_success,
+                ),
               ),
             ],
           ),
           const SizedBox(height: 14),
 
           FilledButton(
-            onPressed: _cashTenderedMinor >= subtotal.minorUnits ? _executeCashSale : null,
+            onPressed:
+                !_saleSubmitting && _cashTenderedMinor >= subtotal.minorUnits
+                ? _executeCashSale
+                : null,
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.accent_primary,
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
             child: const Text('Confirm Cash Payment'),
           ),
@@ -427,26 +595,45 @@ class _CheckoutModalState extends State<CheckoutModal> {
                 width: 32,
                 height: 32,
                 alignment: Alignment.center,
-                decoration: const BoxDecoration(color: Color(0xFFD97706), shape: BoxShape.circle),
-                child: const Icon(Icons.book_outlined, color: Colors.white, size: 18),
+                decoration: const BoxDecoration(
+                  color: Color(0xFFD97706),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.book_outlined,
+                  color: Colors.white,
+                  size: 18,
+                ),
               ),
               const SizedBox(width: 10),
               const Text(
                 'Post to Customer Credit Ledger',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF92400E)),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 14,
+                  color: Color(0xFF92400E),
+                ),
               ),
             ],
           ),
           const SizedBox(height: 14),
-          const Text('Select Customer Account:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
+          const Text(
+            'Select Customer Account:',
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+          ),
           const SizedBox(height: 6),
           DropdownButtonFormField<PosCustomer>(
             initialValue: _selectedCreditCustomer,
             decoration: InputDecoration(
               filled: true,
               fillColor: Colors.white,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 10,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
             items: widget.state.customers.map((c) {
               return DropdownMenuItem(
@@ -460,16 +647,28 @@ class _CheckoutModalState extends State<CheckoutModal> {
             const SizedBox(height: 14),
             Container(
               padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(8)),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+              ),
               child: Column(
                 children: [
-                  _CreditRow(label: 'Current Balance Owed:', value: 'KES ${_selectedCreditCustomer!.currentBalance.formatted}'),
+                  _CreditRow(
+                    label: 'Current Balance Owed:',
+                    value:
+                        'KES ${_selectedCreditCustomer!.currentBalance.formatted}',
+                  ),
                   const SizedBox(height: 4),
-                  _CreditRow(label: 'Available Credit Limit:', value: 'KES ${_selectedCreditCustomer!.availableCredit.formatted}'),
+                  _CreditRow(
+                    label: 'Available Credit Limit:',
+                    value:
+                        'KES ${_selectedCreditCustomer!.availableCredit.formatted}',
+                  ),
                   const Divider(height: 12),
                   _CreditRow(
                     label: 'New Balance After Sale:',
-                    value: 'KES ${(_selectedCreditCustomer!.currentBalance + subtotal).formatted}',
+                    value:
+                        'KES ${(_selectedCreditCustomer!.currentBalance + subtotal).formatted}',
                     isBold: true,
                   ),
                 ],
@@ -478,13 +677,33 @@ class _CheckoutModalState extends State<CheckoutModal> {
           ],
           const SizedBox(height: 14),
           FilledButton(
-            onPressed: _selectedCreditCustomer != null ? _executeCreditSale : null,
+            onPressed: !_saleSubmitting && _selectedCreditCustomer != null
+                ? _executeCreditSale
+                : null,
             style: FilledButton.styleFrom(
               backgroundColor: const Color(0xFFD97706),
               padding: const EdgeInsets.symmetric(vertical: 14),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: const Text('Record Debt & Complete Sale'),
+            child: _saleSubmitting
+                ? const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      ),
+                      SizedBox(width: 10),
+                      Text('Recording sale...'),
+                    ],
+                  )
+                : const Text('Record Debt & Complete Sale'),
           ),
         ],
       ),
@@ -517,7 +736,9 @@ class _MethodTab extends StatelessWidget {
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 6),
           alignment: Alignment.topCenter,
           decoration: BoxDecoration(
-            color: isSelected ? activeColor.withAlpha(20) : AppColors.bg_surface,
+            color: isSelected
+                ? activeColor.withAlpha(20)
+                : AppColors.bg_surface,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: isSelected ? activeColor : AppColors.border_subtle,
@@ -533,7 +754,11 @@ class _MethodTab extends StatelessWidget {
                 width: 24,
                 height: 24,
                 child: Center(
-                  child: Icon(icon, color: isSelected ? activeColor : AppColors.text_tertiary, size: 22),
+                  child: Icon(
+                    icon,
+                    color: isSelected ? activeColor : AppColors.text_tertiary,
+                    size: 22,
+                  ),
                 ),
               ),
               const SizedBox(height: 6),
@@ -558,7 +783,11 @@ class _MethodTab extends StatelessWidget {
 }
 
 class _CreditRow extends StatelessWidget {
-  const _CreditRow({required this.label, required this.value, this.isBold = false});
+  const _CreditRow({
+    required this.label,
+    required this.value,
+    this.isBold = false,
+  });
 
   final String label;
   final String value;
@@ -569,8 +798,22 @@ class _CreditRow extends StatelessWidget {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 11, color: isBold ? AppColors.text_primary : AppColors.text_tertiary, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-        Text(value, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isBold ? const Color(0xFFD97706) : AppColors.text_primary)),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            color: isBold ? AppColors.text_primary : AppColors.text_tertiary,
+            fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.bold,
+            color: isBold ? const Color(0xFFD97706) : AppColors.text_primary,
+          ),
+        ),
       ],
     );
   }

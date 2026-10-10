@@ -240,19 +240,11 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Header
+            // Export remains available without repeating the app-bar title.
             if (isMobile)
               Row(
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Sales History & Ledger', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.text_primary)),
-                        Text('Immutable audit log', style: TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
-                      ],
-                    ),
-                  ),
                   IconButton.filledTonal(
                     icon: const Icon(Icons.download_outlined, size: 18),
                     tooltip: 'Export Day Ledger',
@@ -264,15 +256,8 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
               )
             else
               Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('Sales History & Ledger', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.text_primary)),
-                      Text('Immutable audit log of all completed transactions', style: TextStyle(fontSize: 13, color: AppColors.text_tertiary)),
-                    ],
-                  ),
                   ElevatedButton.icon(
                     icon: const Icon(Icons.download_outlined, size: 16),
                     label: const Text('Export Day Ledger'),

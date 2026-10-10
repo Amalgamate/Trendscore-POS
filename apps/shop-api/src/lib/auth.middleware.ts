@@ -59,7 +59,9 @@ export function requireRole(...roles: string[]) {
   return (req: Request, res: Response, next: NextFunction) => {
     const auth = res.locals.auth as AuthLocals | undefined;
     if (!auth) return sendError(res, 401, 'NO_TOKEN', 'Authentication is required.');
-    if (!roles.includes(auth.role)) {
+    const isSystemAdminWithOwnerAccess =
+      auth.role === 'SUPER_ADMIN' && roles.includes('OWNER');
+    if (!roles.includes(auth.role) && !isSystemAdminWithOwnerAccess) {
       return sendError(res, 403, 'FORBIDDEN', 'Your account does not have permission to do this.');
     }
     return next();

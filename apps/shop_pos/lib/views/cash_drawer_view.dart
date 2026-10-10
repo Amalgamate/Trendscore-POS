@@ -241,8 +241,6 @@ class _CashDrawerViewState extends State<CashDrawerView> with SingleTickerProvid
             Row(children: [
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  const Text('Cash & Expense Control', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.text_primary)),
-                  const SizedBox(height: 4),
                   Text('Shift ${shift.shiftId} · ${shift.cashier} · Opened ${shift.openedAt.hour.toString().padLeft(2, '0')}:${shift.openedAt.minute.toString().padLeft(2, '0')}', style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
                 ]),
               ),

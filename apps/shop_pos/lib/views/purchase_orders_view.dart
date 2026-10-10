@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../pos_state.dart';
 import '../cart.dart';
+import '../services/api_service.dart';
 import '../theme/tokens.dart';
 
 /// Purchase order / goods receiving view.
@@ -15,9 +16,335 @@ class PurchaseOrdersView extends StatefulWidget {
 class _PurchaseOrdersViewState extends State<PurchaseOrdersView> {
   final List<_PurchaseOrder> _orders = [];
   final _search = TextEditingController();
+  List<Map<String, dynamic>> _suppliers = [];
+  bool _loadingSuppliers = false;
+  String? _supplierLoadError;
+
+  bool get _canManageSuppliers {
+    final role = widget.state.currentLoggedInUser?.role;
+    return ApiService.instance.hasToken &&
+        (role == PosUserRole.owner ||
+            role == PosUserRole.manager ||
+            role == PosUserRole.systemAdmin);
+  }
 
   @override
   void dispose() { _search.dispose(); super.dispose(); }
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSuppliers();
+  }
+
+  Future<void> _loadSuppliers() async {
+    if (!ApiService.instance.hasToken) return;
+    setState(() {
+      _loadingSuppliers = true;
+      _supplierLoadError = null;
+    });
+    final suppliers = await ApiService.instance.getSuppliers();
+    if (!mounted) return;
+    setState(() {
+      _loadingSuppliers = false;
+      _suppliers = suppliers ?? [];
+      _supplierLoadError = suppliers == null
+          ? ApiService.instance.lastError
+          : null;
+    });
+  }
+
+  Future<void> _showManageSuppliersDialog({
+    TextEditingController? selectNewSupplierController,
+  }) async {
+    final nameController = TextEditingController();
+    final phoneController = TextEditingController();
+    final emailController = TextEditingController();
+    final addressController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+    var adding = false;
+    String? formError;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          return AlertDialog(
+            title: const Text('Manage vendors'),
+            content: SizedBox(
+              width: 520,
+              height: MediaQuery.sizeOf(dialogContext).height * 0.68,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Form(
+                    key: formKey,
+                    child: Column(
+                      children: [
+                        TextFormField(
+                          controller: nameController,
+                          textCapitalization: TextCapitalization.words,
+                          decoration: const InputDecoration(
+                            labelText: 'Vendor name',
+                            prefixIcon: Icon(Icons.business_outlined),
+                          ),
+                          validator: (value) => value == null || value.trim().isEmpty
+                              ? 'Enter a vendor name.'
+                              : null,
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: TextFormField(
+                                controller: phoneController,
+                                keyboardType: TextInputType.phone,
+                                decoration: const InputDecoration(
+                                  labelText: 'Phone (optional)',
+                                  prefixIcon: Icon(Icons.phone_outlined),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: TextFormField(
+                                controller: emailController,
+                                keyboardType: TextInputType.emailAddress,
+                                decoration: const InputDecoration(
+                                  labelText: 'Email (optional)',
+                                  prefixIcon: Icon(Icons.email_outlined),
+                                ),
+                                validator: (value) {
+                                  final email = value?.trim() ?? '';
+                                  if (email.isNotEmpty &&
+                                      !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                                          .hasMatch(email)) {
+                                    return 'Enter a valid email.';
+                                  }
+                                  return null;
+                                },
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        TextFormField(
+                          controller: addressController,
+                          decoration: const InputDecoration(
+                            labelText: 'Address (optional)',
+                            prefixIcon: Icon(Icons.location_on_outlined),
+                          ),
+                        ),
+                        if (formError != null) ...[
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Text(
+                              formError!,
+                              style: const TextStyle(
+                                color: AppColors.status_danger,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: FilledButton.icon(
+                            onPressed: adding
+                                ? null
+                                : () async {
+                                    if (!formKey.currentState!.validate()) return;
+                                    setDialogState(() {
+                                      adding = true;
+                                      formError = null;
+                                    });
+                                    final payload = <String, dynamic>{
+                                      'name': nameController.text.trim(),
+                                      if (phoneController.text.trim().isNotEmpty)
+                                        'phone': phoneController.text.trim(),
+                                      if (emailController.text.trim().isNotEmpty)
+                                        'email': emailController.text.trim(),
+                                      if (addressController.text.trim().isNotEmpty)
+                                        'address': addressController.text.trim(),
+                                    };
+                                    final supplier = await ApiService.instance
+                                        .createSupplier(payload);
+                                    if (!mounted || !dialogContext.mounted) return;
+                                    setDialogState(() => adding = false);
+                                    if (supplier == null) {
+                                      setDialogState(() {
+                                        formError = ApiService.instance.lastError ??
+                                            'Could not add vendor.';
+                                      });
+                                      return;
+                                    }
+                                    setState(() {
+                                      _suppliers = [..._suppliers, supplier]
+                                        ..sort((a, b) => (a['name'] as String)
+                                            .compareTo(b['name'] as String));
+                                      _supplierLoadError = null;
+                                    });
+                                    selectNewSupplierController?.text =
+                                        supplier['name'] as String;
+                                    nameController.clear();
+                                    phoneController.clear();
+                                    emailController.clear();
+                                    addressController.clear();
+                                  },
+                            icon: adding
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.add, size: 18),
+                            label: const Text('Add vendor'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Divider(height: 24),
+                  Text(
+                    _suppliers.isEmpty
+                        ? 'No vendors added yet'
+                        : 'Saved vendors (${_suppliers.length})',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.text_secondary,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Expanded(
+                    child: _suppliers.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'Add a vendor above to reuse their details when receiving stock.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: AppColors.text_tertiary),
+                            ),
+                          )
+                        : ListView.separated(
+                            itemCount: _suppliers.length,
+                            separatorBuilder: (_, _) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final supplier = _suppliers[index];
+                              final balance =
+                                  (supplier['balance'] as num?)?.toDouble() ?? 0;
+                              return ListTile(
+                                contentPadding: EdgeInsets.zero,
+                                leading: const CircleAvatar(
+                                  backgroundColor: AppColors.bg_subtle,
+                                  child: Icon(
+                                    Icons.business_outlined,
+                                    color: AppColors.accent_primary,
+                                  ),
+                                ),
+                                title: Text(
+                                  supplier['name'] as String? ?? 'Vendor',
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                subtitle: Text([
+                                  if ((supplier['phone'] as String? ?? '')
+                                      .isNotEmpty)
+                                    supplier['phone'] as String,
+                                  if ((supplier['email'] as String? ?? '')
+                                      .isNotEmpty)
+                                    supplier['email'] as String,
+                                  if (balance != 0)
+                                    'Balance: KES ${balance.toStringAsFixed(2)}',
+                                ].join(' · ')),
+                                trailing: IconButton(
+                                  tooltip: 'Delete vendor',
+                                  icon: const Icon(
+                                    Icons.delete_outline,
+                                    color: AppColors.status_danger,
+                                  ),
+                                  onPressed: () async {
+                                    final confirm = await showDialog<bool>(
+                                      context: dialogContext,
+                                      builder: (confirmContext) => AlertDialog(
+                                        title: const Text('Delete vendor?'),
+                                        content: Text(
+                                          'Archive ${supplier['name']}? Purchase history is retained. Vendors with an outstanding balance cannot be deleted.',
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () => Navigator.pop(
+                                              confirmContext,
+                                              false,
+                                            ),
+                                            child: const Text('Cancel'),
+                                          ),
+                                          FilledButton(
+                                            style: FilledButton.styleFrom(
+                                              backgroundColor:
+                                                  AppColors.status_danger,
+                                            ),
+                                            onPressed: () => Navigator.pop(
+                                              confirmContext,
+                                              true,
+                                            ),
+                                            child: const Text('Delete'),
+                                          ),
+                                        ],
+                                      ),
+                                    );
+                                    if (confirm != true) return;
+                                    final deleted = await ApiService.instance
+                                        .archiveSupplier(
+                                          supplier['id'] as String,
+                                        );
+                                    if (!mounted ||
+                                        !dialogContext.mounted) {
+                                      return;
+                                    }
+                                    if (!deleted) {
+                                      setDialogState(() {
+                                        formError =
+                                            ApiService.instance.lastError ??
+                                            'Could not delete vendor.';
+                                      });
+                                      return;
+                                    }
+                                    setState(
+                                      () => _suppliers.removeWhere(
+                                        (item) =>
+                                            item['id'] == supplier['id'],
+                                      ),
+                                    );
+                                    setDialogState(() => formError = null);
+                                  },
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Done'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+
+    nameController.dispose();
+    phoneController.dispose();
+    emailController.dispose();
+    addressController.dispose();
+  }
 
   void _showReceiveStockModal() {
     final supplierCtrl = TextEditingController();
@@ -63,14 +390,59 @@ class _PurchaseOrdersViewState extends State<PurchaseOrdersView> {
               // Supplier
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-                child: TextField(
-                  controller: supplierCtrl,
-                  decoration: InputDecoration(
-                    labelText: 'Supplier / Vendor Name (optional)',
-                    prefixIcon: const Icon(Icons.business_outlined, size: 18, color: AppColors.text_tertiary),
-                    filled: true, fillColor: AppColors.bg_subtle,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
-                  ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: supplierCtrl,
+                        decoration: InputDecoration(
+                          labelText: 'Supplier / Vendor Name (optional)',
+                          prefixIcon: const Icon(
+                            Icons.business_outlined,
+                            size: 18,
+                            color: AppColors.text_tertiary,
+                          ),
+                          suffixIcon: _suppliers.isEmpty
+                              ? null
+                              : PopupMenuButton<String>(
+                                  tooltip: 'Choose saved vendor',
+                                  icon: const Icon(Icons.arrow_drop_down),
+                                  itemBuilder: (context) => _suppliers
+                                      .map(
+                                        (supplier) => PopupMenuItem<String>(
+                                          value: supplier['name'] as String,
+                                          child: Text(
+                                            supplier['name'] as String,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                  onSelected: (name) =>
+                                      supplierCtrl.text = name,
+                                ),
+                          filled: true,
+                          fillColor: AppColors.bg_subtle,
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10),
+                            borderSide: const BorderSide(
+                              color: AppColors.border_subtle,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    if (_canManageSuppliers) ...[
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: () => _showManageSuppliersDialog(
+                          selectNewSupplierController: supplierCtrl,
+                        ),
+                        icon: const Icon(Icons.add_business_outlined, size: 18),
+                        label: const Text('Add vendor'),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               const SizedBox(height: 12),
@@ -152,7 +524,7 @@ class _PurchaseOrdersViewState extends State<PurchaseOrdersView> {
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                   ),
-                  value: null,
+                  initialValue: null,
                   items: widget.state.products
                       .where((p) => !lines.any((l) => l.product.id == p.id))
                       .map((p) => DropdownMenuItem(value: p, child: Text(p.name, overflow: TextOverflow.ellipsis)))
@@ -223,12 +595,15 @@ class _PurchaseOrdersViewState extends State<PurchaseOrdersView> {
             child: Padding(
               padding: EdgeInsets.all(isMobile ? 16 : 24),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Row(children: [
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: const [
-                    Text('Purchase Orders', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: AppColors.text_primary)),
-                    SizedBox(height: 4),
-                    Text('Receive stock from suppliers and update shelf inventory', style: TextStyle(fontSize: 13, color: AppColors.text_tertiary)),
-                  ])),
+                Row(mainAxisAlignment: MainAxisAlignment.end, children: [
+                  if (_canManageSuppliers) ...[
+                    OutlinedButton.icon(
+                      onPressed: _showManageSuppliersDialog,
+                      icon: const Icon(Icons.business_outlined, size: 18),
+                      label: const Text('Manage vendors'),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
                   FilledButton.icon(
                     onPressed: _showReceiveStockModal,
                     icon: const Icon(Icons.local_shipping_outlined, size: 18),
@@ -236,6 +611,26 @@ class _PurchaseOrdersViewState extends State<PurchaseOrdersView> {
                     style: FilledButton.styleFrom(backgroundColor: AppColors.accent_primary, padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14), shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                   ),
                 ]),
+                if (_supplierLoadError != null) ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _supplierLoadError!,
+                          style: const TextStyle(
+                            color: AppColors.status_danger,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: _loadingSuppliers ? null : _loadSuppliers,
+                        child: const Text('Retry'),
+                      ),
+                    ],
+                  ),
+                ],
                 const SizedBox(height: 20),
 
                 // Reorder alerts

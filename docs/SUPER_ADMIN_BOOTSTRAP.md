@@ -1,6 +1,6 @@
 # Super-admin bootstrap
 
-The provisioning CLI can create the same super-admin identity inside each newly provisioned shop database. The account has owner access within that shop. Shop databases stay isolated, so this is a separately stored account in each installation, not a central cross-shop session.
+The provisioning CLI can create the same super-admin identity inside each newly provisioned shop database. The account uses the `SUPER_ADMIN` role and has owner-equivalent access within that shop, including Settings and staff management. Shop databases stay isolated, so this is a separately stored account in each installation, not a central cross-shop session.
 
 For the live `www.gutagala.trendscore.co.ke` deployment, configure both values as secrets in the GitHub Actions `production` environment:
 

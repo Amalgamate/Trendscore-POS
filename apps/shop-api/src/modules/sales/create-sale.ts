@@ -16,7 +16,12 @@ import {
 
 /** Thrown when an idempotency key replays. Carries the original receipt. */
 export class DuplicateSaleError extends Error {
-  constructor(public readonly receiptNumber: string, public readonly saleId: string) {
+  constructor(
+    public readonly receiptNumber: string,
+    public readonly saleId: string,
+    public readonly total: number,
+    public readonly customerId: string | null,
+  ) {
     super(`Sale already recorded as ${receiptNumber}`);
     this.name = 'DuplicateSaleError';
   }
@@ -56,10 +61,15 @@ export async function createSale(
     // 1. Check idempotency
     const existing = await tx.sale.findUnique({
       where: { idempotencyKey },
-      select: { id: true, receiptNumber: true },
+      select: { id: true, receiptNumber: true, total: true, customerId: true },
     });
     if (existing) {
-      throw new DuplicateSaleError(existing.receiptNumber, existing.id);
+      throw new DuplicateSaleError(
+        existing.receiptNumber,
+        existing.id,
+        Number(existing.total),
+        existing.customerId,
+      );
     }
 
     if (!lines || lines.length === 0) {
@@ -125,6 +135,46 @@ export async function createSale(
     const vatAmount = vatAmountCents / 100;
     const total = totalCents / 100;
     const costTotal = costTotalCents / 100;
+
+    if (method === 'CREDIT') {
+      if (!customerId) {
+        throw new SaleValidationError(
+          { kind: 'CUSTOMER_REQUIRED' },
+          'Select an active customer account before charging a sale to credit.',
+        );
+      }
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "customers"
+          WHERE "id" = ${customerId}::uuid AND "businessId" = ${businessId}::uuid
+          FOR UPDATE`,
+      );
+      const customer = await tx.customer.findFirst({
+        where: { id: customerId, businessId },
+      });
+      if (!customer || customer.status !== 'ACTIVE') {
+        throw new SaleValidationError(
+          { kind: 'CREDIT_ACCOUNT_UNAVAILABLE', customerId },
+          'This customer credit account is unavailable. Refresh the account list and try again.',
+        );
+      }
+      if (customer.creditFrozen) {
+        throw new SaleValidationError(
+          { kind: 'CREDIT_FROZEN', customerId },
+          `Credit is frozen for ${customer.fullName}. Record the sale using another payment method.`,
+        );
+      }
+      if (Number(customer.balance) + total > Number(customer.creditLimit)) {
+        throw new SaleValidationError(
+          {
+            kind: 'CREDIT_LIMIT_EXCEEDED',
+            customerId,
+            available: Math.max(0, Math.round((Number(customer.creditLimit) - Number(customer.balance)) * 100)),
+            requested: totalCents,
+          },
+          `${customer.fullName} does not have enough available credit for this sale.`,
+        );
+      }
+    }
 
     // 3. Generate receipt number
     const count = await tx.sale.count({ where: { businessId } });

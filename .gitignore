@@ -3,6 +3,8 @@ dist/
 build/
 .next/
 out/
+*.tsbuildinfo
+.impeccable/hook.cache.json
 
 # Flutter / Dart
 .dart_tool/
@@ -36,4 +38,3 @@ Thumbs.db
 *.log
 migrate-test.cmd
 validate-schema.cmd
-
