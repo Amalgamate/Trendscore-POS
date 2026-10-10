@@ -9,6 +9,10 @@ export const metadata: Metadata = {
   title: 'ShopSmart Storefront Preview',
   description:
     'Explore a sample ShopSmart storefront. Sample products and prices are illustrative; ordering is not enabled.',
+  icons: {
+    icon: '/icon.svg',
+    apple: '/apple-icon.png',
+  },
 };
 
 export default function RootLayout({

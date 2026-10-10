@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'cart.dart';
 import 'pos_state.dart';
 import 'services/api_service.dart';
-import 'services/favicon_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'theme/tokens.dart';
@@ -27,11 +26,6 @@ void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final state = PosState();
   await state.loadInitialState();
-  FaviconService.update(
-    state.brandLogoBase64?.isNotEmpty == true
-        ? state.brandLogoBase64
-        : state.brandLogoUrl,
-  );
   ApiService.instance.configure(state.serverUrl);
   if (state.currentLoggedInUser != null) {
     state.catalogueSyncMessage =
