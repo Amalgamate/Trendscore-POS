@@ -118,6 +118,7 @@ class _LoginViewState extends State<LoginView> {
 
   final _shakeKey = GlobalKey<_ShakeControllerState>();
   final FocusNode _focusNode = FocusNode();
+  final FocusNode _phoneFocusNode = FocusNode();
 
   List<PosUser> get _users => widget.state.activeUsers;
 
@@ -146,12 +147,15 @@ class _LoginViewState extends State<LoginView> {
   @override
   void dispose() {
     _focusNode.dispose();
+    _phoneFocusNode.dispose();
     _phoneController.dispose();
     super.dispose();
   }
 
   void _tapKey(String key) {
     if (_isLoading) return;
+    _phoneFocusNode.unfocus();
+    _focusNode.requestFocus();
     setState(() {
       _errorMsg = null;
       if (key == '⌫') {
@@ -167,9 +171,10 @@ class _LoginViewState extends State<LoginView> {
   }
 
   Future<void> _verifyPin() async {
-    final phone = _user.phone.isNotEmpty ? _user.phone : _phoneController.text.trim();
+    final enteredPhone = _phoneController.text.trim();
+    final phone = enteredPhone.isNotEmpty ? enteredPhone : _user.phone;
     if (phone.replaceAll(RegExp(r'\D'), '').length < 9 || _pin.length < 4) {
-      setState(() => _errorMsg = (kIsWeb || _users.isEmpty) ? 'Enter your phone number and 4-6 digit PIN.' : 'Select your account and enter your PIN.');
+      setState(() => _errorMsg = 'Enter your phone number and PIN.');
       return;
     }
     setState(() => _isLoading = true);
@@ -434,6 +439,7 @@ class _LoginViewState extends State<LoginView> {
   }
 
   void _handleHardwareKey(KeyEvent event) {
+    if (_phoneFocusNode.hasFocus) return;
     if (event is KeyDownEvent) {
       final key = event.logicalKey;
       if (key == LogicalKeyboardKey.backspace) {
@@ -778,13 +784,39 @@ class _LoginViewState extends State<LoginView> {
               const SizedBox(height: 4),
 
               // 3. Supporting Text
-              const Text(
-                kIsWeb || _users.isEmpty ? 'Use the phone number and PIN assigned to your staff account.' : 'Select your account above, then enter your PIN.',
+              Text(
+                'Enter your account phone number, then enter your PIN.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12.5,
                   color: Color(0xFF64748B),
                   height: 1.35,
+                ),
+              ),
+
+              const SizedBox(height: 16),
+
+              TextField(
+                controller: _phoneController,
+                focusNode: _phoneFocusNode,
+                keyboardType: TextInputType.phone,
+                textInputAction: TextInputAction.done,
+                maxLength: 16,
+                inputFormatters: [
+                  FilteringTextInputFormatter.allow(RegExp(r'[0-9+\s()-]')),
+                ],
+                onSubmitted: (_) {
+                  _phoneFocusNode.unfocus();
+                  _focusNode.requestFocus();
+                },
+                onChanged: (_) {
+                  if (_errorMsg != null) setState(() => _errorMsg = null);
+                },
+                decoration: const InputDecoration(
+                  labelText: 'Phone number',
+                  hintText: '07xx xxx xxx',
+                  prefixIcon: Icon(Icons.phone_iphone),
+                  counterText: '',
                 ),
               ),
 
