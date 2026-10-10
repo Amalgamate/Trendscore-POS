@@ -570,6 +570,68 @@ a {
   font-size: 13px;
 }
 
+.store-details {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.8fr) minmax(0, 2fr);
+  gap: 38px;
+  padding: 38px clamp(20px, 10vw, 144px);
+  border-top: 1px solid var(--line);
+  background: var(--canvas);
+}
+
+.store-details-heading {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+}
+
+.store-details-heading .eyebrow {
+  margin-bottom: 7px;
+}
+
+.store-details-heading h2 {
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -0.035em;
+}
+
+.store-details-logo {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 auto;
+  object-fit: contain;
+  border-radius: 8px;
+}
+
+.store-details-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 32px;
+}
+
+.store-details-grid h3 {
+  margin: 0 0 6px;
+  font-size: 12px;
+}
+
+.store-details-grid p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.store-details-grid a:hover {
+  color: var(--teal-dark);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.store-details-multiline,
+.policy-copy {
+  white-space: pre-line;
+}
+
 .store-next-step {
   display: flex;
   align-items: center;
@@ -692,10 +754,9 @@ a {
   font-size: 13px;
 }
 
-.footer-wordmark .wordmark-mark {
+.footer-wordmark .wordmark-logo {
   width: 28px;
   height: 28px;
-  font-size: 14px;
 }
 
 .policy-links {
@@ -1112,6 +1173,11 @@ a {
   margin: 8px 0 0;
   color: var(--muted);
   font-size: 13px;
+  line-height: 1.65;
+}
+
+.policy-list .policy-not-provided {
+  font-style: italic;
 }
 
 :focus-visible {
@@ -1160,6 +1226,26 @@ a {
   .catalog-section {
     min-height: unset;
     padding: 38px 18px 48px;
+  }
+
+  .store-details {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding: 32px 20px;
+  }
+
+  .store-details-grid {
+    gap: 18px;
+  }
+
+  .store-details {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding: 32px 20px;
+  }
+
+  .store-details-grid {
+    gap: 18px;
   }
 
   .catalog-intro {

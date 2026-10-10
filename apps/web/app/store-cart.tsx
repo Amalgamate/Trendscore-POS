@@ -13,9 +13,47 @@ import { PREVIEW_PRODUCTS, type StoreProduct } from './store-data';
 
 type CartLine = { productId: string; quantity: number };
 type CatalogState = 'loading' | 'live' | 'sample' | 'error';
+export type StorefrontProfile = {
+  storeName: string;
+  description: string;
+  phone: string;
+  email: string;
+  address: string;
+  county: string;
+  logoUrl: string;
+  openingHours: string;
+  deliveryEnabled: boolean;
+  deliveryDetails: string;
+  pickupEnabled: boolean;
+  pickupDetails: string;
+  policies: {
+    delivery: string;
+    returns: string;
+    privacy: string;
+    terms: string;
+  };
+};
+
+const EMPTY_STOREFRONT_PROFILE: StorefrontProfile = {
+  storeName: 'ShopSmart Online Store',
+  description: '',
+  phone: '',
+  email: '',
+  address: '',
+  county: '',
+  logoUrl: '',
+  openingHours: '',
+  deliveryEnabled: false,
+  deliveryDetails: '',
+  pickupEnabled: false,
+  pickupDetails: '',
+  policies: { delivery: '', returns: '', privacy: '', terms: '' },
+};
+
 type CartContextValue = {
   products: StoreProduct[];
   catalogState: CatalogState;
+  storefrontProfile: StorefrontProfile;
   items: CartLine[];
   itemCount: number;
   subtotal: number;
@@ -32,6 +70,9 @@ const CartContext = createContext<CartContextValue | null>(null);
 export function StoreCartProvider({ children }: { children: ReactNode }) {
   const [products, setProducts] = useState<StoreProduct[]>([]);
   const [catalogState, setCatalogState] = useState<CatalogState>('loading');
+  const [storefrontProfile, setStorefrontProfile] = useState<StorefrontProfile>(
+    EMPTY_STOREFRONT_PROFILE,
+  );
   const [items, setItems] = useState<CartLine[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [storageError, setStorageError] = useState(false);
@@ -106,6 +147,62 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
           setProducts([]);
           setCatalogState('error');
         }
+      });
+  }, []);
+
+  useEffect(() => {
+    const apiBase = process.env.NEXT_PUBLIC_SHOP_API_BASE_URL ?? '/api';
+    fetch(`${apiBase.replace(/\/+$/, '')}/business/storefront`, {
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`Store profile request failed (${response.status}).`);
+        }
+        const payload: unknown = await response.json();
+        if (
+          typeof payload !== 'object' ||
+          payload === null ||
+          !('data' in payload) ||
+          typeof payload.data !== 'object' ||
+          payload.data === null
+        ) {
+          throw new Error('Store profile response has an invalid shape.');
+        }
+        const data = payload.data as Record<string, unknown>;
+        const policies =
+          typeof data.policies === 'object' && data.policies !== null
+            ? (data.policies as Record<string, unknown>)
+            : {};
+        const stringValue = (value: unknown) =>
+          typeof value === 'string' ? value : '';
+        if (typeof data.storeName !== 'string' || !data.storeName.trim()) {
+          throw new Error('Store profile does not include a valid store name.');
+        }
+        setStorefrontProfile({
+          storeName: data.storeName,
+          description: stringValue(data.description),
+          phone: stringValue(data.phone),
+          email: stringValue(data.email),
+          address: stringValue(data.address),
+          county: stringValue(data.county),
+          logoUrl: stringValue(data.logoUrl),
+          openingHours: stringValue(data.openingHours),
+          deliveryEnabled: data.deliveryEnabled === true,
+          deliveryDetails: stringValue(data.deliveryDetails),
+          pickupEnabled: data.pickupEnabled === true,
+          pickupDetails: stringValue(data.pickupDetails),
+          policies: {
+            delivery: stringValue(policies.delivery),
+            returns: stringValue(policies.returns),
+            privacy: stringValue(policies.privacy),
+            terms: stringValue(policies.terms),
+          },
+        });
+      })
+      .catch((error: unknown) => {
+        console.error('Could not load the public storefront profile.', error);
+        setStorefrontProfile(EMPTY_STOREFRONT_PROFILE);
       });
   }, []);
 
@@ -187,6 +284,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
     return {
       products,
       catalogState,
+      storefrontProfile,
       items,
       itemCount,
       subtotal,
@@ -196,7 +294,17 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
       setQuantity,
       remove,
     };
-  }, [products, catalogState, items, hydrated, storageError, add, setQuantity, remove]);
+  }, [
+    products,
+    catalogState,
+    storefrontProfile,
+    items,
+    hydrated,
+    storageError,
+    add,
+    setQuantity,
+    remove,
+  ]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;
 }

@@ -1050,6 +1050,57 @@ class ApiService {
     return null;
   }
 
+  // ── Storefront profile ──────────────────────────────────────────────
+
+  Future<Map<String, dynamic>?> getStorefrontSettings() async {
+    lastError = null;
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/business/storefront/settings'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned invalid storefront settings.';
+        return null;
+      }
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not fetch storefront settings (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not fetch storefront settings from the shop API.';
+      debugPrint('API getStorefrontSettings error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> updateStorefrontSettings(Map<String, dynamic> settings) async {
+    lastError = null;
+    try {
+      final res = await http
+          .put(
+            Uri.parse('$baseUrl/business/storefront/settings'),
+            headers: _headers,
+            body: jsonEncode(settings),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not save storefront settings (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not save storefront settings to the shop API.';
+      debugPrint('API updateStorefrontSettings error: $e');
+    }
+    return false;
+  }
+
   // ── Delivery config ─────────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> getDeliveryConfig() async {
