@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import '../pos_state.dart';
 import '../shared/icons.dart';
@@ -166,9 +167,9 @@ class _LoginViewState extends State<LoginView> {
   }
 
   Future<void> _verifyPin() async {
-    final phone = _phoneController.text.trim();
+    final phone = _user.phone.isNotEmpty ? _user.phone : _phoneController.text.trim();
     if (phone.replaceAll(RegExp(r'\D'), '').length < 9 || _pin.length < 4) {
-      setState(() => _errorMsg = 'Enter your phone number and 4–6 digit PIN.');
+      setState(() => _errorMsg = 'Select your account and enter your PIN.');
       return;
     }
     setState(() => _isLoading = true);
@@ -447,11 +448,7 @@ class _LoginViewState extends State<LoginView> {
 
   @override
   Widget build(BuildContext context) {
-    return KeyboardListener(
-      focusNode: _focusNode,
-      autofocus: true,
-      onKeyEvent: _handleHardwareKey,
-      child: Scaffold(
+    final scaffold = Scaffold(
         backgroundColor: const Color(0xFF0F172A),
         body: LayoutBuilder(
           builder: (context, constraints) {
@@ -486,8 +483,16 @@ class _LoginViewState extends State<LoginView> {
             return _buildMobileLayout(constraints);
           },
         ),
-      ),
     );
+    if (kIsWeb) {
+      return KeyboardListener(
+        focusNode: _focusNode,
+        autofocus: true,
+        onKeyEvent: _handleHardwareKey,
+        child: scaffold,
+      );
+    }
+    return scaffold;
   }
 
   Widget _buildBrandLogo(double size, {double radius = 6}) {
@@ -774,7 +779,7 @@ class _LoginViewState extends State<LoginView> {
 
               // 3. Supporting Text
               const Text(
-                'Use the phone number and PIN assigned to your staff account.',
+                'Select your account above, then enter your PIN.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12.5,
@@ -783,19 +788,6 @@ class _LoginViewState extends State<LoginView> {
                 ),
               ),
 
-              const SizedBox(height: 14),
-              TextField(
-                controller: _phoneController,
-                keyboardType: TextInputType.phone,
-                textInputAction: TextInputAction.next,
-                decoration: InputDecoration(
-                  labelText: 'Phone number',
-                  hintText: '07xx xxx xxx',
-                  prefixIcon: const Icon(AppIcons.phone),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-                onChanged: (_) => setState(() => _errorMsg = null),
-              ),
               const SizedBox(height: 12),
 
               // 4. PIN indicators inside a soft pill

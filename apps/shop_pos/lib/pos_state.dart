@@ -691,7 +691,8 @@ class PosState extends ChangeNotifier {
   bool cashDrawerKick = true;
   bool requirePinForReversal = true;
   String printerPaperSize = '80mm';
-  String serverUrl = kIsWeb ? 'http://localhost:4001' : 'http://localhost:4001';
+  /// Empty on mobile = not yet configured; shows ShopCodeView on first launch.
+  String serverUrl = kIsWeb ? 'http://localhost:4001' : '';
 
   late List<PosUser> users;
   PosUser? currentLoggedInUser;

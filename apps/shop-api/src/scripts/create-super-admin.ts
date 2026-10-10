@@ -1,8 +1,10 @@
 /**
  * Ensure the platform administrator exists in this shop database.
- * Re-runs always reset the PIN hash so stale hashes from previous seeds
- * are never left in place. mustChangePin is always set to true on every
- * run so the admin is forced to change the initial PIN before use.
+ *
+ * New account: created with the supplied initial PIN and mustChangePin = true,
+ * so the admin must set their own PIN at first login.
+ * Existing account: the PIN and mustChangePin are left untouched, so re-running
+ * this script never forces a PIN change or resets a PIN the admin already chose.
  */
 import { PrismaClient } from '@prisma/client';
 import * as argon2 from 'argon2';
@@ -44,10 +46,10 @@ async function main(): Promise<void> {
 
   const existing = await prisma.user.findUnique({ where: { phone } });
   if (existing?.isPlatformSuperAdmin) {
-    // Always reset PIN hash so stale hashes from previous seeds never block login.
+    // Existing admin: never touch pinHash or mustChangePin.
     await prisma.user.update({
       where: { id: existing.id },
-      data: { fullName: 'Retail OS Super Admin', pinHash, role: 'SUPER_ADMIN', active: true, mustChangePin: true },
+      data: { fullName: 'Retail OS Super Admin', role: 'SUPER_ADMIN', active: true },
     });
     console.log(JSON.stringify({ ok: true, created: false, role: 'SUPER_ADMIN' }));
     return;
@@ -56,11 +58,10 @@ async function main(): Promise<void> {
   await prisma.user.upsert({
     where: { phone },
     update: {
+      // Existing user being promoted: keep their PIN and do not force a change.
       fullName: 'Retail OS Super Admin',
-      pinHash,
       role: 'SUPER_ADMIN',
       active: true,
-      mustChangePin: true,
       isPlatformSuperAdmin: true,
     },
     create: {

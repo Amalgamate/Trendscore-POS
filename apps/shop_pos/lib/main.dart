@@ -9,6 +9,7 @@ import 'services/favicon_service.dart';
 import 'theme/app_theme.dart';
 import 'theme/theme_controller.dart';
 import 'theme/tokens.dart';
+import 'views/shop_code_view.dart';
 import 'views/cash_drawer_view.dart';
 import 'views/checkout_modal.dart';
 import 'views/customers_view.dart';
@@ -330,6 +331,17 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
 
   @override
   Widget build(BuildContext context) {
+    // First launch: no shop configured yet
+    if (widget.state.serverUrl.isEmpty) {
+      return ShopCodeView(
+        state: widget.state,
+        onConnected: () {
+          ApiService.instance.configure(widget.state.serverUrl);
+          setState(() {});
+        },
+      );
+    }
+
     if (_isLocked) {
       return LoginView(
         state: widget.state,

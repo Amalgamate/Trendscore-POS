@@ -1,31 +1,31 @@
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
-import 'package:file_picker_web/file_picker_web.dart' show FilePickerWebOptions;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import '../cart.dart';
 import '../pos_state.dart';
 import '../theme/tokens.dart';
 import 'widgets/image_upload_widget.dart';
+import '../shared/icons.dart';
 
 const _categoryMeta = {
-  'Dairy':     {'color': Color(0xFFEFF6FF), 'icon': Icons.egg_outlined},
-  'Bakery':    {'color': Color(0xFFFFFBEB), 'icon': Icons.bakery_dining},
-  'Beverages': {'color': Color(0xFFF0FDF4), 'icon': Icons.local_drink_outlined},
-  'Produce':   {'color': Color(0xFFF0FDF4), 'icon': Icons.eco_outlined},
-  'Snacks':    {'color': Color(0xFFFFF7ED), 'icon': Icons.fastfood_outlined},
-  'Household': {'color': Color(0xFFF5F3FF), 'icon': Icons.home_outlined},
-  'Grains':    {'color': Color(0xFFFEFCE8), 'icon': Icons.grass_outlined},
-  'Health':    {'color': Color(0xFFFFEFF2), 'icon': Icons.health_and_safety_outlined},
-  'Cleaning':  {'color': Color(0xFFEEF2FF), 'icon': Icons.cleaning_services_outlined},
-  'Other':     {'color': Color(0xFFF8FAFC), 'icon': Icons.inventory_2_outlined},
+  'Dairy':     {'color': Color(0xFFEFF6FF), 'icon': AppIcons.egg},
+  'Bakery':    {'color': Color(0xFFFFFBEB), 'icon': AppIcons.bakery},
+  'Beverages': {'color': Color(0xFFF0FDF4), 'icon': AppIcons.drink},
+  'Produce':   {'color': Color(0xFFF0FDF4), 'icon': AppIcons.produce},
+  'Snacks':    {'color': Color(0xFFFFF7ED), 'icon': AppIcons.snack},
+  'Household': {'color': Color(0xFFF5F3FF), 'icon': AppIcons.home},
+  'Grains':    {'color': Color(0xFFFEFCE8), 'icon': AppIcons.grain},
+  'Health':    {'color': Color(0xFFFFEFF2), 'icon': AppIcons.health},
+  'Cleaning':  {'color': Color(0xFFEEF2FF), 'icon': AppIcons.clean},
+  'Other':     {'color': Color(0xFFF8FAFC), 'icon': AppIcons.inventory},
 };
 
 Color _catColor(String cat) =>
     (_categoryMeta[cat]?['color'] as Color?) ?? const Color(0xFFF8FAFC);
 IconData _catIcon(String cat) =>
-    (_categoryMeta[cat]?['icon'] as IconData?) ?? Icons.inventory_2_outlined;
+    (_categoryMeta[cat]?['icon'] as IconData?) ?? AppIcons.inventory;
 
 class InventoryView extends StatefulWidget {
   const InventoryView({super.key, required this.state});
@@ -126,7 +126,7 @@ class _InventoryViewState extends State<InventoryView> {
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close, size: 20),
+                          icon: const Icon(AppIcons.close, size: 20),
                           onPressed: () => Navigator.pop(ctx),
                           padding: EdgeInsets.zero,
                           constraints: const BoxConstraints(),
@@ -211,7 +211,7 @@ class _InventoryViewState extends State<InventoryView> {
                               Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Icon(Icons.error_outline, size: 16, color: AppColors.status_danger),
+                                  const Icon(AppIcons.error, size: 16, color: AppColors.status_danger),
                                   const SizedBox(width: 6),
                                   Expanded(
                                     child: Text(
@@ -456,7 +456,6 @@ class _InventoryViewState extends State<InventoryView> {
       final file = await FilePicker.pickFile(
         type: FileType.custom,
         allowedExtensions: const ['csv'],
-        webOptions: const FilePickerWebOptions(cancelUploadOnWindowBlur: false),
       );
       if (file == null) return;
       final bytes = await file.readAsBytes();
@@ -504,7 +503,7 @@ class _InventoryViewState extends State<InventoryView> {
             costPrice: costText.isEmpty ? null : Money.parse(costText),
             stock: stock,
             lowStockThreshold: thresholdText.isEmpty ? 10 : int.parse(thresholdText),
-            icon: Icons.inventory_2_outlined,
+            icon: AppIcons.inventory,
             tint: const Color(0xFFF8FAFC),
           ));
         } on FormatException {
@@ -613,7 +612,7 @@ class _InventoryViewState extends State<InventoryView> {
               borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
             ),
             child: Row(children: [
-              const Icon(Icons.swap_vert_circle_outlined, color: AppColors.accent_primary),
+              const Icon(AppIcons.swapVert, color: AppColors.accent_primary),
               const SizedBox(width: 10),
               Expanded(child: Text('Adjust Stock: ${product.name}',
                   style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700))),
@@ -633,7 +632,7 @@ class _InventoryViewState extends State<InventoryView> {
                     border: Border.all(color: AppColors.border_subtle),
                   ),
                   child: Row(children: [
-                    const Icon(Icons.inventory_2_outlined, size: 16, color: AppColors.text_tertiary),
+                    const Icon(AppIcons.inventory, size: 16, color: AppColors.text_tertiary),
                     const SizedBox(width: 8),
                     const Text('Current stock: ',
                         style: TextStyle(fontSize: 13, color: AppColors.text_tertiary)),
@@ -644,7 +643,7 @@ class _InventoryViewState extends State<InventoryView> {
                 const SizedBox(height: 16),
                 Row(children: [
                   Expanded(child: _choiceButton(
-                    label: '+ Receive Stock', icon: Icons.add_circle_outline,
+                    label: '+ Receive Stock', icon: AppIcons.addCircle,
                     selected: isAddition, color: AppColors.status_success,
                     onTap: () => setModal(() {
                       isAddition = true; reason = 'Stock delivery / Purchase';
@@ -652,7 +651,7 @@ class _InventoryViewState extends State<InventoryView> {
                   )),
                   const SizedBox(width: 8),
                   Expanded(child: _choiceButton(
-                    label: '\u2212 Spoilage / Loss', icon: Icons.remove_circle_outline,
+                    label: '\u2212 Spoilage / Loss', icon: AppIcons.removeCircle,
                     selected: !isAddition, color: AppColors.status_danger,
                     onTap: () => setModal(() {
                       isAddition = false; reason = 'Damaged / Expired stock write-off';
@@ -710,7 +709,7 @@ class _InventoryViewState extends State<InventoryView> {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         title: const Row(children: [
-          Icon(Icons.warning_amber_rounded, color: AppColors.status_danger),
+          Icon(AppIcons.warning, color: AppColors.status_danger),
           SizedBox(width: 8),
           Text('Deactivate Product?'),
         ]),
@@ -747,7 +746,7 @@ class _InventoryViewState extends State<InventoryView> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton.icon(
-            icon: const Icon(Icons.delete_forever, size: 16),
+            icon: const Icon(AppIcons.deleteForever, size: 16),
             label: const Text('Deactivate'),
             style: FilledButton.styleFrom(backgroundColor: AppColors.status_danger),
             onPressed: () => Navigator.pop(ctx, true),
@@ -832,7 +831,7 @@ class _InventoryViewState extends State<InventoryView> {
                           style: TextStyle(fontSize: 13, color: AppColors.text_tertiary)),
                     ])),
                     OutlinedButton.icon(
-                      icon: const Icon(Icons.file_download_outlined, size: 17),
+                      icon: const Icon(AppIcons.download, size: 17),
                       label: const Text('Export'),
                       onPressed: () {},
                       style: OutlinedButton.styleFrom(
@@ -842,7 +841,7 @@ class _InventoryViewState extends State<InventoryView> {
                     ),
                     const SizedBox(width: 8),
                     OutlinedButton.icon(
-                      icon: const Icon(Icons.file_upload_outlined, size: 17),
+                      icon: const Icon(AppIcons.upload, size: 17),
                       label: const Text('Import CSV'),
                       onPressed: _importProductsCsv,
                       style: OutlinedButton.styleFrom(
@@ -852,7 +851,7 @@ class _InventoryViewState extends State<InventoryView> {
                     ),
                     const SizedBox(width: 8),
                     FilledButton.icon(
-                      icon: const Icon(Icons.add, size: 17),
+                      icon: const Icon(AppIcons.add, size: 17),
                       label: const Text('Add Product'),
                       onPressed: () => _showProductEditor(),
                       style: FilledButton.styleFrom(
@@ -880,8 +879,8 @@ class _InventoryViewState extends State<InventoryView> {
                           Icon(
                             widget.state.catalogueSyncMessage!.startsWith('Local-only') ||
                                     widget.state.catalogueSyncMessage!.startsWith('Catalogue sync failed')
-                                ? Icons.cloud_off_outlined
-                                : Icons.cloud_done_outlined,
+                                ? AppIcons.cloudOff
+                                : AppIcons.cloudDone,
                             size: 16,
                             color: AppColors.text_secondary,
                           ),
@@ -896,16 +895,16 @@ class _InventoryViewState extends State<InventoryView> {
                   // KPI cards
                   Row(children: [
                     _StatCard('Active SKUs', '$totalSkus items',
-                        Icons.qr_code_2, AppColors.accent_primary),
+                        AppIcons.qrCode, AppColors.accent_primary),
                     const SizedBox(width: 10),
                     _StatCard('Stock Valuation', 'KES ${Money(valuation).formatted}',
-                        Icons.account_balance_wallet_outlined, const Color(0xFF16A34A)),
+                        AppIcons.wallet, const Color(0xFF16A34A)),
                     const SizedBox(width: 10),
                     _StatCard('Low Stock', '$lowCount alerts',
-                        Icons.trending_down_outlined, const Color(0xFFD97706)),
+                        AppIcons.trendingDown, const Color(0xFFD97706)),
                     const SizedBox(width: 10),
                     _StatCard('Out of Stock', '$outCount SKUs',
-                        Icons.remove_shopping_cart_outlined, AppColors.status_danger),
+                        AppIcons.removeFromCart, AppColors.status_danger),
                   ]),
                   const SizedBox(height: 16),
 
@@ -916,7 +915,7 @@ class _InventoryViewState extends State<InventoryView> {
                       onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
                         hintText: 'Search by name, SKU or barcode\u2026',
-                        prefixIcon: const Icon(Icons.search, size: 20),
+                        prefixIcon: const Icon(AppIcons.search, size: 20),
                         filled: true, fillColor: Colors.white,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         border: OutlineInputBorder(
@@ -1014,13 +1013,13 @@ class _InventoryViewState extends State<InventoryView> {
                         ),
                         if (filtered.isEmpty)
                           Expanded(child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-                            Icon(Icons.inventory_2_outlined, size: 48, color: AppColors.border_subtle),
+                            Icon(AppIcons.inventory, size: 48, color: AppColors.border_subtle),
                             const SizedBox(height: 12),
                             const Text('No products match your filters',
                                 style: TextStyle(color: AppColors.text_tertiary)),
                             const SizedBox(height: 8),
                             TextButton.icon(
-                              icon: const Icon(Icons.add, size: 16),
+                              icon: const Icon(AppIcons.add, size: 16),
                               label: const Text('Add a product'),
                               onPressed: () => _showProductEditor(),
                             ),
@@ -1172,10 +1171,10 @@ class _ProductRowState extends State<_ProductRow> {
               Expanded(flex: 2, child: _StockBadge(p)),
               SizedBox(width: 110, child: (_hovered || widget.isSelected)
                   ? Row(mainAxisAlignment: MainAxisAlignment.end, children: [
-                      _ActionIcon(icon: Icons.swap_vert_circle_outlined,
+                      _ActionIcon(icon: AppIcons.swapVert,
                           tooltip: 'Adjust Stock', color: AppColors.accent_primary,
                           onTap: widget.onStockAdjust),
-                      _ActionIcon(icon: Icons.edit_outlined,
+                      _ActionIcon(icon: AppIcons.edit,
                           tooltip: 'Edit Product', color: AppColors.text_secondary,
                           onTap: widget.onEdit),
                       PopupMenuButton<String>(
@@ -1189,14 +1188,14 @@ class _ProductRowState extends State<_ProductRow> {
                         },
                         itemBuilder: (_) => [
                           PopupMenuItem(value: 'duplicate',
-                              child: _menuRow(Icons.copy_outlined, 'Duplicate')),
+                              child: _menuRow(AppIcons.copy, 'Duplicate')),
                           PopupMenuItem(value: 'toggle',
                               child: _menuRow(
-                                  p.isActive ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                                  p.isActive ? AppIcons.visibilityOff : AppIcons.visibility,
                                   p.isActive ? 'Deactivate' : 'Activate')),
                           const PopupMenuDivider(),
                           PopupMenuItem(value: 'delete',
-                              child: _menuRow(Icons.delete_outline, 'Delete',
+                              child: _menuRow(AppIcons.delete, 'Delete',
                                   color: AppColors.status_danger)),
                         ],
                       ),
@@ -1249,7 +1248,7 @@ class _ProductDetailPanel extends StatelessWidget {
                     color: AppColors.text_primary)),
             const Spacer(),
             IconButton(
-              icon: const Icon(Icons.close, size: 18),
+              icon: const Icon(AppIcons.close, size: 18),
               onPressed: onClose, padding: EdgeInsets.zero,
               constraints: const BoxConstraints(),
               color: AppColors.text_tertiary,
@@ -1314,7 +1313,7 @@ class _ProductDetailPanel extends StatelessWidget {
                 color: AppColors.text_tertiary)),
             const SizedBox(height: 10),
             SizedBox(width: double.infinity, child: OutlinedButton.icon(
-              icon: const Icon(Icons.swap_vert_circle_outlined, size: 16),
+              icon: const Icon(AppIcons.swapVert, size: 16),
               label: const Text('Adjust Stock'),
               onPressed: onStockAdjust,
               style: OutlinedButton.styleFrom(
@@ -1324,7 +1323,7 @@ class _ProductDetailPanel extends StatelessWidget {
             )),
             const SizedBox(height: 8),
             SizedBox(width: double.infinity, child: FilledButton.icon(
-              icon: const Icon(Icons.edit_outlined, size: 16),
+              icon: const Icon(AppIcons.edit, size: 16),
               label: const Text('Edit Product'),
               onPressed: onEdit,
               style: FilledButton.styleFrom(

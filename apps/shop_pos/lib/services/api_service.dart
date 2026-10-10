@@ -27,6 +27,25 @@ class ApiService {
         if (_authToken != null) 'Authorization': 'Bearer $_authToken',
       };
 
+  /// Resolves a shop code to a server URL by treating the code as the
+  /// subdomain slug on trendscore.co.ke.
+  ///
+  /// Examples:
+  ///   gutagala  → https://gutagala.trendscore.co.ke
+  ///   GUTAGALA  → https://gutagala.trendscore.co.ke  (lowercased)
+  ///
+  /// No lookup server needed — the code IS the subdomain.
+  /// When the control-plane resolve API is ready this can be swapped in.
+  Future<String> resolveShopCode(String code) async {
+    lastError = null;
+    final slug = code.toLowerCase().trim();
+    if (slug.isEmpty) {
+      lastError = 'Shop code cannot be empty.';
+      return '';
+    }
+    return 'https://$slug.trendscore.co.ke';
+  }
+
   /// Check server health
   Future<bool> checkHealth() async {
     try {
