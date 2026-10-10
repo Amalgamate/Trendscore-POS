@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart';
 import '../pos_state.dart';
+import '../services/api_service.dart';
 import '../shared/icons.dart';
 
 // ─── Double-Leaf Brand Logo Painter ──────────────────────────────────────────
@@ -113,6 +114,8 @@ class _LoginViewState extends State<LoginView> {
   String _pin = '';
   String? _errorMsg;
   bool _isLoading = false;
+  bool _isLoadingAccounts = false;
+  String? _accountLoadError;
   int _selectedUserIdx = 0;
   final TextEditingController _phoneController = TextEditingController();
 
@@ -139,8 +142,27 @@ class _LoginViewState extends State<LoginView> {
   @override
   void initState() {
     super.initState();
+    if (!kIsWeb) {
+      _isLoadingAccounts = true;
+      _loadMobileAccounts();
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _focusNode.requestFocus();
+    });
+  }
+
+  Future<void> _loadMobileAccounts() async {
+    if (!_isLoadingAccounts) {
+      setState(() => _isLoadingAccounts = true);
+    }
+    final loaded = await widget.state.refreshShopLoginUsers();
+    if (!mounted) return;
+    setState(() {
+      _isLoadingAccounts = false;
+      _accountLoadError = loaded
+          ? null
+          : ApiService.instance.lastError ?? 'Could not load staff accounts.';
+      if (loaded) _errorMsg = null;
     });
   }
 
@@ -171,14 +193,29 @@ class _LoginViewState extends State<LoginView> {
   }
 
   Future<void> _verifyPin() async {
-    final enteredPhone = _phoneController.text.trim();
-    final phone = enteredPhone.isNotEmpty ? enteredPhone : _user.phone;
-    if (phone.replaceAll(RegExp(r'\D'), '').length < 9 || _pin.length < 4) {
-      setState(() => _errorMsg = 'Enter your phone number and PIN.');
+    final phone = _phoneController.text.trim();
+    if (kIsWeb && phone.replaceAll(RegExp(r'\D'), '').length < 9) {
+      setState(() => _errorMsg = 'Enter your phone number.');
+      return;
+    }
+    if (!kIsWeb && (_isLoadingAccounts || _users.isEmpty)) {
+      setState(
+        () => _errorMsg =
+            _accountLoadError ??
+            (_isLoadingAccounts
+                ? 'Loading staff accounts…'
+                : 'No active staff accounts are available for this shop.'),
+      );
+      return;
+    }
+    if (_pin.length < 4) {
+      setState(() => _errorMsg = 'Enter your 4–6 digit PIN.');
       return;
     }
     setState(() => _isLoading = true);
-    final user = await widget.state.authenticateShopUser(phone, _pin);
+    final user = kIsWeb
+        ? await widget.state.authenticateShopUser(phone, _pin)
+        : await widget.state.authenticateShopUserById(_user.id, _pin);
     if (!mounted) return;
     if (user != null) {
       if (user.mustChangePin) {
@@ -207,7 +244,8 @@ class _LoginViewState extends State<LoginView> {
       setState(() {
         _isLoading = false;
         _pin = '';
-        _errorMsg = widget.state.catalogueSyncMessage ?? 'Phone number or PIN is incorrect.';
+        _errorMsg =
+            widget.state.catalogueSyncMessage ?? 'Account or PIN is incorrect.';
       });
     }
   }
@@ -222,58 +260,70 @@ class _LoginViewState extends State<LoginView> {
       builder: (dialogContext) => PopScope(
         canPop: false,
         child: StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
-          title: const Text('Set a new PIN'),
-          content: SizedBox(
-            width: 360,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text('This initial PIN can only be used once. Choose a new 4–6 digit PIN to continue.'),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: pinController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(labelText: 'New PIN'),
-                ),
-                TextField(
-                  controller: confirmController,
-                  obscureText: true,
-                  keyboardType: TextInputType.number,
-                  maxLength: 6,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: const InputDecoration(labelText: 'Confirm new PIN'),
-                ),
-                if (error != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(error!, style: const TextStyle(color: Color(0xFFDC2626))),
+          builder: (context, setDialogState) => AlertDialog(
+            title: const Text('Set a new PIN'),
+            content: SizedBox(
+              width: 360,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'This initial PIN can only be used once. Choose a new 4–6 digit PIN to continue.',
                   ),
-              ],
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: pinController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(labelText: 'New PIN'),
+                  ),
+                  TextField(
+                    controller: confirmController,
+                    obscureText: true,
+                    keyboardType: TextInputType.number,
+                    maxLength: 6,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    decoration: const InputDecoration(
+                      labelText: 'Confirm new PIN',
+                    ),
+                  ),
+                  if (error != null)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        error!,
+                        style: const TextStyle(color: Color(0xFFDC2626)),
+                      ),
+                    ),
+                ],
+              ),
             ),
+            actions: [
+              FilledButton(
+                onPressed: () {
+                  final pin = pinController.text;
+                  if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
+                    setDialogState(
+                      () => error = 'PIN must contain 4 to 6 digits.',
+                    );
+                  } else if (pin != confirmController.text) {
+                    setDialogState(() => error = 'The PINs do not match.');
+                  } else if (pin == '000000') {
+                    setDialogState(
+                      () => error =
+                          'Choose a PIN different from the initial PIN.',
+                    );
+                  } else {
+                    Navigator.of(dialogContext).pop(pin);
+                  }
+                },
+                child: const Text('Save PIN and continue'),
+              ),
+            ],
           ),
-          actions: [
-            FilledButton(
-              onPressed: () {
-                final pin = pinController.text;
-                if (!RegExp(r'^\d{4,6}$').hasMatch(pin)) {
-                  setDialogState(() => error = 'PIN must contain 4 to 6 digits.');
-                } else if (pin != confirmController.text) {
-                  setDialogState(() => error = 'The PINs do not match.');
-                } else if (pin == '000000') {
-                  setDialogState(() => error = 'Choose a PIN different from the initial PIN.');
-                } else {
-                  Navigator.of(dialogContext).pop(pin);
-                }
-              },
-              child: const Text('Save PIN and continue'),
-            ),
-          ],
-        ),
         ),
       ),
     );
@@ -314,12 +364,18 @@ class _LoginViewState extends State<LoginView> {
                         SizedBox(height: 2),
                         Text(
                           'Choose the active staff operator for this session',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF64748B),
+                          ),
                         ),
                       ],
                     ),
                     IconButton(
-                      icon: const Icon(AppIcons.close, color: Color(0xFF64748B)),
+                      icon: const Icon(
+                        AppIcons.close,
+                        color: Color(0xFF64748B),
+                      ),
                       onPressed: () => Navigator.pop(ctx),
                     ),
                   ],
@@ -341,12 +397,19 @@ class _LoginViewState extends State<LoginView> {
                     borderRadius: BorderRadius.circular(12),
                     child: Container(
                       margin: const EdgeInsets.symmetric(vertical: 4),
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 14,
+                        vertical: 12,
+                      ),
                       decoration: BoxDecoration(
-                        color: isSelected ? const Color(0xFFF0FDF4) : Colors.transparent,
+                        color: isSelected
+                            ? const Color(0xFFF0FDF4)
+                            : Colors.transparent,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(
-                          color: isSelected ? const Color(0xFF10B981) : const Color(0xFFE2E8F0),
+                          color: isSelected
+                              ? const Color(0xFF10B981)
+                              : const Color(0xFFE2E8F0),
                         ),
                       ),
                       child: Row(
@@ -374,15 +437,22 @@ class _LoginViewState extends State<LoginView> {
                                       u.fullName,
                                       style: TextStyle(
                                         fontSize: 15,
-                                        fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                                        fontWeight: isSelected
+                                            ? FontWeight.w700
+                                            : FontWeight.w600,
                                         color: const Color(0xFF0F172A),
                                       ),
                                     ),
                                     const SizedBox(width: 8),
                                     Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 8,
+                                        vertical: 2,
+                                      ),
                                       decoration: BoxDecoration(
-                                        color: _roleBadgeColor(u.role).withValues(alpha: 0.12),
+                                        color: _roleBadgeColor(
+                                          u.role,
+                                        ).withValues(alpha: 0.12),
                                         borderRadius: BorderRadius.circular(6),
                                       ),
                                       child: Text(
@@ -398,8 +468,13 @@ class _LoginViewState extends State<LoginView> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  '${u.phone} • ${u.rolePermissions}',
-                                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                  kIsWeb
+                                      ? '${u.phone} • ${u.rolePermissions}'
+                                      : u.rolePermissions,
+                                  style: const TextStyle(
+                                    fontSize: 11,
+                                    color: Color(0xFF64748B),
+                                  ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -407,7 +482,11 @@ class _LoginViewState extends State<LoginView> {
                             ),
                           ),
                           if (isSelected)
-                            const Icon(AppIcons.checkCircle, color: Color(0xFF10B981), size: 20),
+                            const Icon(
+                              AppIcons.checkCircle,
+                              color: Color(0xFF10B981),
+                              size: 20,
+                            ),
                         ],
                       ),
                     ),
@@ -446,7 +525,8 @@ class _LoginViewState extends State<LoginView> {
         _tapKey('⌫');
       } else if (key == LogicalKeyboardKey.escape) {
         _tapKey('CLR');
-      } else if (event.character != null && RegExp(r'^[0-9]$').hasMatch(event.character!)) {
+      } else if (event.character != null &&
+          RegExp(r'^[0-9]$').hasMatch(event.character!)) {
         _tapKey(event.character!);
       }
     }
@@ -455,40 +535,37 @@ class _LoginViewState extends State<LoginView> {
   @override
   Widget build(BuildContext context) {
     final scaffold = Scaffold(
-        backgroundColor: const Color(0xFF0F172A),
-        body: LayoutBuilder(
-          builder: (context, constraints) {
-            final isWide = constraints.maxWidth >= 850;
+      backgroundColor: const Color(0xFF0F172A),
+      body: LayoutBuilder(
+        builder: (context, constraints) {
+          final isWide = constraints.maxWidth >= 850;
 
-            if (isWide) {
-              return Row(
-                children: [
-                  // Left Hero Showcase Panel for Desktop/Tablet
-                  Expanded(
-                    flex: 11,
-                    child: _buildDesktopHeroPanel(),
-                  ),
-                  // Right Mobile-Styled PIN Terminal Panel
-                  Expanded(
-                    flex: 9,
-                    child: Container(
-                      color: Colors.white,
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 420),
-                          child: _buildPinPanelContent(isCompact: false),
-                        ),
+          if (isWide) {
+            return Row(
+              children: [
+                // Left Hero Showcase Panel for Desktop/Tablet
+                Expanded(flex: 11, child: _buildDesktopHeroPanel()),
+                // Right Mobile-Styled PIN Terminal Panel
+                Expanded(
+                  flex: 9,
+                  child: Container(
+                    color: Colors.white,
+                    child: Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 420),
+                        child: _buildPinPanelContent(isCompact: false),
                       ),
                     ),
                   ),
-                ],
-              );
-            }
+                ),
+              ],
+            );
+          }
 
-            // Mobile-first layout (Optimized for 390 x 844px smartphone viewport)
-            return _buildMobileLayout(constraints);
-          },
-        ),
+          // Mobile-first layout (Optimized for 390 x 844px smartphone viewport)
+          return _buildMobileLayout(constraints);
+        },
+      ),
     );
     if (kIsWeb) {
       return KeyboardListener(
@@ -502,9 +579,12 @@ class _LoginViewState extends State<LoginView> {
   }
 
   Widget _buildBrandLogo(double size, {double radius = 6}) {
-    if (widget.state.brandLogoBase64 != null && widget.state.brandLogoBase64!.isNotEmpty) {
+    if (widget.state.brandLogoBase64 != null &&
+        widget.state.brandLogoBase64!.isNotEmpty) {
       try {
-        final bytes = base64Decode(widget.state.brandLogoBase64!.split(',').last);
+        final bytes = base64Decode(
+          widget.state.brandLogoBase64!.split(',').last,
+        );
         return ClipRRect(
           borderRadius: BorderRadius.circular(radius),
           child: Image.memory(
@@ -545,7 +625,7 @@ class _LoginViewState extends State<LoginView> {
   Widget _buildMobileLayout(BoxConstraints constraints) {
     final screenHeight = constraints.maxHeight;
     final topPadding = MediaQuery.paddingOf(context).top;
-    
+
     // Scale hero height dynamically: ~32-35% on tall phones, compact on short phones
     final heroHeight = math.max(220.0, math.min(270.0, screenHeight * 0.33));
 
@@ -556,7 +636,8 @@ class _LoginViewState extends State<LoginView> {
           top: 0,
           left: 0,
           right: 0,
-          height: heroHeight + 36, // Extra height so white card overlaps smoothly
+          height:
+              heroHeight + 36, // Extra height so white card overlaps smoothly
           child: _buildMobileHero(topPadding),
         ),
 
@@ -579,7 +660,9 @@ class _LoginViewState extends State<LoginView> {
               ],
             ),
             child: ClipRRect(
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+              borderRadius: const BorderRadius.vertical(
+                top: Radius.circular(32),
+              ),
               child: _buildPinPanelContent(isCompact: true),
             ),
           ),
@@ -596,12 +679,15 @@ class _LoginViewState extends State<LoginView> {
       children: [
         // Retail Photograph (Cashier smiling with POS terminal)
         Image.network(
-          widget.state.heroImageUrl.isNotEmpty ? widget.state.heroImageUrl : 'cashier_banner.jpg',
+          widget.state.heroImageUrl.isNotEmpty
+              ? widget.state.heroImageUrl
+              : 'cashier_banner.jpg',
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Image.network(
             'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=1200&q=80',
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(color: const Color(0xFF0A192F)),
+            errorBuilder: (_, __, ___) =>
+                Container(color: const Color(0xFF0A192F)),
           ),
         ),
 
@@ -616,7 +702,9 @@ class _LoginViewState extends State<LoginView> {
                   end: Alignment.bottomCenter,
                   colors: [
                     Color(0xD9061423), // 85% dark navy at top
-                    Color(0x990A223B), // softer in middle to see attendant smile
+                    Color(
+                      0x990A223B,
+                    ), // softer in middle to see attendant smile
                     Color(0xE6061423), // dark near sheet overlap
                   ],
                 ),
@@ -670,11 +758,16 @@ class _LoginViewState extends State<LoginView> {
                       onTap: _showCashierPicker,
                       borderRadius: BorderRadius.circular(16),
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 4,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.white.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                          border: Border.all(
+                            color: Colors.white.withValues(alpha: 0.2),
+                          ),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -693,7 +786,11 @@ class _LoginViewState extends State<LoginView> {
                               ),
                             ),
                             const SizedBox(width: 4),
-                            const Icon(AppIcons.swapHoriz, color: Color(0xFF34D399), size: 13),
+                            const Icon(
+                              AppIcons.swapHoriz,
+                              color: Color(0xFF34D399),
+                              size: 13,
+                            ),
                           ],
                         ),
                       ),
@@ -757,7 +854,10 @@ class _LoginViewState extends State<LoginView> {
                 decoration: BoxDecoration(
                   color: const Color(0xFFE8F8F2),
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFFD1FAE5), width: 1.2),
+                  border: Border.all(
+                    color: const Color(0xFFD1FAE5),
+                    width: 1.2,
+                  ),
                 ),
                 child: const Center(
                   child: Icon(
@@ -785,40 +885,43 @@ class _LoginViewState extends State<LoginView> {
 
               // 3. Supporting Text
               Text(
-                'Enter your account phone number, then enter your PIN.',
+                kIsWeb
+                    ? 'Enter your account phone number, then enter your PIN.'
+                    : 'Select your account above, then enter your PIN.',
                 textAlign: TextAlign.center,
-                style: TextStyle(
+                style: const TextStyle(
                   fontSize: 12.5,
                   color: Color(0xFF64748B),
                   height: 1.35,
                 ),
               ),
 
-              const SizedBox(height: 16),
-
-              TextField(
-                controller: _phoneController,
-                focusNode: _phoneFocusNode,
-                keyboardType: TextInputType.phone,
-                textInputAction: TextInputAction.done,
-                maxLength: 16,
-                inputFormatters: [
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9+\s()-]')),
-                ],
-                onSubmitted: (_) {
-                  _phoneFocusNode.unfocus();
-                  _focusNode.requestFocus();
-                },
-                onChanged: (_) {
-                  if (_errorMsg != null) setState(() => _errorMsg = null);
-                },
-                decoration: const InputDecoration(
-                  labelText: 'Phone number',
-                  hintText: '07xx xxx xxx',
-                  prefixIcon: Icon(Icons.phone_iphone),
-                  counterText: '',
+              if (kIsWeb) ...[
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _phoneController,
+                  focusNode: _phoneFocusNode,
+                  keyboardType: TextInputType.phone,
+                  textInputAction: TextInputAction.done,
+                  maxLength: 16,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9+\s()-]')),
+                  ],
+                  onSubmitted: (_) {
+                    _phoneFocusNode.unfocus();
+                    _focusNode.requestFocus();
+                  },
+                  onChanged: (_) {
+                    if (_errorMsg != null) setState(() => _errorMsg = null);
+                  },
+                  decoration: const InputDecoration(
+                    labelText: 'Phone number',
+                    hintText: '07xx xxx xxx',
+                    prefixIcon: Icon(Icons.phone_iphone),
+                    counterText: '',
+                  ),
                 ),
-              ),
+              ],
 
               const SizedBox(height: 12),
 
@@ -826,7 +929,10 @@ class _LoginViewState extends State<LoginView> {
               _ShakeController(
                 shakeKey: _shakeKey,
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 10,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFF1F5F9),
                     borderRadius: BorderRadius.circular(24),
@@ -847,8 +953,8 @@ class _LoginViewState extends State<LoginView> {
                           color: isError
                               ? const Color(0xFFEF4444)
                               : isFilled
-                                  ? const Color(0xFF0F172A)
-                                  : const Color(0xFFCBD5E1),
+                              ? const Color(0xFF0F172A)
+                              : const Color(0xFFCBD5E1),
                         ),
                       );
                     }),
@@ -866,21 +972,32 @@ class _LoginViewState extends State<LoginView> {
                           height: 14,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0D9488)),
+                            valueColor: AlwaysStoppedAnimation<Color>(
+                              Color(0xFF0D9488),
+                            ),
                           ),
                         )
                       : _errorMsg != null
-                          ? Text(
-                              _errorMsg!,
-                              style: const TextStyle(
-                                color: Color(0xFFEF4444),
-                                fontSize: 11.5,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            )
-                          : null,
+                      ? Text(
+                          _errorMsg!,
+                          style: const TextStyle(
+                            color: Color(0xFFEF4444),
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        )
+                      : null,
                 ),
               ),
+              if (!kIsWeb)
+                TextButton(
+                  onPressed: _isLoadingAccounts ? null : _loadMobileAccounts,
+                  child: Text(
+                    _accountLoadError == null
+                        ? 'Refresh accounts'
+                        : 'Retry loading accounts',
+                  ),
+                ),
 
               const SizedBox(height: 6),
 
@@ -901,7 +1018,9 @@ class _LoginViewState extends State<LoginView> {
                   style: FilledButton.styleFrom(
                     backgroundColor: const Color(0xFF0D9488),
                     foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                   ),
                 ),
               ),
@@ -928,7 +1047,9 @@ class _LoginViewState extends State<LoginView> {
                   ),
                 ],
               ),
-              SizedBox(height: math.max(10.0, MediaQuery.paddingOf(context).bottom)),
+              SizedBox(
+                height: math.max(10.0, MediaQuery.paddingOf(context).bottom),
+              ),
             ],
           ),
         );
@@ -986,15 +1107,20 @@ class _LoginViewState extends State<LoginView> {
     final isBio = label == 'CLR';
 
     final bgColor = isBio ? const Color(0xFFE8F8F2) : const Color(0xFFFFFFFF);
-    final borderColor = isBio ? const Color(0xFFD1FAE5) : const Color(0xFFE2E8F0);
+    final borderColor = isBio
+        ? const Color(0xFFD1FAE5)
+        : const Color(0xFFE2E8F0);
 
     return Material(
       color: Colors.transparent,
       child: InkWell(
         onTap: () => _tapKey(label),
         borderRadius: BorderRadius.circular(14),
-        splashColor: (isBio ? const Color(0xFF0D9488) : const Color(0xFF0F172A)).withValues(alpha: 0.1),
-        highlightColor: (isBio ? const Color(0xFF0D9488) : const Color(0xFF0F172A)).withValues(alpha: 0.05),
+        splashColor: (isBio ? const Color(0xFF0D9488) : const Color(0xFF0F172A))
+            .withValues(alpha: 0.1),
+        highlightColor:
+            (isBio ? const Color(0xFF0D9488) : const Color(0xFF0F172A))
+                .withValues(alpha: 0.05),
         child: Ink(
           height: 56,
           decoration: BoxDecoration(
@@ -1017,15 +1143,22 @@ class _LoginViewState extends State<LoginView> {
                     size: 20,
                   )
                 : isBio
-                    ? const Text('CLR', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w700, color: Color(0xFF0D9488)))
-                    : Text(
-                        label,
-                        style: const TextStyle(
-                          fontSize: 22,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A),
-                        ),
-                      ),
+                ? const Text(
+                    'CLR',
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF0D9488),
+                    ),
+                  )
+                : Text(
+                    label,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                      color: Color(0xFF0F172A),
+                    ),
+                  ),
           ),
         ),
       ),
@@ -1039,12 +1172,15 @@ class _LoginViewState extends State<LoginView> {
       fit: StackFit.expand,
       children: [
         Image.network(
-          widget.state.heroImageUrl.isNotEmpty ? widget.state.heroImageUrl : 'cashier_banner.jpg',
+          widget.state.heroImageUrl.isNotEmpty
+              ? widget.state.heroImageUrl
+              : 'cashier_banner.jpg',
           fit: BoxFit.cover,
           errorBuilder: (_, __, ___) => Image.network(
             'https://images.unsplash.com/photo-1556742049-0a67c5574f73?w=1600&q=80',
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => Container(color: const Color(0xFF0F2B48)),
+            errorBuilder: (_, __, ___) =>
+                Container(color: const Color(0xFF0F2B48)),
           ),
         ),
         Container(
@@ -1052,11 +1188,7 @@ class _LoginViewState extends State<LoginView> {
             gradient: LinearGradient(
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
-              colors: [
-                Color(0xFA081B2E),
-                Color(0xDF0A243D),
-                Color(0x550A243D),
-              ],
+              colors: [Color(0xFA081B2E), Color(0xDF0A243D), Color(0x550A243D)],
             ),
           ),
         ),
@@ -1140,11 +1272,17 @@ class _LoginViewState extends State<LoginView> {
               const SizedBox(height: 36),
               _buildDesktopFeature(AppIcons.cart, 'Fast & easy sales'),
               const SizedBox(height: 16),
-              _buildDesktopFeature(AppIcons.inventory, 'Live inventory tracking'),
+              _buildDesktopFeature(
+                AppIcons.inventory,
+                'Live inventory tracking',
+              ),
               const SizedBox(height: 16),
               _buildDesktopFeature(AppIcons.people, 'Customer credit book'),
               const SizedBox(height: 16),
-              _buildDesktopFeature(AppIcons.trendingUp, 'Actionable analytics & reports'),
+              _buildDesktopFeature(
+                AppIcons.trendingUp,
+                'Actionable analytics & reports',
+              ),
               const Spacer(flex: 3),
               const Text(
                 'Simple tools. Real growth.',

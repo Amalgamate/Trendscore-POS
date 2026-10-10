@@ -8,6 +8,7 @@ import { authRouter } from './modules/auth/auth.router';
 import { productsRouter } from './modules/products/products.router';
 import { customersRouter } from './modules/customers/customers.router';
 import { salesRouter } from './modules/sales/sales.router';
+import { suppliersRouter } from './modules/suppliers/suppliers.router';
 import { categoriesRouter } from './modules/categories/categories.router';
 import { businessRouter } from './modules/business/business.router';
 import { deliveryRouter } from './modules/delivery/delivery.router';
@@ -52,6 +53,7 @@ if (BUSINESS_ID) {
   app.use('/categories', categoriesRouter(BUSINESS_ID));
   app.use('/customers', customersRouter(BUSINESS_ID));
   app.use('/sales', salesRouter(BUSINESS_ID));
+  app.use('/suppliers', suppliersRouter(BUSINESS_ID));
   app.use('/business', businessRouter(BUSINESS_ID));
   app.use('/delivery', deliveryRouter(BUSINESS_ID));
 } else {

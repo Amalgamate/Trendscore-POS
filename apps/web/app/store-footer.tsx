@@ -7,9 +7,9 @@ export function StoreFooter() {
         <div>
           <Link className="wordmark footer-wordmark" href="/">
             <span className="wordmark-mark">S</span>
-            <span>Your shop</span>
+            <span>ShopSmart</span>
           </Link>
-          <p>Online store powered by ShopSmart.</p>
+          <p>A storefront preview powered by ShopSmart.</p>
         </div>
         <nav className="policy-links" aria-label="Store policies">
           <Link href="/policies#delivery">Delivery</Link>
@@ -19,7 +19,7 @@ export function StoreFooter() {
         </nav>
       </div>
       <div className="footer-bottom">
-        <span>Store policies will be published by the shop.</span>
+        <span>Sample items only · Ordering is not enabled.</span>
         <span>© {new Date().getFullYear()} ShopSmart</span>
       </div>
     </footer>
