@@ -87,6 +87,33 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
   DateTime? _lastUpdatedAt;
   Timer? _refreshTimer;
 
+  List<Map<String, dynamic>> get _orderedDeliveries {
+    final deliveries = List<Map<String, dynamic>>.of(_deliveries);
+    deliveries.sort((a, b) {
+      final attentionOrder = (_needsAttention(a) ? 0 : 1).compareTo(
+        _needsAttention(b) ? 0 : 1,
+      );
+      if (attentionOrder != 0) return attentionOrder;
+
+      final statusOrder = (a['status'] == 'IN_TRANSIT' ? 0 : 1).compareTo(
+        b['status'] == 'IN_TRANSIT' ? 0 : 1,
+      );
+      if (statusOrder != 0) return statusOrder;
+
+      return (a['recipientName']?.toString() ?? '').compareTo(
+        b['recipientName']?.toString() ?? '',
+      );
+    });
+    return deliveries;
+  }
+
+  Map<String, dynamic>? get _selectedDelivery {
+    for (final delivery in _deliveries) {
+      if (delivery['id']?.toString() == _selectedDeliveryId) return delivery;
+    }
+    return null;
+  }
+
   @override
   void initState() {
     super.initState();
@@ -157,8 +184,14 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
     _hasFittedLocations = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (points.length == 1) {
-        _mapController.move(points.single, 14);
+      final first = points.first;
+      if (points.length == 1 ||
+          points.every(
+            (point) =>
+                point.latitude == first.latitude &&
+                point.longitude == first.longitude,
+          )) {
+        _mapController.move(first, 14);
       } else {
         _mapController.fitCamera(
           CameraFit.bounds(
@@ -202,6 +235,18 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
         DateTime.now().difference(recordedAt) > _staleAfter;
   }
 
+  bool _needsAttention(Map<String, dynamic> delivery) =>
+      delivery['sharingEnabled'] == true &&
+      (_positionFor(delivery) == null || _isStale(delivery));
+
+  double? _accuracyFor(Map<String, dynamic> delivery) {
+    final location = delivery['location'];
+    if (location is! Map) return null;
+    final accuracy = num.tryParse(location['accuracy']?.toString() ?? '');
+    if (accuracy == null || !accuracy.isFinite || accuracy <= 0) return null;
+    return accuracy.toDouble();
+  }
+
   String _ageLabel(DateTime recordedAt) {
     final seconds = math.max(
       0,
@@ -226,8 +271,13 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
         .toList(growable: false);
     if (points.isEmpty) {
       _mapController.move(_initialCenter, 6);
-    } else if (points.length == 1) {
-      _mapController.move(points.single, 14);
+    } else if (points.length == 1 ||
+        points.every(
+          (point) =>
+              point.latitude == points.first.latitude &&
+              point.longitude == points.first.longitude,
+        )) {
+      _mapController.move(points.first, 14);
     } else {
       _mapController.fitCamera(
         CameraFit.bounds(
@@ -239,10 +289,129 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
   }
 
   Color _markerColor(Map<String, dynamic> delivery) {
-    if (_isStale(delivery)) return AppColors.status_warning;
+    final palette = context.palette;
+    if (_isStale(delivery)) return palette.statusWarning;
     return delivery['status'] == 'IN_TRANSIT'
-        ? AppColors.accent_primary
-        : AppColors.status_info;
+        ? palette.accentPrimary
+        : palette.statusInfo;
+  }
+
+  String _markerSemanticsLabel(Map<String, dynamic> delivery) {
+    final riderName =
+        (delivery['rider'] as Map?)?['fullName']?.toString() ??
+        'Unassigned rider';
+    final status = delivery['status']?.toString() ?? 'Active';
+    final recordedAt = _recordedAt(delivery);
+    final locationLabel = _needsAttention(delivery)
+        ? 'Location needs attention'
+        : recordedAt == null
+        ? 'Location not available'
+        : 'Location ${_ageLabel(recordedAt)}';
+    return '${delivery['recipientName'] ?? 'Delivery'}, $riderName, $status, $locationLabel';
+  }
+
+  Widget _mapLegend() {
+    final palette = context.palette;
+    final entries = [
+      (palette.accentPrimary, 'In transit'),
+      (palette.statusInfo, 'Assigned'),
+      (palette.statusWarning, 'Needs update'),
+    ];
+    return Material(
+      color: palette.bgSurface.withValues(alpha: 0.96),
+      borderRadius: BorderRadius.circular(8),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 6,
+          children: [
+            for (final (color, label) in entries)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 8,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      color: color,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      color: palette.textSecondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _selectedDeliveryCard(Map<String, dynamic> delivery) {
+    final palette = context.palette;
+    final riderName =
+        (delivery['rider'] as Map?)?['fullName']?.toString() ??
+        'Unassigned rider';
+    final recordedAt = _recordedAt(delivery);
+    final stale = _needsAttention(delivery);
+    final accuracy = _accuracyFor(delivery);
+    final status = delivery['status'] == 'IN_TRANSIT'
+        ? 'In transit'
+        : 'Assigned';
+    final locationStatus = delivery['sharingEnabled'] != true
+        ? 'Location sharing off'
+        : recordedAt == null
+        ? 'Waiting for first fix'
+        : '${stale ? 'Last fix' : 'Updated'} ${_ageLabel(recordedAt)}'
+              '${accuracy == null ? '' : ' · ±${accuracy.round()} m'}';
+    return Material(
+      color: palette.bgSurface.withValues(alpha: 0.97),
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              delivery['recipientName']?.toString() ?? 'Delivery',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: palette.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              '$riderName · $status',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(color: palette.textSecondary, fontSize: 12),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              locationStatus,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: stale ? palette.statusWarning : palette.textTertiary,
+                fontSize: 11,
+                fontWeight: stale ? FontWeight.w600 : FontWeight.w400,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   Widget _mapPanel() {
@@ -266,6 +435,23 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'ke.trendscore.retailpos.shop_pos',
               ),
+              CircleLayer(
+                circles: [
+                  for (final delivery in _deliveries)
+                    if (_positionFor(delivery) case final point?)
+                      if (_accuracyFor(delivery) case final accuracy?)
+                        CircleMarker(
+                          point: point,
+                          radius: accuracy,
+                          useRadiusInMeter: true,
+                          color: _markerColor(delivery).withValues(alpha: 0.12),
+                          borderColor: _markerColor(
+                            delivery,
+                          ).withValues(alpha: 0.55),
+                          borderStrokeWidth: 1,
+                        ),
+                ],
+              ),
               MarkerLayer(
                 markers: [
                   for (final delivery in _deliveries)
@@ -276,8 +462,7 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
                         height: 52,
                         child: Semantics(
                           button: true,
-                          label:
-                              '${delivery['recipientName'] ?? 'Delivery'}, ${delivery['status'] ?? 'Active'}',
+                          label: _markerSemanticsLabel(delivery),
                           child: GestureDetector(
                             onTap: () => _selectDelivery(delivery),
                             child: AnimatedContainer(
@@ -305,12 +490,16 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
                       ),
                 ],
               ),
-              SimpleAttributionWidget(
-                source: const Text('© OpenStreetMap contributors'),
-                backgroundColor: palette.bgSurface.withValues(alpha: 0.92),
+              RichAttributionWidget(
+                attributions: const [
+                  TextSourceAttribution('OpenStreetMap contributors'),
+                ],
+                popupBackgroundColor: palette.bgSurface.withValues(alpha: 0.92),
+                showFlutterMapAttribution: false,
               ),
             ],
           ),
+          Positioned(top: 12, left: 12, child: _mapLegend()),
           Positioned(
             top: 12,
             right: 12,
@@ -325,9 +514,22 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
               ),
             ),
           ),
+          if (_selectedDelivery case final selected?)
+            Positioned(
+              bottom: 36,
+              left: 12,
+              right: 12,
+              child: Align(
+                alignment: Alignment.bottomLeft,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 300),
+                  child: _selectedDeliveryCard(selected),
+                ),
+              ),
+            ),
           if (!hasCoordinates)
             Positioned(
-              top: 12,
+              top: 58,
               left: 12,
               right: 64,
               child: Material(
@@ -414,9 +616,10 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
         ),
       );
     }
+    final orderedDeliveries = _orderedDeliveries;
     return ListView.separated(
       padding: const EdgeInsets.symmetric(vertical: 4),
-      itemCount: _deliveries.length,
+      itemCount: orderedDeliveries.length,
       separatorBuilder: (_, _) => Divider(
         height: 1,
         color: palette.borderSubtle,
@@ -424,15 +627,15 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
         endIndent: 16,
       ),
       itemBuilder: (context, index) {
-        final delivery = _deliveries[index];
+        final delivery = orderedDeliveries[index];
         final status = delivery['status']?.toString() ?? 'ASSIGNED';
         final sharingEnabled = delivery['sharingEnabled'] == true;
         final recordedAt = _recordedAt(delivery);
         final hasPosition = _positionFor(delivery) != null;
-        final stale = sharingEnabled && (!hasPosition || _isStale(delivery));
+        final stale = _needsAttention(delivery);
         final statusColor = status == 'IN_TRANSIT'
-            ? AppColors.accent_primary
-            : AppColors.status_info;
+            ? palette.accentPrimary
+            : palette.statusInfo;
         final locationLabel = !sharingEnabled
             ? 'Location sharing off'
             : !hasPosition
@@ -485,6 +688,11 @@ class _DeliveryMapTabState extends State<_DeliveryMapTab> {
                     fontWeight: stale ? FontWeight.w600 : FontWeight.w400,
                   ),
                 ),
+                if (sharingEnabled && hasPosition)
+                  Text(
+                    'GPS accuracy ±${_accuracyFor(delivery)?.round() ?? '—'} m',
+                    style: TextStyle(color: palette.textTertiary, fontSize: 11),
+                  ),
               ],
             ),
           ),
