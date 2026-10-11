@@ -6,7 +6,11 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "node ../../scripts/check-no-gradients.mjs && node ../../scripts/check-no-hardcoded-colors.mjs",
+    "lint:gradients": "node ../../scripts/check-no-gradients.mjs",
+    "lint:colors": "node ../../scripts/check-no-hardcoded-colors.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "next": "^15.5.9",
@@ -14,9 +18,17 @@
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
+    "@axe-core/react": "^4.13.0",
+    "@testing-library/jest-dom": "^7.0.1",
+    "@testing-library/react": "^16.3.3",
+    "@testing-library/user-event": "^14.6.7",
     "@types/node": "^22.10.2",
     "@types/react": "^19.1.0",
     "@types/react-dom": "^19.1.0",
-    "typescript": "^5.7.2"
+    "@vitejs/plugin-react": "^4.7.0",
+    "axe-playwright": "^2.2.2",
+    "jsdom": "^26.1.0",
+    "typescript": "^5.7.2",
+    "vitest": "^3.2.7"
   }
 }
