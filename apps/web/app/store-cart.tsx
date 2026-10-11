@@ -54,6 +54,7 @@ type CartContextValue = {
   products: StoreProduct[];
   catalogState: CatalogState;
   storefrontProfile: StorefrontProfile;
+  storefrontProfileLoaded: boolean;
   items: CartLine[];
   itemCount: number;
   subtotal: number;
@@ -62,6 +63,7 @@ type CartContextValue = {
   add: (productId: string) => void;
   setQuantity: (productId: string, quantity: number) => void;
   remove: (productId: string) => void;
+  clear: () => void;
 };
 
 const storageKey = 'shopsmart-storefront-cart';
@@ -73,6 +75,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
   const [storefrontProfile, setStorefrontProfile] = useState<StorefrontProfile>(
     EMPTY_STOREFRONT_PROFILE,
   );
+  const [storefrontProfileLoaded, setStorefrontProfileLoaded] = useState(false);
   const [items, setItems] = useState<CartLine[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [storageError, setStorageError] = useState(false);
@@ -203,6 +206,9 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
       .catch((error: unknown) => {
         console.error('Could not load the public storefront profile.', error);
         setStorefrontProfile(EMPTY_STOREFRONT_PROFILE);
+      })
+      .finally(() => {
+        setStorefrontProfileLoaded(true);
       });
   }, []);
 
@@ -274,6 +280,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
     (productId: string) => setQuantity(productId, 0),
     [setQuantity],
   );
+  const clear = useCallback(() => setItems([]), []);
 
   const value = useMemo(() => {
     const itemCount = items.reduce((sum, line) => sum + line.quantity, 0);
@@ -285,6 +292,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
       products,
       catalogState,
       storefrontProfile,
+      storefrontProfileLoaded,
       items,
       itemCount,
       subtotal,
@@ -293,17 +301,20 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
       add,
       setQuantity,
       remove,
+      clear,
     };
   }, [
     products,
     catalogState,
     storefrontProfile,
+    storefrontProfileLoaded,
     items,
     hydrated,
     storageError,
     add,
     setQuantity,
     remove,
+    clear,
   ]);
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

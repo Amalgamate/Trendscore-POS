@@ -97,6 +97,10 @@ describe('createSale payment methods', () => {
     const result = await createSale(client, input('CASH', { cashTendered: 120 }));
 
     expect(result.paymentStatus).toBe('SUCCESS');
+    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(tx.$queryRaw.mock.invocationCallOrder[0]!).toBeLessThan(
+      tx.product.findMany.mock.invocationCallOrder[0]!,
+    );
     expect(tx.salePayment.create).toHaveBeenCalledWith({
       data: expect.objectContaining({
         method: 'CASH',

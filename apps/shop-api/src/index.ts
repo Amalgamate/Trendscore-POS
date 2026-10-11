@@ -12,6 +12,10 @@ import { suppliersRouter } from './modules/suppliers/suppliers.router';
 import { categoriesRouter } from './modules/categories/categories.router';
 import { businessRouter } from './modules/business/business.router';
 import { deliveryRouter } from './modules/delivery/delivery.router';
+import {
+  expirePendingStorefrontOrders,
+  storefrontOrdersRouter,
+} from './modules/storefront/storefront-orders.router';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const VERSION = process.env.APP_VERSION ?? 'dev';
@@ -56,6 +60,7 @@ if (BUSINESS_ID) {
   app.use('/suppliers', suppliersRouter(BUSINESS_ID));
   app.use('/business', businessRouter(BUSINESS_ID));
   app.use('/delivery', deliveryRouter(BUSINESS_ID));
+  app.use('/storefront/orders', storefrontOrdersRouter(BUSINESS_ID));
 } else {
   log.warn('BUSINESS_ID is not set — business routes are disabled. Set the env var to enable them.');
 }
@@ -69,9 +74,19 @@ const server = app.listen(PORT, () => {
   log.info({ port: PORT, version: VERSION, businessId: BUSINESS_ID || 'unset' }, 'shop-api listening');
 });
 
+const storefrontOrderReaper = BUSINESS_ID
+  ? setInterval(() => {
+      void expirePendingStorefrontOrders(BUSINESS_ID).catch((err: unknown) => {
+        log.error({ err }, 'failed to expire pending storefront order reservations');
+      });
+    }, 60_000)
+  : null;
+storefrontOrderReaper?.unref();
+
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
     log.info({ signal }, 'shutting down');
+    if (storefrontOrderReaper) clearInterval(storefrontOrderReaper);
     server.close(() => process.exit(0));
   });
 }

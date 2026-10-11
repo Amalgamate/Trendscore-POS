@@ -19,9 +19,23 @@ import 'views/reports_view.dart';
 import 'views/settings_view.dart';
 import 'views/purchase_orders_view.dart';
 import 'views/delivery_view.dart';
+import 'views/storefront_orders_view.dart';
+import 'views/mpesa_integration_view.dart';
 import 'views/website_builder_view.dart';
 import 'views/rider_home_view.dart';
 import 'shared/icons.dart';
+
+Set<int> accessibleTabsFor(PosUserRole? role) {
+  if (role == null) return const <int>{};
+  return switch (role) {
+    PosUserRole.superAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+    PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11},
+    PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11},
+    PosUserRole.cashier => const <int>{0, 1, 4, 8, 10},
+    PosUserRole.stockClerk => const <int>{2, 7},
+    PosUserRole.rider => const <int>{},
+  };
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -94,7 +108,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _isLocked = widget.state.currentLoggedInUser == null;
-    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 9);
+    _activeTabIndex = widget.state.savedTabIndex.clamp(0, 11);
     _startInactivityTimer();
   }
 
@@ -370,15 +384,7 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
   }
 
   Set<int> _accessibleTabs(PosUser? user) {
-    if (user == null) return const <int>{};
-    return switch (user.role) {
-      PosUserRole.superAdmin => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
-      PosUserRole.owner => const <int>{0, 1, 2, 3, 4, 5, 6, 7, 8, 9},
-      PosUserRole.manager => const <int>{0, 1, 2, 3, 4, 5, 7, 8, 9},
-      PosUserRole.cashier => const <int>{0, 1, 4, 8},
-      PosUserRole.stockClerk => const <int>{2, 7},
-      PosUserRole.rider => const <int>{},
-    };
+    return accessibleTabsFor(user?.role);
   }
 
   void _selectTab(int index) {
@@ -442,6 +448,20 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                     Icons.storefront_rounded,
                     'Storefront settings',
                     9,
+                    ctx,
+                  ),
+                if (allowedTabs.contains(10))
+                  _moreTile(
+                    Icons.shopping_bag_outlined,
+                    'Online Orders',
+                    10,
+                    ctx,
+                  ),
+                if (allowedTabs.contains(11))
+                  _moreTile(
+                    Icons.account_balance_rounded,
+                    'Integrations',
+                    11,
                     ctx,
                   ),
               ],
@@ -655,6 +675,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             7 => 'Orders',
             8 => 'Delivery',
             9 => 'Storefront',
+            10 => 'Online Orders',
+            11 => 'Integrations',
             _ => 'ShopSmart POS',
           };
 
@@ -678,6 +700,12 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             // index 8 — Delivery management view
             DeliveryView(state: widget.state),
             WebsiteBuilderView(state: widget.state),
+            _activeTabIndex == 10
+                ? const StorefrontOrdersView()
+                : const SizedBox.shrink(),
+            _activeTabIndex == 11
+                ? const MpesaIntegrationView()
+                : const SizedBox.shrink(),
           ];
 
           if (isMobile) {
@@ -705,7 +733,8 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
                     notificationPredicate: (notification) =>
                         notification.depth == 0 &&
                         _activeTabIndex != 2 &&
-                        _activeTabIndex != 8,
+                        _activeTabIndex != 8 &&
+                        _activeTabIndex != 10,
                     onRefresh: _refreshCurrentView,
                     child: IndexedStack(
                       index: _activeTabIndex,
@@ -981,6 +1010,16 @@ class _NavigationSidebar extends StatelessWidget {
                       tab: 9,
                       icon: Icons.storefront_rounded,
                       label: 'Storefront',
+                    ),
+                    (
+                      tab: 10,
+                      icon: Icons.shopping_bag_outlined,
+                      label: 'Online Orders',
+                    ),
+                    (
+                      tab: 11,
+                      icon: Icons.account_balance_rounded,
+                      label: 'Integrations',
                     ),
                   ])
                     if (visibleTabs.contains(item.tab))
