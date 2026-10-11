@@ -443,6 +443,12 @@ export function productsRouter(businessId: string): Router {
 
     try {
       const result = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "products"
+            WHERE "businessId" = ${businessId}::uuid
+              AND "id" = ${productId}::uuid
+            FOR UPDATE`,
+        );
         const product = await tx.product.findFirstOrThrow({ where: { id: productId, businessId } });
         const newStock = Number(product.stock) + body.delta;
 

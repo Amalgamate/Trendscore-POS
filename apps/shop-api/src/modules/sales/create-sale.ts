@@ -96,8 +96,16 @@ export async function createSale(
       );
     }
 
-    // 2. Fetch products and lock them FOR UPDATE
-    const productIds = lines.map((l) => l.productId);
+    // Lock stock rows in a stable order before reading balances so POS sales
+    // serialize with storefront reservations and other inventory mutations.
+    const productIds = [...new Set(lines.map((line) => line.productId))].sort();
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "products"
+        WHERE "businessId" = ${businessId}::uuid
+          AND "id" IN (${Prisma.join(productIds.map((id) => Prisma.sql`${id}::uuid`))})
+        ORDER BY "id"
+        FOR UPDATE`,
+    );
     const products = await tx.product.findMany({
       where: { id: { in: productIds }, businessId },
     });

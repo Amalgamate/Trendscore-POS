@@ -27,7 +27,7 @@ export default function CartPage() {
         <div>
           <h1>Your bag</h1>
           <p className="page-intro">
-            Your selected shop products. Online checkout is not enabled yet.
+            Your selected products, ready to order from this shop.
           </p>
         </div>
         <Link className="back-link" href="/#products">
@@ -37,7 +37,7 @@ export default function CartPage() {
 
       {storageError && (
         <p className="inline-warning" role="status">
-          Your browser could not save this preview bag. It may clear when you
+          Your browser could not save your bag. It may clear when you
           leave this page.
         </p>
       )}
@@ -139,13 +139,14 @@ export default function CartPage() {
             </div>
             <div className="summary-row summary-muted">
               <span>Delivery</span>
-              <span>Not configured</span>
+              <span>Confirmed by shop</span>
             </div>
             <p className="summary-note">
-              Delivery and verified online payment are still being connected.
+              No payment is taken now. The shop confirms any delivery charge
+              before payment.
             </p>
-            <Link className="button button-disabled" href="/checkout">
-              Checkout unavailable
+            <Link className="button button-primary" href="/checkout">
+              Continue to checkout
             </Link>
             <Link className="text-link summary-policies" href="/policies">
               Review store information

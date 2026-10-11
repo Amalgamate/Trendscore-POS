@@ -46,7 +46,22 @@ const AssignRiderSchema = z.object({
 
 const UpdateStatusSchema = z.object({
   status: z.enum(['IN_TRANSIT', 'DELIVERED', 'FAILED']),
-  failureReason: z.string().optional(),
+  failureReason: z.string().trim().min(1).max(500).optional(),
+}).superRefine((body, ctx) => {
+  if (body.status === 'FAILED' && !body.failureReason) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['failureReason'],
+      message: 'A failure reason is required.',
+    });
+  }
+});
+
+export const RiderLocationSchema = z.object({
+  latitude: z.number().finite().min(-90).max(90),
+  longitude: z.number().finite().min(-180).max(180),
+  accuracy: z.number().finite().positive().max(10000),
+  recordedAt: z.string().datetime({ offset: true }),
 });
 
 const CancelOrderSchema = z.object({
@@ -109,12 +124,256 @@ export function deliveryRouter(businessId: string): Router {
     const auth = res.locals.auth as AuthLocals;
     if (auth?.role === 'RIDER') {
       const isRiderPath = req.path.startsWith('/rider/');
+      const isOrderLocation =
+        req.method === 'POST' &&
+        /^\/orders\/[^/]+\/location$/.test(req.path);
       const isStatusUpdate = req.method === 'PATCH' && /^\/orders\/[^/]+\/status$/.test(req.path);
-      if (!isRiderPath && !isStatusUpdate) {
+      if (!isRiderPath && !isStatusUpdate && !isOrderLocation) {
         return sendError(res, 403, 'FORBIDDEN', 'Your account does not have permission to do this.');
       }
     }
     return next();
+  });
+
+  router.get('/rider/location-consent', requireAuth, requireRole('RIDER'), async (_req, res) => {
+    const auth = res.locals.auth as AuthLocals;
+    try {
+      const [rider, activeDeliveries, lastLocation] = await Promise.all([
+        prisma.user.findUnique({
+          where: { id: auth.userId },
+          select: {
+            riderLocationConsentAt: true,
+            riderLocationConsentRevokedAt: true,
+          },
+        }),
+        prisma.deliveryOrder.count({
+          where: {
+            businessId,
+            riderId: auth.userId,
+            status: { in: ['ASSIGNED', 'IN_TRANSIT'] },
+          },
+        }),
+        prisma.riderLocation.findFirst({
+          where: {
+            businessId,
+            riderId: auth.userId,
+            deliveryOrder: { status: { in: ['ASSIGNED', 'IN_TRANSIT'] } },
+          },
+          orderBy: { recordedAt: 'desc' },
+          select: { recordedAt: true },
+        }),
+      ]);
+      const sharingEnabled = Boolean(
+        rider?.riderLocationConsentAt &&
+        !rider.riderLocationConsentRevokedAt,
+      );
+      return send200(res, {
+        sharingEnabled,
+        activeDeliveries,
+        lastLocationAt: lastLocation?.recordedAt ?? null,
+      });
+    } catch (err) {
+      console.error('delivery/rider/location-consent GET error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch location sharing status.');
+    }
+  });
+
+  router.patch('/rider/location-consent', requireAuth, requireRole('RIDER'), async (req, res) => {
+    const body = parseBody(z.object({ enabled: z.boolean() }), req, res);
+    if (!body) return;
+    const auth = res.locals.auth as AuthLocals;
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const activeOrders = await tx.deliveryOrder.findMany({
+          where: {
+            businessId,
+            riderId: auth.userId,
+            status: { in: ['ASSIGNED', 'IN_TRANSIT'] },
+          },
+          select: { id: true },
+        });
+        if (body.enabled && activeOrders.length === 0) {
+          return { enabled: false, activeDeliveries: 0 };
+        }
+        const now = new Date();
+        await tx.user.update({
+          where: { id: auth.userId },
+          data: body.enabled
+            ? { riderLocationConsentAt: now, riderLocationConsentRevokedAt: null }
+            : { riderLocationConsentRevokedAt: now },
+        });
+        if (!body.enabled) {
+          await tx.riderLocation.deleteMany({
+            where: { businessId, riderId: auth.userId },
+          });
+        }
+        if (activeOrders.length > 0) {
+          await tx.auditLog.create({
+            data: {
+              businessId,
+              userId: auth.userId,
+              action: body.enabled ? 'DELIVERY_LOCATION_CONSENT_GRANTED' : 'DELIVERY_LOCATION_CONSENT_REVOKED',
+              entityType: 'DELIVERY_ORDER',
+              entityId: activeOrders[0]!.id,
+            },
+          });
+        }
+        return { enabled: body.enabled, activeDeliveries: activeOrders.length };
+      });
+      return send200(res, result);
+    } catch (err) {
+      console.error('delivery/rider/location-consent PATCH error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to update location sharing consent.');
+    }
+  });
+
+  router.post('/orders/:id/location', requireAuth, requireRole('RIDER'), async (req, res) => {
+    const body = parseBody(RiderLocationSchema, req, res);
+    if (!body) return;
+    const auth = res.locals.auth as AuthLocals;
+    const orderId = req.params['id'] as string;
+    const recordedAt = new Date(body.recordedAt);
+    const now = new Date();
+    if (recordedAt > new Date(now.getTime() + 60_000) ||
+        recordedAt < new Date(now.getTime() - 5 * 60_000)) {
+      return sendError(res, 422, 'STALE_LOCATION', 'Location timestamp must be within the last five minutes.');
+    }
+    try {
+      const result = await prisma.$transaction(async (tx) => {
+        const consentedRider = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM users
+          WHERE id = ${auth.userId}::uuid
+            AND "riderLocationConsentAt" IS NOT NULL
+            AND "riderLocationConsentRevokedAt" IS NULL
+          FOR UPDATE
+        `;
+        if (consentedRider.length === 0) {
+          return { error: 'LOCATION_CONSENT_REQUIRED' as const };
+        }
+        const lockedOrder = await tx.$queryRaw<Array<{ id: string }>>`
+          SELECT id
+          FROM delivery_orders
+          WHERE id = ${orderId}::uuid
+            AND "businessId" = ${businessId}::uuid
+            AND "riderId" = ${auth.userId}::uuid
+            AND status IN ('ASSIGNED', 'IN_TRANSIT')
+          FOR UPDATE
+        `;
+        if (lockedOrder.length === 0) {
+          const assignedOrder = await tx.deliveryOrder.findFirst({
+            where: { id: orderId, businessId, riderId: auth.userId },
+            select: { status: true },
+          });
+          if (!assignedOrder) return { error: 'NOT_FOUND' as const };
+          return { error: 'DELIVERY_INACTIVE' as const };
+        }
+        const order = await tx.deliveryOrder.findFirst({
+          where: {
+            id: orderId,
+            businessId,
+            riderId: auth.userId,
+            status: { in: ['ASSIGNED', 'IN_TRANSIT'] },
+          },
+          select: { id: true, riderId: true },
+        });
+        if (!order) {
+          return { error: 'DELIVERY_INACTIVE' as const };
+        }
+        const current = await tx.riderLocation.findUnique({
+          where: { deliveryOrderId: order.id },
+          select: { recordedAt: true },
+        });
+        if (current && recordedAt <= current.recordedAt) {
+          return { error: 'STALE_LOCATION' as const };
+        }
+        if (current && recordedAt.getTime() - current.recordedAt.getTime() < 15_000) {
+          return { error: 'RATE_LIMITED' as const };
+        }
+        await tx.riderLocation.upsert({
+          where: { deliveryOrderId: order.id },
+          create: {
+            businessId,
+            deliveryOrderId: order.id,
+            riderId: auth.userId,
+            latitude: body.latitude,
+            longitude: body.longitude,
+            accuracy: body.accuracy,
+            recordedAt,
+          },
+          update: {
+            riderId: auth.userId,
+            latitude: body.latitude,
+            longitude: body.longitude,
+            accuracy: body.accuracy,
+            recordedAt,
+          },
+        });
+        return { recordedAt };
+      });
+      if ('error' in result) {
+        if (result.error === 'NOT_FOUND') {
+          return sendError(res, 404, 'NOT_FOUND', 'Delivery order not found.');
+        }
+        if (result.error === 'DELIVERY_INACTIVE') {
+          return sendError(res, 422, 'DELIVERY_INACTIVE', 'Location is accepted only during an active delivery.');
+        }
+        if (result.error === 'RATE_LIMITED') {
+          return sendError(res, 429, 'LOCATION_RATE_LIMITED', 'Location updates are limited to one every 15 seconds.');
+        }
+        if (result.error === 'STALE_LOCATION') {
+          return sendError(res, 409, 'STALE_LOCATION', 'A newer location has already been recorded.');
+        }
+        return sendError(res, 403, 'LOCATION_CONSENT_REQUIRED', 'Enable location sharing before sending your location.');
+      }
+      return send200(res, { accepted: true, recordedAt: result.recordedAt });
+    } catch (err) {
+      console.error('delivery/orders/:id/location POST error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to update rider location.');
+    }
+  });
+
+  router.get('/locations/active', requireAuth, requireRole('MANAGER', 'OWNER', 'SUPER_ADMIN'), async (_req, res) => {
+    try {
+      const activeOrders = await prisma.deliveryOrder.findMany({
+        where: {
+          businessId,
+          status: { in: ['ASSIGNED', 'IN_TRANSIT'] },
+        },
+        include: {
+          location: true,
+          rider: {
+            select: {
+              fullName: true,
+              riderLocationConsentAt: true,
+              riderLocationConsentRevokedAt: true,
+            },
+          },
+        },
+        orderBy: { assignedAt: 'asc' },
+      });
+      return send200(
+        res,
+        activeOrders.map((order) => {
+          const sharingEnabled = Boolean(
+            order.rider?.riderLocationConsentAt &&
+            !order.rider.riderLocationConsentRevokedAt,
+          );
+          return {
+            id: order.id,
+            status: order.status,
+            recipientName: order.recipientName,
+            deliveryAddress: order.deliveryAddress,
+            sharingEnabled,
+            rider: order.rider ? { fullName: order.rider.fullName } : null,
+            location: sharingEnabled ? order.location : null,
+          };
+        }),
+      );
+    } catch (err) {
+      console.error('delivery/locations/active GET error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch active rider locations.');
+    }
   });
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -321,8 +580,8 @@ export function deliveryRouter(businessId: string): Router {
             return { ok: false, error: { status: 404, code: 'NOT_FOUND', message: 'Delivery order not found.' } };
           }
 
-          // Validate transition
-          if (order.status !== 'PENDING') {
+          // Reassignment is allowed until the rider has picked up the order.
+          if (order.status !== 'PENDING' && order.status !== 'ASSIGNED') {
             return {
               ok: false,
               error: { status: 422, code: 'INVALID_TRANSITION', message: `Cannot assign a rider to an order in status '${order.status}'.` },
@@ -344,7 +603,14 @@ export function deliveryRouter(businessId: string): Router {
           // Update order
           const updated = await tx.deliveryOrder.update({
             where: { id: order.id },
-            data: { status: 'ASSIGNED', riderId, assignedAt: new Date() },
+            data: {
+              status: 'ASSIGNED',
+              riderId,
+              assignedAt: new Date(),
+            },
+          });
+          await tx.riderLocation.deleteMany({
+            where: { businessId, deliveryOrderId: order.id },
           });
 
           // Audit log
@@ -352,7 +618,7 @@ export function deliveryRouter(businessId: string): Router {
             data: {
               businessId,
               userId: auth.userId,
-              action: 'ASSIGN',
+              action: order.status === 'ASSIGNED' ? 'REASSIGN' : 'ASSIGN',
               entityType: 'DELIVERY_ORDER',
               entityId: order.id,
             },
@@ -406,6 +672,9 @@ export function deliveryRouter(businessId: string): Router {
 
           // State machine validation
           const current = order.status;
+          if (current === requestedStatus) {
+            return { ok: true, data: order };
+          }
           const updateData: {
             status: typeof requestedStatus;
             pickedUpAt?: Date;
@@ -431,12 +700,41 @@ export function deliveryRouter(businessId: string): Router {
               },
             };
           }
-
-          // Update order
-          const updated = await tx.deliveryOrder.update({
-            where: { id: order.id },
+          // Compare-and-set prevents duplicate completion/ledger credits on retries.
+          const updateResult = await tx.deliveryOrder.updateMany({
+            where: { id: order.id, businessId, status: current },
             data: updateData,
           });
+          if (updateResult.count === 0) {
+            const latest = await tx.deliveryOrder.findFirst({
+              where: { id: order.id, businessId },
+            });
+            if (latest?.status === requestedStatus) {
+              return { ok: true, data: latest };
+            }
+            return {
+              ok: false,
+              error: {
+                status: 422,
+                code: 'INVALID_TRANSITION',
+                message: `Cannot transition from '${latest?.status ?? current}' to '${requestedStatus}'.`,
+              },
+            };
+          }
+          const updated = await tx.deliveryOrder.findFirst({
+            where: { id: order.id, businessId },
+          });
+          if (!updated) {
+            return {
+              ok: false,
+              error: { status: 404, code: 'NOT_FOUND', message: 'Delivery order not found.' },
+            };
+          }
+          if (requestedStatus === 'DELIVERED' || requestedStatus === 'FAILED') {
+            await tx.riderLocation.deleteMany({
+              where: { businessId, deliveryOrderId: order.id },
+            });
+          }
 
           // On DELIVERED: create RiderLedger CREDIT
           if (requestedStatus === 'DELIVERED' && order.riderId) {
@@ -522,7 +820,13 @@ export function deliveryRouter(businessId: string): Router {
 
           const updated = await tx.deliveryOrder.update({
             where: { id: order.id },
-            data: { status: 'CANCELLED', failureReason: reason },
+            data: {
+              status: 'CANCELLED',
+              failureReason: reason,
+            },
+          });
+          await tx.riderLocation.deleteMany({
+            where: { businessId, deliveryOrderId: order.id },
           });
 
           await tx.auditLog.create({

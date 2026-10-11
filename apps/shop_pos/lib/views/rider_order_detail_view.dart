@@ -21,6 +21,9 @@ class RiderOrderDetailView extends StatefulWidget {
 class _RiderOrderDetailViewState extends State<RiderOrderDetailView> {
   late Map<String, dynamic> _order;
   bool _loading = false;
+  String? _error;
+  String? _retryStatus;
+  String? _retryFailureReason;
 
   @override
   void initState() {
@@ -39,20 +42,83 @@ class _RiderOrderDetailViewState extends State<RiderOrderDetailView> {
     };
   }
 
-  Future<void> _advanceStatus(String newStatus) async {
-    setState(() => _loading = true);
+  Future<void> _advanceStatus(
+    String newStatus, {
+    String? failureReason,
+  }) async {
+    if (_loading) return;
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
     final result = await ApiService.instance.updateDeliveryStatus(
-      _order['id'] as String, newStatus);
+      _order['id'] as String,
+      newStatus,
+      failureReason: failureReason,
+    );
     if (!mounted) return;
-    setState(() => _loading = false);
     if (result == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Could not update status. Please try again.')),
-      );
+      setState(() {
+        _loading = false;
+        _error = ApiService.instance.lastError ??
+            'Could not update status. Your delivery was not changed.';
+        _retryStatus = newStatus;
+        _retryFailureReason = failureReason;
+      });
       return;
     }
-    setState(() => _order = result);
-    if (newStatus == 'DELIVERED') Navigator.of(context).pop(true);
+    setState(() {
+      _loading = false;
+      _error = null;
+      _retryStatus = null;
+      _retryFailureReason = null;
+      _order = result;
+    });
+    if (newStatus == 'DELIVERED' || newStatus == 'FAILED') {
+      Navigator.of(context).pop(true);
+    }
+  }
+
+  Future<void> _reportFailure() async {
+    final reasonController = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Report delivery issue'),
+        content: TextField(
+          controller: reasonController,
+          autofocus: true,
+          maxLength: 500,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'What prevented delivery?',
+            hintText: 'Add a short reason for the back office.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = reasonController.text.trim();
+              if (value.isNotEmpty) Navigator.pop(dialogContext, value);
+            },
+            child: const Text('Submit issue'),
+          ),
+        ],
+      ),
+    );
+    reasonController.dispose();
+    if (reason == null || !mounted) return;
+    await _advanceStatus('FAILED', failureReason: reason);
+  }
+
+  Future<void> _retryStatusUpdate() async {
+    final status = _retryStatus;
+    if (status == null) return;
+    await _advanceStatus(status, failureReason: _retryFailureReason);
   }
 
   @override
@@ -115,29 +181,88 @@ class _RiderOrderDetailViewState extends State<RiderOrderDetailView> {
             const SizedBox(height: 32),
 
             // Action buttons
+            if (_error != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: AppColors.status_danger.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(
+                      AppIcons.warning,
+                      size: 18,
+                      color: AppColors.status_danger,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        _error!,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.status_danger,
+                        ),
+                      ),
+                    ),
+                    if (_retryStatus != null)
+                      TextButton(
+                        onPressed: _loading ? null : _retryStatusUpdate,
+                        child: const Text('Retry'),
+                      ),
+                  ],
+                ),
+              ),
             if (_loading)
               const Center(child: CircularProgressIndicator())
             else if (status == 'ASSIGNED')
-              FilledButton.icon(
-                icon: const Icon(AppIcons.shipping, size: 18),
-                label: const Text('Pick Up'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: const Color(0xFF3B82F6),
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: () => _advanceStatus('IN_TRANSIT'),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FilledButton.icon(
+                    icon: const Icon(AppIcons.shipping, size: 18),
+                    label: const Text('Pick Up'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF3B82F6),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () => _advanceStatus('IN_TRANSIT'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(AppIcons.warning, size: 18),
+                    label: const Text('Report delivery issue'),
+                    onPressed: _reportFailure,
+                  ),
+                ],
               )
             else if (status == 'IN_TRANSIT')
-              FilledButton.icon(
-                icon: const Icon(AppIcons.checkCircle, size: 18),
-                label: const Text('Mark as Delivered'),
-                style: FilledButton.styleFrom(
-                  backgroundColor: AppColors.status_success,
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: () => _advanceStatus('DELIVERED'),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  FilledButton.icon(
+                    icon: const Icon(AppIcons.checkCircle, size: 18),
+                    label: const Text('Mark as Delivered'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: AppColors.status_success,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                    ),
+                    onPressed: () => _advanceStatus('DELIVERED'),
+                  ),
+                  const SizedBox(height: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(AppIcons.warning, size: 18),
+                    label: const Text('Report delivery issue'),
+                    onPressed: _reportFailure,
+                  ),
+                ],
               ),
           ],
         ),

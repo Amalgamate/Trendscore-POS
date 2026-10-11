@@ -50,6 +50,18 @@ class AppMenuView extends StatelessWidget {
     ),
     _WorkspaceApp(
       10,
+      'Online Orders',
+      Icons.shopping_bag_outlined,
+      Color(0xFF0D9488),
+    ),
+    _WorkspaceApp(
+      11,
+      'Integrations',
+      Icons.account_balance_rounded,
+      Color(0xFF0D9488),
+    ),
+    _WorkspaceApp(
+      12,
       'Social Commerce',
       Icons.campaign_rounded,
       Color(0xFF2563EB),
