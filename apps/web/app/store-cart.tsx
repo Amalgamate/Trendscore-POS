@@ -9,10 +9,10 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { PREVIEW_PRODUCTS, type StoreProduct } from './store-data';
+import type { StoreProduct } from './store-data';
 
 type CartLine = { productId: string; quantity: number };
-type CatalogState = 'loading' | 'live' | 'sample' | 'error';
+type CatalogState = 'loading' | 'live' | 'error';
 export type StorefrontProfile = {
   storeName: string;
   description: string;
@@ -141,15 +141,8 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
       })
       .catch((error: unknown) => {
         console.error('Could not load the published shop catalog.', error);
-        if (process.env.NODE_ENV !== 'production') {
-          setProducts(
-            PREVIEW_PRODUCTS.map((product) => ({ ...product, preview: true })),
-          );
-          setCatalogState('sample');
-        } else {
-          setProducts([]);
-          setCatalogState('error');
-        }
+        setProducts([]);
+        setCatalogState('error');
       });
   }, []);
 
@@ -234,7 +227,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
         }
       }
     } catch (error) {
-      console.error('Could not read the saved storefront preview bag.', error);
+      console.error('Could not read the saved storefront bag.', error);
       setStorageError(true);
     } finally {
       setHydrated(true);
@@ -247,7 +240,7 @@ export function StoreCartProvider({ children }: { children: ReactNode }) {
       window.localStorage.setItem(storageKey, JSON.stringify(items));
       setStorageError(false);
     } catch (error) {
-      console.error('Could not save the storefront preview bag.', error);
+      console.error('Could not save the storefront bag.', error);
       setStorageError(true);
     }
   }, [hydrated, items]);

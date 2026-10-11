@@ -1,15 +1,16 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import Link from 'next/link';
 import { formatStorePrice } from './store-data';
 import { useStoreCart } from './store-cart';
+import { AddToBagButton } from './add-to-bag-button';
+import { StoreProductArt } from './store-product-art';
 
 export function StorefrontHome() {
   const [category, setCategory] = useState('All');
   const [query, setQuery] = useState('');
-  const [addedProduct, setAddedProduct] = useState<string | null>(null);
   const {
-    add,
     products: catalogProducts,
     catalogState,
     storefrontProfile,
@@ -34,20 +35,6 @@ export function StorefrontHome() {
 
   return (
     <main>
-      {catalogState === 'sample' && (
-        <div className="preview-ribbon" role="status">
-          <span aria-hidden="true">PREVIEW</span>
-          Live catalog is not connected. These sample products and prices are
-          illustrative only.
-        </div>
-      )}
-      {catalogState === 'error' && (
-        <div className="preview-ribbon" role="alert">
-          <span aria-hidden="true">NOTICE</span>
-          The shop catalog is temporarily unavailable. Please try again later.
-        </div>
-      )}
-
       <section className="welcome-band" aria-labelledby="welcome-title">
       <div className="welcome-copy">
         <h1 id="welcome-title">
@@ -61,7 +48,7 @@ export function StorefrontHome() {
             Browse products
           </a>
         </div>
-        <div className="welcome-aside" aria-label="Preview status">
+        <div className="welcome-aside" aria-label="Catalog status">
           <span
             className={`status-dot${catalogState === 'live' ? ' is-live' : ''}${catalogState === 'error' ? ' is-error' : ''}`}
           />
@@ -71,14 +58,14 @@ export function StorefrontHome() {
                 ? 'Published catalog'
                 : catalogState === 'error'
                   ? 'Catalog unavailable'
-                  : 'Catalog preview'}
+                  : 'Loading catalog'}
             </strong>
             <p>
               {catalogState === 'live'
                 ? `${catalogProducts.length} published ${catalogProducts.length === 1 ? 'product' : 'products'}`
                 : catalogState === 'error'
-                  ? 'Published products could not be loaded. No sample products are being shown.'
-                  : 'Showing illustrative products; no orders or payments are submitted.'}
+                  ? 'Published products could not be loaded. Please try again later.'
+                  : 'Connecting to the shop’s published catalog.'}
             </p>
           </div>
         </div>
@@ -136,48 +123,46 @@ export function StorefrontHome() {
         ) : filteredProducts.length ? (
           <div className="product-grid">
             {filteredProducts.map((product) => (
-              <article className="product-item" key={product.id}>
-                <div className={`product-art art-${product.color}`} aria-hidden="true">
-                  {product.imageUrl ? (
-                    <img src={product.imageUrl} alt="" />
-                  ) : (
-                    <>
-                      <span className="art-orbit" />
-                      <span className="art-object">{product.mark.slice(0, 1)}</span>
-                      <span className="art-label">{product.mark}</span>
-                      {product.preview && <span className="sample-stamp">SAMPLE</span>}
-                    </>
-                  )}
-                </div>
+              <article
+                className="product-item"
+                key={product.id}
+                data-product-presentation
+              >
+                <Link
+                  className="product-art-link"
+                  href={`/products/${encodeURIComponent(product.id)}`}
+                  aria-label={`View ${product.name}`}
+                >
+                  <StoreProductArt product={product} />
+                </Link>
                 <div className="product-copy">
                   <div className="product-meta">
                     <span>{product.category}</span>
                     <span>{product.available ? 'Available' : 'Out of stock'}</span>
                   </div>
-                  <h3>{product.name}{product.variantLabel ? ` · ${product.variantLabel}` : ''}</h3>
-                  <p>{product.description || ' '}</p>
+                  <h3>
+                    <Link href={`/products/${encodeURIComponent(product.id)}`}>
+                      {product.name}
+                    </Link>
+                  </h3>
+                  {product.variantLabel && (
+                    <p className="product-variant">{product.variantLabel}</p>
+                  )}
+                  {product.description && <p>{product.description}</p>}
                   <div className="product-buy-row">
                     <div>
                       <span className="price-caption">Price</span>
                       <strong>{formatStorePrice(product.salePrice)}</strong>
                     </div>
-                    <button
-                      className="add-button"
-                      type="button"
-                      disabled={!product.available}
-                      onClick={() => {
-                        add(product.id);
-                        setAddedProduct(product.id);
-                        window.setTimeout(() => setAddedProduct(null), 1600);
-                      }}
-                      aria-label={`Add ${product.name} to bag`}
-                    >
-                      {!product.available
-                        ? 'Unavailable'
-                        : addedProduct === product.id
-                          ? 'Added'
-                          : 'Add to bag'}
-                    </button>
+                    <div className="product-actions">
+                      <Link
+                        className="product-view-link"
+                        href={`/products/${encodeURIComponent(product.id)}`}
+                      >
+                        View details
+                      </Link>
+                      <AddToBagButton product={product} />
+                    </div>
                   </div>
                 </div>
               </article>

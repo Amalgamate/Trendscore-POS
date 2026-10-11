@@ -13,6 +13,9 @@ type StorefrontOrder = {
   status: 'AWAITING_PAYMENT' | 'CANCELLED' | 'EXPIRED';
   fulfillmentMethod: FulfillmentMethod;
   subtotal: number;
+  deliveryFee: number | null;
+  deliveryFeeQuotedAt: string | null;
+  deliveryFeeAcceptedAt: string | null;
   total: number;
   expiresAt: string;
   createdAt: string;
@@ -59,6 +62,19 @@ function parseStorefrontOrder(value: unknown): StorefrontOrder {
     (data.fulfillmentMethod !== 'DELIVERY' && data.fulfillmentMethod !== 'PICKUP') ||
     typeof data.subtotal !== 'number' ||
     !Number.isFinite(data.subtotal) ||
+    (data.deliveryFee !== undefined &&
+      data.deliveryFee !== null &&
+      (typeof data.deliveryFee !== 'number' ||
+        !Number.isFinite(data.deliveryFee) ||
+        data.deliveryFee < 0)) ||
+    (data.deliveryFeeQuotedAt !== undefined &&
+      data.deliveryFeeQuotedAt !== null &&
+      (typeof data.deliveryFeeQuotedAt !== 'string' ||
+        Number.isNaN(Date.parse(data.deliveryFeeQuotedAt)))) ||
+    (data.deliveryFeeAcceptedAt !== undefined &&
+      data.deliveryFeeAcceptedAt !== null &&
+      (typeof data.deliveryFeeAcceptedAt !== 'string' ||
+        Number.isNaN(Date.parse(data.deliveryFeeAcceptedAt)))) ||
     typeof data.total !== 'number' ||
     !Number.isFinite(data.total) ||
     typeof data.expiresAt !== 'string' ||
@@ -97,6 +113,15 @@ function parseStorefrontOrder(value: unknown): StorefrontOrder {
     status: data.status,
     fulfillmentMethod: data.fulfillmentMethod,
     subtotal: data.subtotal,
+    deliveryFee: typeof data.deliveryFee === 'number' ? data.deliveryFee : null,
+    deliveryFeeQuotedAt:
+      typeof data.deliveryFeeQuotedAt === 'string'
+        ? data.deliveryFeeQuotedAt
+        : null,
+    deliveryFeeAcceptedAt:
+      typeof data.deliveryFeeAcceptedAt === 'string'
+        ? data.deliveryFeeAcceptedAt
+        : null,
     total: data.total,
     expiresAt: data.expiresAt,
     createdAt: data.createdAt,
@@ -173,6 +198,7 @@ export default function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false);
   const [refreshingOrder, setRefreshingOrder] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [acceptingFee, setAcceptingFee] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const restoreAttempted = useRef(false);
 
@@ -190,7 +216,7 @@ export default function CheckoutPage() {
   const bagCanBeOrdered =
     cartLines.length > 0 &&
     cartLines.length === items.length &&
-    cartLines.every(({ product }) => product.available && !product.preview);
+    cartLines.every(({ product }) => product.available);
 
   useEffect(() => {
     try {
@@ -365,6 +391,43 @@ export default function CheckoutPage() {
     }
   };
 
+  const acceptDeliveryFee = async () => {
+    if (
+      !order ||
+      !orderAccessKey ||
+      !order.deliveryFeeQuotedAt ||
+      order.deliveryFee === null ||
+      acceptingFee
+    ) {
+      return;
+    }
+    setAcceptingFee(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `${apiBaseUrl()}/storefront/orders/${order.id}/accept-delivery-fee`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessKey: orderAccessKey,
+            quotedAt: order.deliveryFeeQuotedAt,
+          }),
+        },
+      );
+      if (!response.ok) throw new Error(await responseMessage(response));
+      rememberOrder(orderAccessKey, await readOrderResponse(response));
+    } catch (acceptError) {
+      setError(
+        acceptError instanceof Error
+          ? acceptError.message
+          : 'The delivery fee could not be accepted. Refresh the order and try again.',
+      );
+    } finally {
+      setAcceptingFee(false);
+    }
+  };
+
   const dismissOrder = () => {
     try {
       sessionStorage.removeItem(savedOrderStorage);
@@ -439,7 +502,9 @@ export default function CheckoutPage() {
             </button>
           </div>
 
-          <div className="order-confirmation-details">
+          <div
+            className={`order-confirmation-details${order.fulfillmentMethod === 'DELIVERY' ? ' is-delivery' : ''}`}
+          >
             <div>
               <span>Receive by</span>
               <strong>
@@ -448,6 +513,24 @@ export default function CheckoutPage() {
             </div>
             <div>
               <span>Merchandise total</span>
+              <strong>{formatStorePrice(order.subtotal)}</strong>
+            </div>
+            {order.fulfillmentMethod === 'DELIVERY' && (
+              <div>
+                <span>Delivery charge</span>
+                <strong>
+                  {order.deliveryFee === null
+                    ? 'Pending shop quote'
+                    : formatStorePrice(order.deliveryFee)}
+                </strong>
+              </div>
+            )}
+            <div>
+              <span>
+                {order.fulfillmentMethod === 'DELIVERY' && order.deliveryFee === null
+                  ? 'Current total before delivery'
+                  : 'Order total'}
+              </span>
               <strong>{formatStorePrice(order.total)}</strong>
             </div>
             <div>
@@ -455,6 +538,39 @@ export default function CheckoutPage() {
               <strong>Not collected</strong>
             </div>
           </div>
+
+          {order.fulfillmentMethod === 'DELIVERY' && (
+            <div className="checkout-section checkout-payment-notice fee-review">
+              <h2>
+                {order.deliveryFee === null
+                  ? 'Delivery charge awaiting shop'
+                  : order.deliveryFeeAcceptedAt
+                    ? 'Delivery charge accepted'
+                    : 'Review delivery charge'}
+              </h2>
+              <p>
+                {order.deliveryFee === null
+                  ? paymentPending
+                    ? 'The shop has not set a delivery charge yet. Refresh this order to check for an update. You must accept the quoted charge before payment.'
+                    : 'The reservation ended before the shop confirmed a delivery charge. The items are available again; place a new order if you still want them.'
+                  : order.deliveryFeeAcceptedAt
+                    ? 'You accepted this delivery charge. The order total above includes it; payment has not been taken.'
+                    : paymentPending
+                      ? `The shop quoted ${formatStorePrice(order.deliveryFee)}. Review the updated total of ${formatStorePrice(order.total)} and accept before payment.`
+                      : 'This order is no longer active. Its delivery charge cannot be accepted.'}
+              </p>
+              {order.deliveryFee !== null && !order.deliveryFeeAcceptedAt && paymentPending && (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={acceptDeliveryFee}
+                  disabled={acceptingFee}
+                >
+                  {acceptingFee ? 'Saving acceptance…' : 'Accept delivery fee'}
+                </button>
+              )}
+            </div>
+          )}
 
           <ol className="order-lines" aria-label="Items in this order">
             {order.items.map((line, index) => (
@@ -474,11 +590,15 @@ export default function CheckoutPage() {
                 <span className="order-history-dot" aria-hidden="true" />
                 <div>
                   <strong>
-                    {event.toStatus === 'AWAITING_PAYMENT'
-                      ? 'Order placed'
-                      : event.toStatus === 'CANCELLED'
-                        ? 'Order cancelled'
-                        : 'Stock hold expired'}
+                  {event.detail.startsWith('Delivery fee quoted')
+                    ? 'Delivery fee set'
+                    : event.detail.startsWith('Customer accepted the delivery fee')
+                      ? 'Delivery fee accepted'
+                      : event.toStatus === 'AWAITING_PAYMENT'
+                        ? 'Order placed'
+                        : event.toStatus === 'CANCELLED'
+                          ? 'Order cancelled'
+                          : 'Stock hold expired'}
                   </strong>
                   <p>{event.detail}</p>
                   <time dateTime={event.createdAt}>
@@ -644,13 +764,10 @@ export default function CheckoutPage() {
                 <h2>Payment and delivery charge</h2>
                 <p>
                   This creates an unpaid order only. No money is taken here.
-                  The shop will confirm any delivery charge before payment is
-                  connected.
+                  For delivery, the shop sets the charge and you must review and
+                  accept it before payment.
                 </p>
-                <p>
-                  Stock is held for 15 minutes. If payment is not completed
-                  before the hold expires, the items are released back to stock.
-                </p>
+                <p>Stock is held for 15 minutes from order placement.</p>
               </section>
 
               <label className="checkout-consent">
@@ -697,7 +814,8 @@ export default function CheckoutPage() {
               </div>
               <p className="summary-note">
                 Prices and stock are checked again by the shop when you place
-                the order. Delivery charge, if any, is confirmed by the shop.
+                the order. For delivery, the shop will quote a charge for you
+                to review before payment.
               </p>
               <button
                 className="button button-primary checkout-submit"
