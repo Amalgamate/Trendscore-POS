@@ -875,24 +875,26 @@ model DeliveryOrder {
 }
 
 model StorefrontOrder {
-  id                 String                      @id @default(uuid()) @db.Uuid
-  businessId         String                      @db.Uuid
-  orderNumber        String                      @unique
-  idempotencyKeyHash String                      @unique @db.VarChar(64)
-  requestHash        String                      @db.VarChar(64)
-  customerName       String
-  customerPhone      String
-  customerEmail      String?
-  fulfillmentMethod  StorefrontFulfillmentMethod
-  deliveryAddress    String?
-  subtotal           Decimal                     @db.Decimal(14, 2)
-  total              Decimal                     @db.Decimal(14, 2)
-  deliveryFee        Decimal?                    @db.Decimal(14, 2)
-  status             StorefrontOrderStatus       @default(AWAITING_PAYMENT)
-  expiresAt          DateTime
-  saleId             String?                     @unique @db.Uuid
-  createdAt          DateTime                    @default(now())
-  updatedAt          DateTime                    @updatedAt
+  id                    String                      @id @default(uuid()) @db.Uuid
+  businessId            String                      @db.Uuid
+  orderNumber           String                      @unique
+  idempotencyKeyHash    String                      @unique @db.VarChar(64)
+  requestHash           String                      @db.VarChar(64)
+  customerName          String
+  customerPhone         String
+  customerEmail         String?
+  fulfillmentMethod     StorefrontFulfillmentMethod
+  deliveryAddress       String?
+  subtotal              Decimal                     @db.Decimal(14, 2)
+  deliveryFee           Decimal?                    @db.Decimal(14, 2)
+  deliveryFeeQuotedAt   DateTime?
+  deliveryFeeAcceptedAt DateTime?
+  total                 Decimal                     @db.Decimal(14, 2)
+  status                StorefrontOrderStatus       @default(AWAITING_PAYMENT)
+  expiresAt             DateTime
+  saleId                String?                     @unique @db.Uuid
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
 
   business     Business               @relation(fields: [businessId], references: [id], onDelete: Restrict)
   items        StorefrontOrderItem[]

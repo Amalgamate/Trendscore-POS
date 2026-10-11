@@ -164,6 +164,10 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
         switch (action) {
           case 'profile':
             _showUserProfile(user, name: name, role: role);
+          case 'storefront':
+            _selectTab(9);
+          case 'mpesa':
+            _selectTab(11);
           case 'settings':
             _selectTab(6);
           case 'sign_out':
@@ -221,6 +225,32 @@ class _PosShellState extends State<PosShell> with WidgetsBindingObserver {
             title: Text('Profile'),
           ),
         ),
+        if (_accessibleTabs(user).contains(9))
+          const PopupMenuItem<String>(
+            value: 'storefront',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(
+                Icons.storefront_rounded,
+                color: AppColors.text_secondary,
+              ),
+              title: Text('Storefront'),
+            ),
+          ),
+        if (_accessibleTabs(user).contains(11))
+          const PopupMenuItem<String>(
+            value: 'mpesa',
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              dense: true,
+              leading: Icon(
+                Icons.account_balance_rounded,
+                color: AppColors.text_secondary,
+              ),
+              title: Text('M-Pesa'),
+            ),
+          ),
         if (_accessibleTabs(user).contains(6))
           const PopupMenuItem<String>(
             value: 'settings',
@@ -1007,19 +1037,9 @@ class _NavigationSidebar extends StatelessWidget {
                     (tab: 4, icon: AppIcons.wallet, label: 'Till'),
                     (tab: 5, icon: AppIcons.analytics, label: 'Reports'),
                     (
-                      tab: 9,
-                      icon: Icons.storefront_rounded,
-                      label: 'Storefront',
-                    ),
-                    (
                       tab: 10,
                       icon: Icons.shopping_bag_outlined,
                       label: 'Online Orders',
-                    ),
-                    (
-                      tab: 11,
-                      icon: Icons.account_balance_rounded,
-                      label: 'Integrations',
                     ),
                   ])
                     if (visibleTabs.contains(item.tab))

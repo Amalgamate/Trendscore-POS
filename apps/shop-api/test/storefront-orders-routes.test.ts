@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import express from 'express';
 import jwt from 'jsonwebtoken';
+import { Prisma } from '@prisma/client';
 import { createServer, type Server } from 'node:http';
 import { storefrontOrdersRouter } from '../src/modules/storefront/storefront-orders.router';
 
@@ -39,6 +40,9 @@ function sampleOrder(status = 'AWAITING_PAYMENT') {
     fulfillmentMethod: 'PICKUP',
     deliveryAddress: null,
     subtotal: 100,
+    deliveryFee: null,
+    deliveryFeeQuotedAt: null,
+    deliveryFeeAcceptedAt: null,
     total: 100,
     expiresAt,
     createdAt: new Date(),
@@ -237,5 +241,191 @@ describe('staff storefront order routes', () => {
     expect(transaction.product.update).not.toHaveBeenCalled();
     expect(transaction.stockMovement.create).not.toHaveBeenCalled();
     expect(transaction.storefrontOrderEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('sets a delivery fee and recalculates the order total', async () => {
+    const current = {
+      ...sampleOrder(),
+      fulfillmentMethod: 'DELIVERY',
+      deliveryAddress: 'Westlands, Nairobi',
+      subtotal: new Prisma.Decimal(100),
+      deliveryFeeQuotedAt: null,
+      deliveryFeeAcceptedAt: null,
+    };
+    const quotedAt = new Date();
+    const quoted = {
+      ...current,
+      deliveryFee: new Prisma.Decimal('25.29'),
+      deliveryFeeQuotedAt: quotedAt,
+      total: new Prisma.Decimal('125.29'),
+      statusEvents: [],
+    };
+    const transaction = {
+      storefrontOrder: {
+        findFirst: vi.fn().mockResolvedValue(current),
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue(quoted),
+      },
+      storefrontOrderEvent: { create: vi.fn().mockResolvedValue({}) },
+    };
+    mocks.prisma.storefrontOrder.findMany.mockResolvedValue([]);
+    mocks.prisma.$transaction.mockImplementation((callback) =>
+      callback(transaction),
+    );
+
+    const response = await fetch(
+      `${baseUrl}/storefront/orders/${orderId}/delivery-fee`,
+      {
+        method: 'PATCH',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deliveryFee: 25.29 }),
+      },
+    );
+    const payload = (await response.json()) as {
+      data: { deliveryFee: number; total: number };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.data).toMatchObject({ deliveryFee: 25.29, total: 125.29 });
+    expect(transaction.storefrontOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          fulfillmentMethod: 'DELIVERY',
+          deliveryFeeAcceptedAt: null,
+          deliveryFeeQuotedAt: null,
+        }),
+        data: expect.objectContaining({
+          total: new Prisma.Decimal('125.29'),
+        }),
+      }),
+    );
+    expect(transaction.storefrontOrderEvent.create).toHaveBeenCalledOnce();
+  });
+
+  it('rejects invalid delivery fees before opening a transaction', async () => {
+    const response = await fetch(
+      `${baseUrl}/storefront/orders/${orderId}/delivery-fee`,
+      {
+        method: 'PATCH',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deliveryFee: -1 }),
+      },
+    );
+
+    expect(response.status).toBe(422);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('does not allow a delivery fee on a pickup order', async () => {
+    const transaction = {
+      storefrontOrder: {
+        findFirst: vi.fn().mockResolvedValue(sampleOrder()),
+        updateMany: vi.fn(),
+      },
+    };
+    mocks.prisma.storefrontOrder.findMany.mockResolvedValue([]);
+    mocks.prisma.$transaction.mockImplementation((callback) =>
+      callback(transaction),
+    );
+
+    const response = await fetch(
+      `${baseUrl}/storefront/orders/${orderId}/delivery-fee`,
+      {
+        method: 'PATCH',
+        headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ deliveryFee: 25 }),
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(transaction.storefrontOrder.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('records customer acceptance only for the quoted delivery fee', async () => {
+    const quotedAt = new Date();
+    const initialOrder = {
+      ...sampleOrder(),
+      fulfillmentMethod: 'DELIVERY',
+      deliveryAddress: 'Westlands, Nairobi',
+      deliveryFee: new Prisma.Decimal(25),
+      deliveryFeeQuotedAt: quotedAt,
+      deliveryFeeAcceptedAt: null,
+      total: new Prisma.Decimal(125),
+    };
+    const accepted = {
+      ...initialOrder,
+      deliveryFeeAcceptedAt: new Date(),
+      statusEvents: [],
+    };
+    const transaction = {
+      storefrontOrder: {
+        updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+        findUniqueOrThrow: vi.fn().mockResolvedValue(accepted),
+      },
+      storefrontOrderEvent: { create: vi.fn().mockResolvedValue({}) },
+    };
+    mocks.prisma.storefrontOrder.findMany.mockResolvedValue([]);
+    mocks.prisma.storefrontOrder.findFirst.mockResolvedValue(initialOrder);
+    mocks.prisma.$transaction.mockImplementation((callback) =>
+      callback(transaction),
+    );
+    const accessKey = 'c6e919a7-f795-4b44-a5db-8144514da3c2';
+
+    const response = await fetch(
+      `${baseUrl}/storefront/orders/${orderId}/accept-delivery-fee`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessKey, quotedAt: quotedAt.toISOString() }),
+      },
+    );
+    const payload = (await response.json()) as {
+      data: { deliveryFeeAcceptedAt: string; total: number };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.data.deliveryFeeAcceptedAt).toBeTruthy();
+    expect(payload.data.total).toBe(125);
+    expect(transaction.storefrontOrder.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: expect.objectContaining({
+          deliveryFeeQuotedAt: quotedAt,
+          deliveryFeeAcceptedAt: null,
+        }),
+        data: expect.objectContaining({
+          deliveryFeeAcceptedAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(transaction.storefrontOrderEvent.create).toHaveBeenCalledOnce();
+  });
+
+  it('rejects acceptance when the customer reviewed an outdated quote', async () => {
+    const quotedAt = new Date();
+    mocks.prisma.storefrontOrder.findMany.mockResolvedValue([]);
+    mocks.prisma.storefrontOrder.findFirst.mockResolvedValue({
+      ...sampleOrder(),
+      fulfillmentMethod: 'DELIVERY',
+      deliveryAddress: 'Westlands, Nairobi',
+      deliveryFee: new Prisma.Decimal(30),
+      deliveryFeeQuotedAt: quotedAt,
+      deliveryFeeAcceptedAt: null,
+    });
+    const accessKey = 'c6e919a7-f795-4b44-a5db-8144514da3c2';
+
+    const response = await fetch(
+      `${baseUrl}/storefront/orders/${orderId}/accept-delivery-fee`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          accessKey,
+          quotedAt: new Date(quotedAt.getTime() - 1000).toISOString(),
+        }),
+      },
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 });

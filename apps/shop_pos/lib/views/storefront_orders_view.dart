@@ -157,6 +157,90 @@ class _StorefrontOrdersViewState extends State<StorefrontOrdersView> {
     await _load(reset: true);
   }
 
+  Future<void> _setDeliveryFee(Map<String, dynamic> order) async {
+    final orderNumber = order['orderNumber']?.toString() ?? 'this order';
+    final controller = TextEditingController(
+      text: order['deliveryFee'] == null ? '' : _money(order['deliveryFee']),
+    );
+    final formKey = GlobalKey<FormState>();
+    String? feeText;
+    try {
+      feeText = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: Text('Set delivery fee · $orderNumber'),
+          content: Form(
+            key: formKey,
+            child: TextFormField(
+              controller: controller,
+              autofocus: true,
+              keyboardType: const TextInputType.numberWithOptions(
+                decimal: true,
+              ),
+              decoration: const InputDecoration(
+                labelText: 'Delivery fee',
+                prefixText: 'KES ',
+                helperText: 'Enter 0 if delivery is free.',
+              ),
+              validator: (value) {
+                final text = value?.trim() ?? '';
+                final amount = double.tryParse(text);
+                if (amount == null ||
+                    !amount.isFinite ||
+                    amount < 0 ||
+                    amount > 1000000000 ||
+                    !RegExp(r'^\d{1,10}(?:\.\d{1,2})?$').hasMatch(text)) {
+                  return 'Enter a valid amount with up to 2 decimal places.';
+                }
+                return null;
+              },
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(dialogContext, controller.text.trim());
+                }
+              },
+              child: const Text('Send fee to customer'),
+            ),
+          ],
+        ),
+      );
+    } finally {
+      controller.dispose();
+    }
+    if (feeText == null || !mounted) return;
+
+    final updated = await ApiService.instance.setStorefrontOrderDeliveryFee(
+      order['id']?.toString() ?? '',
+      double.parse(feeText),
+    );
+    if (!mounted) return;
+    if (updated == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ApiService.instance.lastError ??
+                'Could not set the fee. Refresh the order and try again.',
+          ),
+        ),
+      );
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Delivery fee saved. The customer can review it now.'),
+      ),
+    );
+    await _load(reset: true);
+  }
+
   String _dateTime(dynamic value) {
     final parsed = DateTime.tryParse(value?.toString() ?? '');
     if (parsed == null) return 'Not recorded';
@@ -195,7 +279,8 @@ class _StorefrontOrdersViewState extends State<StorefrontOrdersView> {
                       const SizedBox(height: 4),
                       const Text(
                         'Orders are unpaid. Stock is held for 15 minutes; '
-                        'do not prepare or dispatch until payment is verified.',
+                        'set delivery fees within the hold. Do not prepare or '
+                        'dispatch until payment is verified.',
                         style: TextStyle(
                           color: AppColors.text_secondary,
                           height: 1.4,
@@ -370,10 +455,14 @@ class _StorefrontOrdersViewState extends State<StorefrontOrdersView> {
   Widget _orderTile(Map<String, dynamic> order) {
     final status = order['status']?.toString() ?? 'UNKNOWN';
     final isAwaitingPayment = status == 'AWAITING_PAYMENT';
+    final isDelivery = order['fulfillmentMethod'] == 'DELIVERY';
+    final feeAccepted = order['deliveryFeeAcceptedAt'] != null;
+    final feeQuoted = order['deliveryFee'] != null;
+    final expiry = DateTime.tryParse(order['expiresAt']?.toString() ?? '');
+    final holdIsActive = expiry != null && expiry.isAfter(DateTime.now());
     final items = order['items'] is List
         ? (order['items'] as List).whereType<Map>().toList(growable: false)
         : const <Map>[];
-    final expiry = DateTime.tryParse(order['expiresAt']?.toString() ?? '');
     final expiryText = expiry == null
         ? ''
         : expiry.isAfter(DateTime.now())
@@ -445,19 +534,45 @@ class _StorefrontOrdersViewState extends State<StorefrontOrdersView> {
               ),
             ),
           const Divider(height: 20),
+          _detailRow(
+            'Merchandise subtotal',
+            'KES ${_money(order['subtotal'])}',
+          ),
+          if (isDelivery)
+            _detailRow(
+              'Delivery fee',
+              feeQuoted ? 'KES ${_money(order['deliveryFee'])}' : 'Not set',
+            ),
           _detailRow('Order total', 'KES ${_money(order['total'])}'),
+          if (isDelivery && feeQuoted)
+            _detailRow(
+              'Customer response',
+              feeAccepted ? 'Fee accepted' : 'Waiting for customer',
+            ),
           if (isAwaitingPayment) ...[
             const SizedBox(height: 12),
-            Align(
-              alignment: Alignment.centerRight,
-              child: OutlinedButton.icon(
-                onPressed: () => _cancelOrder(order),
-                icon: const Icon(Icons.cancel_outlined),
-                label: const Text('Cancel and release stock'),
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: AppColors.status_danger,
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (isDelivery && !feeAccepted && holdIsActive)
+                  OutlinedButton.icon(
+                    onPressed: () => _setDeliveryFee(order),
+                    icon: const Icon(Icons.local_shipping_outlined),
+                    label: Text(
+                      feeQuoted ? 'Update delivery fee' : 'Set delivery fee',
+                    ),
+                  ),
+                OutlinedButton.icon(
+                  onPressed: () => _cancelOrder(order),
+                  icon: const Icon(Icons.cancel_outlined),
+                  label: const Text('Cancel and release stock'),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppColors.status_danger,
+                  ),
                 ),
-              ),
+              ],
             ),
           ],
         ],

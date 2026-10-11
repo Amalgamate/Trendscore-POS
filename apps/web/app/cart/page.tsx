@@ -66,12 +66,10 @@ export default function CartPage() {
           <p>
             {catalogState === 'live'
               ? 'Browse published products and add a few to your bag.'
-              : catalogState === 'error'
-                ? 'The published catalog is unavailable right now. Please try again later.'
-                : 'Browse sample items and add a few to try the bag.'}
+              : 'The published catalog is unavailable right now. Please try again later.'}
           </p>
           <Link className="button button-primary" href="/#products">
-            {catalogState === 'sample' ? 'Browse sample items' : 'Browse products'}
+            Browse products
           </Link>
         </div>
       ) : (

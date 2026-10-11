@@ -1309,6 +1309,41 @@ class ApiService {
     return null;
   }
 
+  Future<Map<String, dynamic>?> setStorefrontOrderDeliveryFee(
+    String orderId,
+    double deliveryFee,
+  ) async {
+    lastError = null;
+    try {
+      final response = await http
+          .patch(
+            Uri.parse('$baseUrl/storefront/orders/$orderId/delivery-fee'),
+            headers: _headers,
+            body: jsonEncode({'deliveryFee': deliveryFee}),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned an invalid delivery-fee response.';
+      } else {
+        if (response.statusCode == 401) {
+          setToken(null);
+        }
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not set the delivery fee (HTTP ${response.statusCode}).';
+      }
+    } catch (e) {
+      debugPrint('API setStorefrontOrderDeliveryFee error: $e');
+      lastError = 'Could not reach the shop API to set the delivery fee.';
+    }
+    return null;
+  }
+
   // ── Delivery config ─────────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> getDeliveryConfig() async {

@@ -24,7 +24,12 @@ export function StoreHeader() {
         <Link href="/#products">Browse</Link>
         <Link href="/policies">Policies</Link>
       </nav>
-      <Link className="bag-link" href="/cart" aria-label={`Shop bag, ${itemCount} items`}>
+      <Link
+        className="bag-link"
+        href="/cart"
+        aria-label={`Shop bag, ${itemCount} items`}
+        data-store-bag-target
+      >
         <svg viewBox="0 0 24 24" aria-hidden="true">
           <path d="M5 8h14l1 12H4L5 8Z" />
           <path d="M9 9V6a3 3 0 0 1 6 0v3" />

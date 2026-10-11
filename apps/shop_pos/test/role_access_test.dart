@@ -47,7 +47,6 @@ void main() {
       'Orders',
       'Delivery',
       'Online Orders',
-      'Integrations',
       'Credit',
       'Till',
       'Reports',
@@ -58,11 +57,15 @@ void main() {
         reason: '$label should be visible without scrolling the sidebar',
       );
     }
+    expect(find.byTooltip('Storefront'), findsNothing);
+    expect(find.byTooltip('Integrations'), findsNothing);
 
     await tester.tap(find.byTooltip('Profile, settings, and sign out'));
     await tester.pumpAndSettle();
 
     expect(find.text('Profile'), findsOneWidget);
+    expect(find.text('Storefront'), findsOneWidget);
+    expect(find.text('M-Pesa'), findsOneWidget);
     expect(find.text('Settings'), findsNothing);
     expect(find.text('Lock and sign out'), findsOneWidget);
   });
@@ -76,22 +79,33 @@ void main() {
     expect(accessibleTabsFor(PosUserRole.superAdmin).contains(11), isTrue);
   });
 
-  testWidgets('authorized staff can open Integrations from the POS sidebar', (
+  testWidgets('authorized staff can open M-Pesa from the profile dropdown', (
     tester,
   ) async {
     await pumpAsRole(tester, PosUserRole.manager);
 
-    await tester.tap(find.byTooltip('Integrations'));
+    await tester.tap(find.byTooltip('Profile, settings, and sign out'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('M-Pesa'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text(
-        'Daraja is not connected. No M-Pesa payments are being initiated or verified.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.byTooltip('Integrations'), findsOneWidget);
+    expect(find.text('M-Pesa setup'), findsOneWidget);
+    expect(find.byTooltip('Integrations'), findsNothing);
   });
+
+  testWidgets(
+    'authorized staff can open Storefront from the profile dropdown',
+    (tester) async {
+      await pumpAsRole(tester, PosUserRole.manager);
+
+      await tester.tap(find.byTooltip('Profile, settings, and sign out'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Storefront'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Storefront settings'), findsOneWidget);
+    },
+  );
 
   testWidgets('managers can open Integrations from compact navigation', (
     tester,
@@ -103,12 +117,7 @@ void main() {
     await tester.tap(find.text('Integrations'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text(
-        'Daraja is not connected. No M-Pesa payments are being initiated or verified.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('M-Pesa setup'), findsOneWidget);
   });
 
   testWidgets('owners can open Profile and Settings from the avatar menu', (
