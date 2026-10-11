@@ -52,6 +52,21 @@ const List<int> kCategoryColors = [
   0xFFF8FAFC,
 ];
 
+String _defaultServerUrl() {
+  if (!kIsWeb) return '';
+
+  final origin = Uri.base;
+  if (const {'localhost', '127.0.0.1', '::1'}.contains(origin.host)) {
+    return 'http://localhost:4001';
+  }
+  return origin.resolve('/api').toString().replaceFirst(RegExp(r'/$'), '');
+}
+
+bool _isLoopbackServerUrl(String url) {
+  final host = Uri.tryParse(url)?.host;
+  return const {'localhost', '127.0.0.1', '::1'}.contains(host);
+}
+
 /// A shop-defined product category.
 class PosCategory {
   PosCategory({
@@ -782,7 +797,7 @@ class PosState extends ChangeNotifier {
   String printerPaperSize = '80mm';
 
   /// Empty on mobile = not yet configured; shows ShopCodeView on first launch.
-  String serverUrl = kIsWeb ? 'http://localhost:4001' : '';
+  String serverUrl = _defaultServerUrl();
 
   late List<PosUser> users;
   PosUser? currentLoggedInUser;
@@ -1837,7 +1852,11 @@ class PosState extends ChangeNotifier {
       printerPaperSize =
           prefs.getString('printer_paper_size') ?? printerPaperSize;
       serverUrl = prefs.getString('server_url') ?? serverUrl;
-      if (serverUrl == 'http://localhost:3000' ||
+      if (kIsWeb &&
+          !_isLoopbackServerUrl(Uri.base.toString()) &&
+          _isLoopbackServerUrl(serverUrl)) {
+        serverUrl = _defaultServerUrl();
+      } else if (serverUrl == 'http://localhost:3000' ||
           serverUrl == 'http://localhost:4000') {
         serverUrl = 'http://localhost:4001';
       }
