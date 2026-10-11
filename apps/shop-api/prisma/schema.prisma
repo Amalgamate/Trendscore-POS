@@ -128,8 +128,16 @@ enum DeliveryStatus {
 
 enum StorefrontOrderStatus {
   AWAITING_PAYMENT
+  PAID
   CANCELLED
   EXPIRED
+}
+
+enum StorefrontPaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNKNOWN
 }
 
 enum StorefrontFulfillmentMethod {
@@ -449,7 +457,7 @@ model Sale {
   id            String  @id @default(uuid()) @db.Uuid
   businessId    String  @db.Uuid
   receiptNumber String  @unique
-  cashierId     String  @db.Uuid
+  cashierId     String? @db.Uuid
   customerId    String? @db.Uuid
   cashSessionId String? @db.Uuid
 
@@ -475,15 +483,17 @@ model Sale {
   voidedAt   DateTime?
   voidReason String?
 
-  business       Business        @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  cashier        User            @relation(fields: [cashierId], references: [id], onDelete: Restrict)
-  customer       Customer?       @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  cashSession    CashSession?    @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
-  items          SaleItem[]
-  payments       SalePayment[]
-  refunds        Refund[]
-  stockMovements StockMovement[] @relation("SaleStockMovements")
-  deliveryOrders DeliveryOrder[]
+  business          Business           @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  cashier           User?              @relation(fields: [cashierId], references: [id], onDelete: Restrict)
+  customer          Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cashSession       CashSession?       @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
+  items             SaleItem[]
+  payments          SalePayment[]
+  refunds           Refund[]
+  stockMovements    StockMovement[]    @relation("SaleStockMovements")
+  deliveryOrders    DeliveryOrder[]
+  storefrontOrder   StorefrontOrder?
+  storefrontPayment StorefrontPayment?
 
   @@index([businessId, createdAt])
   @@index([cashierId, createdAt])
@@ -689,7 +699,7 @@ model CashSession {
   reconciledById String?  @db.Uuid
 
   business  Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  cashier   User           @relation(fields: [cashierId], references: [id], onDelete: Restrict)
+  cashier   User?          @relation(fields: [cashierId], references: [id], onDelete: SetNull)
   sales     Sale[]
   movements CashMovement[]
 
@@ -882,12 +892,15 @@ model StorefrontOrder {
   total                 Decimal                     @db.Decimal(14, 2)
   status                StorefrontOrderStatus       @default(AWAITING_PAYMENT)
   expiresAt             DateTime
+  saleId                String?                     @unique @db.Uuid
   createdAt             DateTime                    @default(now())
   updatedAt             DateTime                    @updatedAt
 
   business     Business               @relation(fields: [businessId], references: [id], onDelete: Restrict)
   items        StorefrontOrderItem[]
   statusEvents StorefrontOrderEvent[]
+  payments     StorefrontPayment[]
+  sale         Sale?                  @relation(fields: [saleId], references: [id], onDelete: SetNull)
 
   @@index([businessId, createdAt])
   @@index([businessId, status, expiresAt])
@@ -903,6 +916,7 @@ model StorefrontOrderItem {
   quantity     Decimal @db.Decimal(14, 3)
   unitPrice    Decimal @db.Decimal(14, 2)
   unitCost     Decimal @db.Decimal(14, 2)
+  vatRate      Decimal @default(0.16) @db.Decimal(5, 4)
   lineTotal    Decimal @db.Decimal(14, 2)
 
   order   StorefrontOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -911,6 +925,37 @@ model StorefrontOrderItem {
   @@index([orderId])
   @@index([productId])
   @@map("storefront_order_items")
+}
+
+model StorefrontPayment {
+  id                        String                  @id @default(uuid()) @db.Uuid
+  orderId                   String                  @db.Uuid
+  idempotencyKeyHash        String                  @unique @db.VarChar(64)
+  requestHash               String                  @db.VarChar(64)
+  status                    StorefrontPaymentStatus @default(PENDING)
+  amount                    Decimal                 @db.Decimal(14, 2)
+  phoneNumber               String
+  checkoutRequestId         String?                 @unique
+  merchantRequestId         String?
+  mpesaReceipt              String?                 @unique
+  callbackReceiptNumber     String?
+  resultCode                String?
+  resultDescription         String?
+  callbackAmount            Decimal?                @db.Decimal(14, 2)
+  callbackPhoneNumber       String?
+  callbackMerchantRequestId String?
+  callbackReceivedAt        DateTime?
+  verifiedAt                DateTime?
+  saleId                    String?                 @unique @db.Uuid
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  order StorefrontOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sale  Sale?           @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@index([status, updatedAt])
+  @@map("storefront_payments")
 }
 
 model StorefrontOrderEvent {

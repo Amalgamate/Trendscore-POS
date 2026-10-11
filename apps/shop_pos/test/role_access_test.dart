@@ -89,12 +89,7 @@ void main() {
     await tester.tap(find.text('M-Pesa'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text(
-        'Daraja is not connected. No M-Pesa payments are being initiated or verified.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('M-Pesa setup'), findsOneWidget);
     expect(find.byTooltip('Integrations'), findsNothing);
   });
 
@@ -122,12 +117,7 @@ void main() {
     await tester.tap(find.text('Integrations'));
     await tester.pumpAndSettle();
 
-    expect(
-      find.text(
-        'Daraja is not connected. No M-Pesa payments are being initiated or verified.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.text('M-Pesa setup'), findsOneWidget);
   });
 
   testWidgets('owners can open Profile and Settings from the avatar menu', (
