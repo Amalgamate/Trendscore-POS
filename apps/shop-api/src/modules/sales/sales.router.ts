@@ -340,9 +340,17 @@ export function salesRouter(businessId: string): Router {
       const result = await prisma.$transaction(async (tx) => {
         const sale = await tx.sale.findFirstOrThrow({
           where: { id: req.params.id, businessId },
-          include: { items: true, payments: true, customer: true },
+          include: {
+            items: true,
+            payments: true,
+            customer: true,
+            storefrontOrder: { select: { id: true } },
+          },
         });
 
+        if (sale.storefrontOrder) {
+          throw new Error('STOREFRONT_ORDER_REQUIRES_REVIEW');
+        }
         if (sale.status === 'REFUNDED' || sale.status === 'VOIDED') {
           throw new Error('ALREADY_REVERSED');
         }
@@ -400,6 +408,14 @@ export function salesRouter(businessId: string): Router {
     } catch (err) {
       if (err instanceof Error && err.message === 'ALREADY_REVERSED') {
         return sendError(res, 409, 'ALREADY_REVERSED', 'Sale has already been reversed.');
+      }
+      if (err instanceof Error && err.message === 'STOREFRONT_ORDER_REQUIRES_REVIEW') {
+        return sendError(
+          res,
+          409,
+          'STOREFRONT_ORDER_REQUIRES_REVIEW',
+          'This sale is linked to an online order. Review the order and payment before reversing it.',
+        );
       }
       console.error('sales/reverse error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Failed to reverse sale.');

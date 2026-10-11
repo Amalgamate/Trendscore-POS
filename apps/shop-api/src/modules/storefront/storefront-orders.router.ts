@@ -62,7 +62,7 @@ const OrderAccessSchema = z.object({
 
 const OrderIdSchema = z.string().uuid();
 const StaffOrdersQuerySchema = z.object({
-  status: z.enum(['AWAITING_PAYMENT', 'CANCELLED', 'EXPIRED']).optional(),
+  status: z.enum(['AWAITING_PAYMENT', 'PAID', 'CANCELLED', 'EXPIRED']).optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(100).default(50),
 });
@@ -181,6 +181,7 @@ export async function expirePendingStorefrontOrders(
       businessId,
       status: 'AWAITING_PAYMENT',
       expiresAt: { lte: now },
+      payments: { none: { status: { in: ['PENDING', 'UNKNOWN'] } } },
     },
     include: { items: true },
     orderBy: { expiresAt: 'asc' },
@@ -199,6 +200,7 @@ export async function expirePendingStorefrontOrders(
         businessId,
         status: 'AWAITING_PAYMENT',
         expiresAt: { lte: now },
+        payments: { none: { status: { in: ['PENDING', 'UNKNOWN'] } } },
       },
       include: { items: true },
     });
@@ -237,6 +239,8 @@ function orderResponse(order: {
   deliveryAddress: string | null;
   subtotal: Prisma.Decimal;
   total: Prisma.Decimal;
+  deliveryFee?: Prisma.Decimal | null;
+  saleId?: string | null;
   expiresAt: Date;
   createdAt: Date;
   items: Array<{
@@ -252,6 +256,14 @@ function orderResponse(order: {
     detail: string;
     createdAt: Date;
   }>;
+  payments?: Array<{
+    id: string;
+    status: string;
+    amount: Prisma.Decimal;
+    mpesaReceipt: string | null;
+    resultDescription: string | null;
+    createdAt: Date;
+  }>;
 }) {
   return {
     id: order.id,
@@ -264,6 +276,15 @@ function orderResponse(order: {
     deliveryAddress: order.deliveryAddress,
     subtotal: Number(order.subtotal),
     total: Number(order.total),
+    deliveryFee:
+      order.deliveryFee === null || order.deliveryFee === undefined
+        ? null
+        : Number(order.deliveryFee),
+    amountDue:
+      order.fulfillmentMethod === 'PICKUP' || order.deliveryFee !== null
+        ? Number(order.total) + Number(order.deliveryFee ?? 0)
+        : null,
+    saleId: order.saleId ?? null,
     expiresAt: order.expiresAt,
     createdAt: order.createdAt,
     items: order.items.map((item) => ({
@@ -279,6 +300,16 @@ function orderResponse(order: {
       detail: event.detail,
       createdAt: event.createdAt,
     })),
+    latestPayment: order.payments?.[0]
+      ? {
+          id: order.payments[0].id,
+          status: order.payments[0].status,
+          amount: Number(order.payments[0].amount),
+          receiptNumber: order.payments[0].mpesaReceipt,
+          message: order.payments[0].resultDescription,
+          createdAt: order.payments[0].createdAt,
+        }
+      : null,
   };
 }
 
@@ -297,6 +328,18 @@ async function findOrderByAccessKey(
     include: {
       items: { orderBy: { productName: 'asc' } },
       statusEvents: { orderBy: { createdAt: 'asc' } },
+      payments: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: {
+          id: true,
+          status: true,
+          amount: true,
+          mpesaReceipt: true,
+          resultDescription: true,
+          createdAt: true,
+        },
+      },
     },
   });
 }
@@ -323,6 +366,18 @@ export function storefrontOrdersRouter(businessId: string): Router {
             include: {
               items: { orderBy: { productName: 'asc' } },
               statusEvents: { orderBy: { createdAt: 'asc' } },
+              payments: {
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+                select: {
+                  id: true,
+                  status: true,
+                  amount: true,
+                  mpesaReceipt: true,
+                  resultDescription: true,
+                  createdAt: true,
+                },
+              },
             },
             orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
             skip: (page - 1) * limit,
@@ -356,6 +411,18 @@ export function storefrontOrdersRouter(businessId: string): Router {
           include: {
             items: { orderBy: { productName: 'asc' } },
             statusEvents: { orderBy: { createdAt: 'asc' } },
+            payments: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: {
+                id: true,
+                status: true,
+                amount: true,
+                mpesaReceipt: true,
+                resultDescription: true,
+                createdAt: true,
+              },
+            },
           },
         });
         if (!order) return sendError(res, 404, 'NOT_FOUND', 'Order not found.');
@@ -381,10 +448,21 @@ export function storefrontOrdersRouter(businessId: string): Router {
         await expirePendingStorefrontOrders(businessId);
         const initialOrder = await prisma.storefrontOrder.findFirst({
           where: { id: orderId.data, businessId },
-          include: { items: true },
+          include: {
+            items: true,
+            payments: { where: { status: { in: ['PENDING', 'UNKNOWN'] } } },
+          },
         });
         if (!initialOrder) {
           return sendError(res, 404, 'NOT_FOUND', 'Order not found.');
+        }
+        if (initialOrder.payments.length > 0) {
+          return sendError(
+            res,
+            409,
+            'PAYMENT_IN_PROGRESS',
+            'A payment is still being confirmed. Refresh payment status before cancelling this order.',
+          );
         }
         const result = await prisma.$transaction(async (tx) => {
           await lockProducts(
@@ -398,6 +476,7 @@ export function storefrontOrdersRouter(businessId: string): Router {
               businessId,
               status: 'AWAITING_PAYMENT',
               expiresAt: { gt: new Date() },
+              payments: { none: { status: { in: ['PENDING', 'UNKNOWN'] } } },
             },
             data: { status: 'CANCELLED' },
           });
@@ -422,6 +501,18 @@ export function storefrontOrdersRouter(businessId: string): Router {
             include: {
               items: { orderBy: { productName: 'asc' } },
               statusEvents: { orderBy: { createdAt: 'asc' } },
+              payments: {
+                orderBy: { createdAt: 'desc' },
+                take: 1,
+                select: {
+                  id: true,
+                  status: true,
+                  amount: true,
+                  mpesaReceipt: true,
+                  resultDescription: true,
+                  createdAt: true,
+                },
+              },
             },
           });
           return { changed: changed.count === 1, order };
@@ -467,6 +558,18 @@ export function storefrontOrdersRouter(businessId: string): Router {
           include: {
             items: { orderBy: { productName: 'asc' } },
             statusEvents: { orderBy: { createdAt: 'asc' } },
+            payments: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: {
+                id: true,
+                status: true,
+                amount: true,
+                mpesaReceipt: true,
+                resultDescription: true,
+                createdAt: true,
+              },
+            },
           },
         });
         if (existing) {
@@ -512,6 +615,18 @@ export function storefrontOrdersRouter(businessId: string): Router {
           include: {
             items: { orderBy: { productName: 'asc' } },
             statusEvents: { orderBy: { createdAt: 'asc' } },
+            payments: {
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: {
+                id: true,
+                status: true,
+                amount: true,
+                mpesaReceipt: true,
+                resultDescription: true,
+                createdAt: true,
+              },
+            },
           },
         });
         if (concurrentReplay) {
@@ -588,6 +703,7 @@ export function storefrontOrdersRouter(businessId: string): Router {
                 quantity,
                 unitPrice: product.salePrice,
                 unitCost: product.costPrice,
+                vatRate: product.vatRate,
                 lineTotal,
               })),
             },
@@ -704,14 +820,27 @@ export function storefrontOrdersRouter(businessId: string): Router {
     }
     try {
       await expirePendingStorefrontOrders(businessId);
-      const initialOrder = await findOrderByAccessKey(
-        prisma,
-        businessId,
-        orderId.data,
-        parsed.data.accessKey,
-      );
+      const initialOrder = await prisma.storefrontOrder.findFirst({
+        where: {
+          id: orderId.data,
+          businessId,
+          idempotencyKeyHash: hashOrderSecret(parsed.data.accessKey),
+        },
+        include: {
+          items: true,
+          payments: { where: { status: { in: ['PENDING', 'UNKNOWN'] } } },
+        },
+      });
       if (!initialOrder) {
         return sendError(res, 404, 'NOT_FOUND', 'Order not found.');
+      }
+      if (initialOrder.payments.length > 0) {
+        return sendError(
+          res,
+          409,
+          'PAYMENT_IN_PROGRESS',
+          'A payment is still being confirmed. Refresh payment status before cancelling this order.',
+        );
       }
       const result = await prisma.$transaction(async (tx) => {
         await lockProducts(
@@ -725,6 +854,7 @@ export function storefrontOrdersRouter(businessId: string): Router {
             businessId,
             status: 'AWAITING_PAYMENT',
             expiresAt: { gt: new Date() },
+            payments: { none: { status: { in: ['PENDING', 'UNKNOWN'] } } },
           },
           data: { status: 'CANCELLED' },
         });

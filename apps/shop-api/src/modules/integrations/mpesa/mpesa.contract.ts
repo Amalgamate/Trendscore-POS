@@ -12,6 +12,8 @@ export interface MpesaCredentials {
   consumerSecret: string;
   shortcode: string;
   passkey: string;
+  environment: MpesaEnvironment;
+  transactionType: 'CustomerPayBillOnline' | 'CustomerBuyGoodsOnline';
 }
 
 export interface MpesaStkPushRequest {
@@ -28,15 +30,21 @@ export interface MpesaStkPushResult {
   merchantRequestId: string;
   responseCode: string;
   responseDescription: string;
+  customerMessage?: string;
 }
 
 export interface MpesaTransactionQuery {
   checkoutRequestId: string;
-  merchantRequestId: string;
+}
+
+export interface MpesaTransactionQueryResult {
+  resultCode: string;
+  resultDescription: string;
 }
 
 export interface MpesaCallbackResult {
   checkoutRequestId: string;
+  merchantRequestId?: string;
   resultCode: string;
   resultDescription: string;
   receiptNumber?: string;
@@ -60,6 +68,6 @@ export interface MpesaDarajaAdapter {
   queryTransaction(
     credentials: MpesaCredentials,
     query: MpesaTransactionQuery,
-  ): Promise<MpesaTransactionState>;
+  ): Promise<MpesaTransactionQueryResult>;
   parseCallback(payload: unknown): MpesaCallbackResult | null;
 }

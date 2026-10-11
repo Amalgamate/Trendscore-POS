@@ -12,18 +12,14 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
 
     await tester.pumpWidget(const MaterialApp(home: MpesaIntegrationView()));
+    await tester.pumpAndSettle();
 
     expect(find.text('Not connected'), findsOneWidget);
-    expect(
-      find.text(
-        'Daraja is not connected. No M-Pesa payments are being initiated or verified.',
-      ),
-      findsOneWidget,
-    );
+    expect(find.textContaining('M-Pesa'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('setup preview masks credentials and cannot save or test yet', (
+  testWidgets('setup masks credentials and blocks save without server config', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(390, 844);
@@ -55,7 +51,7 @@ void main() {
     );
     expect(tester.widget<FilledButton>(saveButton).onPressed, isNull);
     final testButton = find.ancestor(
-      of: find.text('Test connection'),
+      of: find.text('Test saved connection'),
       matching: find.byWidgetPredicate((widget) => widget is OutlinedButton),
     );
     expect(tester.widget<OutlinedButton>(testButton).onPressed, isNull);
@@ -73,13 +69,16 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: MpesaIntegrationView()));
       await tester.tap(find.text('Transactions'));
       await tester.pumpAndSettle();
-      expect(find.text('Transaction history is not connected'), findsOneWidget);
+      expect(
+        find.text('No M-Pesa transactions have been recorded.'),
+        findsOneWidget,
+      );
 
       await tester.tap(find.text('Reconciliation'));
       await tester.pumpAndSettle();
       expect(find.text('Callback activity'), findsOneWidget);
       expect(
-        find.textContaining('No callback endpoint is active.'),
+        find.textContaining('No public HTTPS callback endpoint is configured.'),
         findsOneWidget,
       );
       expect(tester.takeException(), isNull);

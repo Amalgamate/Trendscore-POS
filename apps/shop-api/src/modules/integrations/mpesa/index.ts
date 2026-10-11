@@ -6,5 +6,6 @@ export type {
   MpesaStkPushRequest,
   MpesaStkPushResult,
   MpesaTransactionQuery,
+  MpesaTransactionQueryResult,
   MpesaTransactionState,
 } from './mpesa.contract';

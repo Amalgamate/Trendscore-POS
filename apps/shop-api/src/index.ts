@@ -16,6 +16,7 @@ import {
   expirePendingStorefrontOrders,
   storefrontOrdersRouter,
 } from './modules/storefront/storefront-orders.router';
+import { mpesaRouter } from './modules/integrations/mpesa/mpesa.router';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const VERSION = process.env.APP_VERSION ?? 'dev';
@@ -30,7 +31,15 @@ const BUSINESS_ID = process.env.BUSINESS_ID ?? '';
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? 'info',
-  redact: ['req.headers.authorization', 'req.headers.cookie', '*.passwordHash', '*.pinHash'],
+  redact: [
+    'req.headers.authorization',
+    'req.headers.cookie',
+    'req.body.consumerKey',
+    'req.body.consumerSecret',
+    'req.body.passkey',
+    '*.passwordHash',
+    '*.pinHash',
+  ],
 });
 
 const app = express();
@@ -61,6 +70,7 @@ if (BUSINESS_ID) {
   app.use('/business', businessRouter(BUSINESS_ID));
   app.use('/delivery', deliveryRouter(BUSINESS_ID));
   app.use('/storefront/orders', storefrontOrdersRouter(BUSINESS_ID));
+  app.use('/payments/mpesa', mpesaRouter(BUSINESS_ID));
 } else {
   log.warn('BUSINESS_ID is not set — business routes are disabled. Set the env var to enable them.');
 }
