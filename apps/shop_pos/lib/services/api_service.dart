@@ -1101,6 +1101,146 @@ class ApiService {
     return false;
   }
 
+  Future<Map<String, dynamic>?> getMpesaConfigurationStatus() async {
+    lastError = null;
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/payments/mpesa/config'), headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError =
+            'The shop API returned invalid M-Pesa configuration status.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not load M-Pesa configuration (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not reach the shop API to load M-Pesa configuration.';
+      debugPrint('API getMpesaConfigurationStatus error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> saveMpesaConfiguration(
+    Map<String, dynamic> configuration,
+  ) async {
+    lastError = null;
+    try {
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/payments/mpesa/config'),
+            headers: _headers,
+            body: jsonEncode(configuration),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned invalid saved M-Pesa status.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not save M-Pesa configuration (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not securely save M-Pesa configuration.';
+      debugPrint('API saveMpesaConfiguration error: $error');
+    }
+    return null;
+  }
+
+  Future<bool> testMpesaConnection() async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(Uri.parse('$baseUrl/payments/mpesa/test'), headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(response.body) ??
+          'Could not verify Daraja connection (${response.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not reach the shop API to test Daraja connection.';
+      debugPrint('API testMpesaConnection error: $error');
+    }
+    return false;
+  }
+
+  Future<Map<String, dynamic>?> getMpesaTransactions({
+    String? status,
+    int page = 1,
+  }) async {
+    lastError = null;
+    try {
+      final query = <String, String>{'page': '$page', 'limit': '50'};
+      if (status != null) query['status'] = status;
+      final uri = Uri.parse(
+        '$baseUrl/payments/mpesa/transactions',
+      ).replace(queryParameters: query);
+      final response = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is List &&
+            decoded['meta'] is Map<String, dynamic>) {
+          return decoded;
+        }
+        lastError = 'The shop API returned invalid M-Pesa transaction data.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not load M-Pesa transactions (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not reach the shop API to load M-Pesa transactions.';
+      debugPrint('API getMpesaTransactions error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> reconcileMpesaTransaction(
+    String paymentId,
+  ) async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse(
+              '$baseUrl/payments/mpesa/transactions/$paymentId/reconcile',
+            ),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned invalid reconciliation status.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not reconcile M-Pesa transaction (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not reach the shop API to reconcile this transaction.';
+      debugPrint('API reconcileMpesaTransaction error: $error');
+    }
+    return null;
+  }
+
   Future<Map<String, dynamic>?> getStorefrontOrders({
     String? status,
     int page = 1,

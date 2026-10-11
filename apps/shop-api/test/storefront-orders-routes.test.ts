@@ -57,6 +57,7 @@ function sampleOrder(status = 'AWAITING_PAYMENT') {
       },
     ],
     statusEvents: [],
+    payments: [],
   };
 }
 

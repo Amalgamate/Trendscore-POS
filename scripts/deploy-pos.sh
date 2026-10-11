@@ -84,6 +84,16 @@ RETAIL_UID="$("${DOCKER[@]}" run --rm --entrypoint id "$API_IMAGE" -u retail)"
 [[ "$RETAIL_UID" =~ ^[0-9]+$ ]] || { echo "Could not resolve the API container user" >&2; exit 1; }
 chown "$RETAIL_UID" "$ADMIN_CONFIG"
 chmod 400 "$ADMIN_CONFIG"
+MPESA_KEY_FILE="$BASE_DIR/mpesa-encryption-key"
+if [[ ! -s "$MPESA_KEY_FILE" ]]; then
+  openssl rand -base64 32 > "$MPESA_KEY_FILE"
+fi
+chmod 400 "$MPESA_KEY_FILE"
+chown "$RETAIL_UID" "$MPESA_KEY_FILE"
+[[ "$(base64 -d "$MPESA_KEY_FILE" | wc -c)" -eq 32 ]] || {
+  echo "The persisted M-Pesa encryption key is invalid" >&2
+  exit 1
+}
 "${DOCKER[@]}" run --rm --network "$NETWORK" --mount "type=bind,src=$ADMIN_CONFIG,dst=/run/secrets/super-admin.json,readonly" \
   -e "DATABASE_URL=$DATABASE_URL" -e "DIRECT_URL=$DATABASE_URL" \
   --entrypoint node "$API_IMAGE" dist/scripts/create-super-admin.js /run/secrets/super-admin.json
@@ -113,7 +123,10 @@ WEB_NAME="retailpos-web-${DEPLOY_ID}"
 "${DOCKER[@]}" run -d --name "$API_NAME" --restart unless-stopped \
   --label retailos.app=shop-api --label "retailos.domain=$DOMAIN" \
   --network "$NETWORK" -p "127.0.0.1:${API_PORT}:4000" \
+  --mount "type=bind,src=$MPESA_KEY_FILE,dst=/run/secrets/mpesa-encryption-key,readonly" \
   -e NODE_ENV=production -e PORT=4000 -e "DATABASE_URL=$DATABASE_URL" -e "DIRECT_URL=$DATABASE_URL" \
+  -e MPESA_CREDENTIALS_ENCRYPTION_KEY_FILE=/run/secrets/mpesa-encryption-key \
+  -e "MPESA_CALLBACK_URL=https://${SHOP_DOMAIN}/api/payments/mpesa/callback" \
   -e "JWT_SECRET=$JWT_SECRET" -e "BUSINESS_ID=$BUSINESS_ID" -e "CORS_ORIGIN=https://${DOMAIN}" \
   "$API_IMAGE" >/dev/null
 "${DOCKER[@]}" run -d --name "$POS_NAME" --restart unless-stopped \

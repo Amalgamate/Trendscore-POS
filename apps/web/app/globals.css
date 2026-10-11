@@ -1365,6 +1365,11 @@ a {
   background: #fde8e8;
 }
 
+.order-status-paid {
+  color: #17643a;
+  background: #e3f5e9;
+}
+
 .order-status-expired {
   color: #4b5563;
   background: #edf0f3;

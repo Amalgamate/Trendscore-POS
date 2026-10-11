@@ -10,12 +10,19 @@ type FulfillmentMethod = 'DELIVERY' | 'PICKUP';
 type StorefrontOrder = {
   id: string;
   orderNumber: string;
-  status: 'AWAITING_PAYMENT' | 'CANCELLED' | 'EXPIRED';
+  status: 'AWAITING_PAYMENT' | 'PAID' | 'CANCELLED' | 'EXPIRED';
   fulfillmentMethod: FulfillmentMethod;
   subtotal: number;
   total: number;
   expiresAt: string;
   createdAt: string;
+  latestPayment: {
+    id: string;
+    status: 'PENDING' | 'SUCCEEDED' | 'FAILED' | 'UNKNOWN';
+    amount: number;
+    receiptNumber: string | null;
+    message: string | null;
+  } | null;
   items: Array<{
     productName: string;
     variantLabel: string | null;
@@ -44,7 +51,29 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isOrderStatus(value: unknown): value is StorefrontOrder['status'] {
-  return value === 'AWAITING_PAYMENT' || value === 'CANCELLED' || value === 'EXPIRED';
+  return value === 'AWAITING_PAYMENT' || value === 'PAID' || value === 'CANCELLED' || value === 'EXPIRED';
+}
+
+function parsePayment(value: unknown): StorefrontOrder['latestPayment'] {
+  if (value === null || value === undefined) return null;
+  if (
+    !isRecord(value) ||
+    typeof value.id !== 'string' ||
+    !['PENDING', 'SUCCEEDED', 'FAILED', 'UNKNOWN'].includes(String(value.status)) ||
+    typeof value.amount !== 'number' ||
+    !Number.isFinite(value.amount) ||
+    (typeof value.receiptNumber !== 'string' && value.receiptNumber !== null) ||
+    (typeof value.message !== 'string' && value.message !== null)
+  ) {
+    throw new Error('The shop returned an invalid payment status.');
+  }
+  return {
+    id: value.id,
+    status: value.status as NonNullable<StorefrontOrder['latestPayment']>['status'],
+    amount: value.amount,
+    receiptNumber: value.receiptNumber,
+    message: value.message,
+  };
 }
 
 function parseStorefrontOrder(value: unknown): StorefrontOrder {
@@ -65,6 +94,9 @@ function parseStorefrontOrder(value: unknown): StorefrontOrder {
     Number.isNaN(Date.parse(data.expiresAt)) ||
     typeof data.createdAt !== 'string' ||
     Number.isNaN(Date.parse(data.createdAt)) ||
+    (data.latestPayment !== null &&
+      data.latestPayment !== undefined &&
+      !isRecord(data.latestPayment)) ||
     !Array.isArray(data.items) ||
     !data.items.every(
       (item) =>
@@ -100,6 +132,7 @@ function parseStorefrontOrder(value: unknown): StorefrontOrder {
     total: data.total,
     expiresAt: data.expiresAt,
     createdAt: data.createdAt,
+    latestPayment: parsePayment(data.latestPayment),
     items: data.items.map((item) => ({
       productName: String(item.productName),
       variantLabel: typeof item.variantLabel === 'string' ? item.variantLabel : null,
@@ -173,6 +206,9 @@ export default function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false);
   const [refreshingOrder, setRefreshingOrder] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  const [startingPayment, setStartingPayment] = useState(false);
+  const [paymentReady, setPaymentReady] = useState(false);
+  const [paymentIdempotencyKey, setPaymentIdempotencyKey] = useState('');
   const [error, setError] = useState<string | null>(null);
   const restoreAttempted = useRef(false);
 
@@ -202,6 +238,28 @@ export default function CheckoutPage() {
       console.error('Could not prepare a safe checkout retry key.', storageError);
       setError('This browser could not start secure checkout. Please enable session storage and try again.');
     }
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    void fetch(`${apiBaseUrl()}/payments/mpesa/availability`, {
+      cache: 'no-store',
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await responseMessage(response));
+        const payload: unknown = await response.json();
+        if (!isRecord(payload) || !isRecord(payload.data)) {
+          throw new Error('The shop returned invalid M-Pesa availability.');
+        }
+        if (active) setPaymentReady(payload.data.pickupPaymentsEnabled === true);
+      })
+      .catch((availabilityError: unknown) => {
+        console.error('Could not load pickup payment availability.', availabilityError);
+        if (active) setPaymentReady(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
@@ -287,7 +345,28 @@ export default function CheckoutPage() {
         },
       );
       if (!response.ok) throw new Error(await responseMessage(response));
-      rememberOrder(orderAccessKey, await readOrderResponse(response));
+      const latest = await readOrderResponse(response);
+      if (latest.latestPayment) {
+        const paymentResponse = await fetch(
+          `${apiBaseUrl()}/payments/mpesa/orders/${latest.id}/status?paymentId=${encodeURIComponent(latest.latestPayment.id)}`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ accessKey: orderAccessKey }),
+            cache: 'no-store',
+          },
+        );
+        if (paymentResponse.ok) {
+          const payload: unknown = await paymentResponse.json();
+          if (isRecord(payload)) {
+            const payment = parsePayment(payload.data);
+            latest.latestPayment = payment;
+          }
+        } else {
+          throw new Error(await responseMessage(paymentResponse));
+        }
+      }
+      rememberOrder(orderAccessKey, latest);
     } catch (refreshError) {
       setError(
         refreshError instanceof Error
@@ -298,6 +377,70 @@ export default function CheckoutPage() {
       setRefreshingOrder(false);
     }
   }, [order, orderAccessKey, refreshingOrder, rememberOrder]);
+
+  useEffect(() => {
+    if (
+      !order ||
+      !orderAccessKey ||
+      (order.latestPayment?.status !== 'PENDING' &&
+        order.latestPayment?.status !== 'UNKNOWN')
+    ) {
+      return;
+    }
+    const interval = window.setInterval(() => {
+      void refreshOrder();
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [order, orderAccessKey, refreshOrder]);
+
+  const startMpesaPayment = async () => {
+    if (
+      !order ||
+      !orderAccessKey ||
+      !paymentReady ||
+      startingPayment ||
+      order.fulfillmentMethod !== 'PICKUP'
+    ) {
+      return;
+    }
+    const retryKey = paymentIdempotencyKey || crypto.randomUUID();
+    setPaymentIdempotencyKey(retryKey);
+    setStartingPayment(true);
+    setError(null);
+    try {
+      const response = await fetch(
+        `${apiBaseUrl()}/payments/mpesa/orders/${order.id}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            accessKey: orderAccessKey,
+            idempotencyKey: retryKey,
+          }),
+          cache: 'no-store',
+        },
+      );
+      if (!response.ok) throw new Error(await responseMessage(response));
+      const payload: unknown = await response.json();
+      if (!isRecord(payload)) {
+        throw new Error('The shop returned an invalid M-Pesa payment response.');
+      }
+      const payment = parsePayment(payload.data);
+      if (!payment) {
+        throw new Error('The shop returned an empty M-Pesa payment response.');
+      }
+      rememberOrder(orderAccessKey, { ...order, latestPayment: payment });
+      if (payment.status === 'FAILED') setPaymentIdempotencyKey('');
+    } catch (paymentError) {
+      setError(
+        paymentError instanceof Error
+          ? paymentError.message
+          : 'The M-Pesa request could not be started. Refresh payment status before retrying.',
+      );
+    } finally {
+      setStartingPayment(false);
+    }
+  };
 
   const placeOrder = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -384,7 +527,17 @@ export default function CheckoutPage() {
   const paymentPending = order?.status === 'AWAITING_PAYMENT';
   const statusLabel =
     order?.status === 'AWAITING_PAYMENT'
-      ? 'Awaiting payment'
+      ? order.latestPayment?.status === 'SUCCEEDED'
+        ? 'Payment confirmed'
+        : order.latestPayment?.status === 'FAILED'
+          ? 'Payment not completed'
+          : order.latestPayment?.status === 'UNKNOWN'
+            ? 'Payment being verified'
+            : order.latestPayment?.status === 'PENDING'
+              ? 'Waiting for M-Pesa'
+              : 'Awaiting payment'
+      : order?.status === 'PAID'
+        ? 'Paid'
       : order?.status === 'CANCELLED'
         ? 'Cancelled'
         : 'Reservation expired';
@@ -396,7 +549,13 @@ export default function CheckoutPage() {
           <h1>{order ? 'Order received' : 'Checkout'}</h1>
           <p className="page-intro">
             {order
-              ? 'Your order is saved with the shop. No payment has been taken.'
+              ? order.status === 'PAID'
+                ? 'Your M-Pesa payment is confirmed and the shop has recorded your sale.'
+                : order.latestPayment?.status === 'SUCCEEDED'
+                  ? 'Payment was verified. Your order is being updated.'
+                  : order.fulfillmentMethod === 'PICKUP'
+                    ? 'Your order is saved with the shop. Continue with pickup payment when you are ready.'
+                    : 'Your delivery order is saved unpaid. The shop will confirm the delivery charge before payment.'
               : 'Add your contact details and choose how you would like to receive your order.'}
           </p>
         </div>
@@ -423,7 +582,12 @@ export default function CheckoutPage() {
               <h2>{order.orderNumber}</h2>
               <p>
                 {paymentPending
-                  ? `Unpaid. Your stock hold ends at ${expiryLabel(order.expiresAt)}.`
+                  ? order.latestPayment?.status === 'PENDING' ||
+                    order.latestPayment?.status === 'UNKNOWN'
+                    ? 'Keep this page open while the shop verifies your M-Pesa payment.'
+                    : `Unpaid. Your stock hold ends at ${expiryLabel(order.expiresAt)}.`
+                  : order.status === 'PAID'
+                    ? 'Payment verified and recorded by the shop.'
                   : order.status === 'CANCELLED'
                     ? 'The stock hold has been released.'
                     : 'The 15-minute stock hold has ended and the items are available again.'}
@@ -452,7 +616,11 @@ export default function CheckoutPage() {
             </div>
             <div>
               <span>Payment</span>
-              <strong>Not collected</strong>
+              <strong>
+                {order.latestPayment?.status === 'SUCCEEDED' || order.status === 'PAID'
+                  ? `Paid${order.latestPayment?.receiptNumber ? ` · ${order.latestPayment.receiptNumber}` : ''}`
+                  : order.latestPayment?.status ?? 'Not collected'}
+              </strong>
             </div>
           </div>
 
@@ -476,6 +644,8 @@ export default function CheckoutPage() {
                   <strong>
                     {event.toStatus === 'AWAITING_PAYMENT'
                       ? 'Order placed'
+                      : event.toStatus === 'PAID'
+                        ? 'Payment confirmed'
                       : event.toStatus === 'CANCELLED'
                         ? 'Order cancelled'
                         : 'Stock hold expired'}
@@ -490,7 +660,41 @@ export default function CheckoutPage() {
           </ol>
 
           <div className="order-confirmation-actions">
-            {paymentPending && (
+            {paymentPending &&
+              order.fulfillmentMethod === 'PICKUP' &&
+              paymentReady &&
+              (!order.latestPayment ||
+                order.latestPayment.status === 'FAILED') && (
+                <button
+                  className="button button-primary"
+                  type="button"
+                  onClick={startMpesaPayment}
+                  disabled={startingPayment}
+                >
+                  {startingPayment
+                    ? 'Sending M-Pesa prompt…'
+                    : order.latestPayment?.status === 'FAILED'
+                      ? 'Try M-Pesa again'
+                      : `Pay ${formatStorePrice(order.total)} with M-Pesa`}
+                </button>
+              )}
+            {paymentPending &&
+              order.fulfillmentMethod === 'PICKUP' &&
+              !paymentReady &&
+              !order.latestPayment && (
+                <p className="checkout-no-payment">
+                  M-Pesa pickup payment is not available yet. The shop will confirm payment with you.
+                </p>
+              )}
+            {order.latestPayment?.message && (
+              <p className="checkout-no-payment" role="status">
+                {order.latestPayment.message}
+              </p>
+            )}
+            {paymentPending &&
+              order.latestPayment?.status !== 'PENDING' &&
+              order.latestPayment?.status !== 'UNKNOWN' &&
+              order.latestPayment?.status !== 'SUCCEEDED' && (
               <button
                 className="button button-secondary"
                 type="button"
@@ -643,9 +847,9 @@ export default function CheckoutPage() {
               <section className="checkout-section checkout-payment-notice">
                 <h2>Payment and delivery charge</h2>
                 <p>
-                  This creates an unpaid order only. No money is taken here.
-                  The shop will confirm any delivery charge before payment is
-                  connected.
+                  {fulfillmentMethod === 'PICKUP'
+                    ? 'Place the order first; if the shop has enabled M-Pesa, you can pay securely after the reservation is created.'
+                    : 'This creates an unpaid delivery order only. No money is taken until the shop confirms the delivery charge.'}
                 </p>
                 <p>
                   Stock is held for 15 minutes. If payment is not completed
@@ -709,7 +913,11 @@ export default function CheckoutPage() {
                 }
                 type="submit"
               >
-                {submitting ? 'Placing order…' : 'Place unpaid order'}
+                {submitting
+                  ? 'Placing order…'
+                  : fulfillmentMethod === 'PICKUP'
+                    ? 'Place pickup order'
+                    : 'Place unpaid delivery order'}
               </button>
               <p className="checkout-no-payment">No payment collected at this step</p>
             </aside>

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../services/api_service.dart';
 import '../theme/tokens.dart';
 
 class MpesaIntegrationView extends StatefulWidget {
@@ -17,12 +18,150 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
   final _consumerKey = TextEditingController();
   final _consumerSecret = TextEditingController();
   final _passkey = TextEditingController();
-  String _environment = 'Sandbox';
+  String _environment = 'sandbox';
+  String _transactionType = 'CustomerPayBillOnline';
+  Map<String, dynamic>? _configuration;
+  List<Map<String, dynamic>> _paymentTransactions = [];
+  bool _loading = true;
+  bool _saving = false;
+  bool _testing = false;
+  bool _refreshingTransactions = false;
+  String? _feedback;
 
   @override
   void initState() {
     super.initState();
     _tabs = TabController(length: 4, vsync: this);
+    _load();
+  }
+
+  Future<void> _load() async {
+    final configuration = await ApiService.instance
+        .getMpesaConfigurationStatus();
+    final transactions = await ApiService.instance.getMpesaTransactions();
+    if (!mounted) return;
+    setState(() {
+      _configuration = configuration;
+      _paymentTransactions = (transactions?['data'] as List? ?? const [])
+          .whereType<Map>()
+          .map((entry) => Map<String, dynamic>.from(entry))
+          .toList();
+      _loading = false;
+      if (configuration == null || transactions == null) {
+        _feedback = ApiService.instance.lastError;
+      }
+      if (configuration != null) {
+        _environment = configuration['environment']?.toString() ?? _environment;
+        _transactionType =
+            configuration['transactionType']?.toString() ?? _transactionType;
+        _shortcode.text = configuration['shortcode']?.toString() ?? '';
+        _accountReference.text =
+            configuration['accountReference']?.toString() ?? '';
+      }
+    });
+  }
+
+  Future<void> _refreshTransactions() async {
+    setState(() => _refreshingTransactions = true);
+    final result = await ApiService.instance.getMpesaTransactions();
+    if (!mounted) return;
+    setState(() {
+      _refreshingTransactions = false;
+      if (result != null) {
+        _paymentTransactions = (result['data'] as List? ?? const [])
+            .whereType<Map>()
+            .map((entry) => Map<String, dynamic>.from(entry))
+            .toList();
+        _feedback = null;
+      } else {
+        _feedback = ApiService.instance.lastError;
+      }
+    });
+  }
+
+  Future<void> _saveConfiguration() async {
+    if (_shortcode.text.trim().isEmpty ||
+        _accountReference.text.trim().isEmpty ||
+        _consumerKey.text.trim().isEmpty ||
+        _consumerSecret.text.trim().isEmpty ||
+        _passkey.text.trim().isEmpty) {
+      setState(
+        () => _feedback =
+            'Complete every merchant and credential field before saving.',
+      );
+      return;
+    }
+    setState(() {
+      _saving = true;
+      _feedback = null;
+    });
+    final saved = await ApiService.instance.saveMpesaConfiguration({
+      'environment': _environment,
+      'shortcode': _shortcode.text.trim(),
+      'transactionType': _transactionType,
+      'accountReference': _accountReference.text.trim(),
+      'consumerKey': _consumerKey.text.trim(),
+      'consumerSecret': _consumerSecret.text.trim(),
+      'passkey': _passkey.text.trim(),
+    });
+    if (!mounted) return;
+    setState(() {
+      _saving = false;
+      _configuration = saved ?? _configuration;
+      _feedback = saved == null
+          ? ApiService.instance.lastError
+          : 'Credentials were encrypted and saved on the shop server.';
+    });
+    if (saved != null) {
+      _consumerKey.clear();
+      _consumerSecret.clear();
+      _passkey.clear();
+    }
+  }
+
+  Future<void> _testConnection() async {
+    setState(() {
+      _testing = true;
+      _feedback = null;
+    });
+    final connected = await ApiService.instance.testMpesaConnection();
+    final refreshedConfiguration = connected
+        ? await ApiService.instance.getMpesaConfigurationStatus()
+        : null;
+    if (!mounted) return;
+    setState(() {
+      _testing = false;
+      if (refreshedConfiguration != null) {
+        _configuration = refreshedConfiguration;
+      }
+      _feedback = connected
+          ? 'Daraja credentials are valid and the server can reach the provider.'
+          : ApiService.instance.lastError;
+    });
+  }
+
+  Future<void> _reconcile(String paymentId) async {
+    setState(() {
+      _feedback = null;
+      _refreshingTransactions = true;
+    });
+    final payment = await ApiService.instance.reconcileMpesaTransaction(
+      paymentId,
+    );
+    final result = await ApiService.instance.getMpesaTransactions();
+    if (!mounted) return;
+    setState(() {
+      _refreshingTransactions = false;
+      if (result != null) {
+        _paymentTransactions = (result['data'] as List? ?? const [])
+            .whereType<Map>()
+            .map((entry) => Map<String, dynamic>.from(entry))
+            .toList();
+      }
+      _feedback = payment == null
+          ? ApiService.instance.lastError
+          : 'Payment status checked: ${payment['status'] ?? 'unknown'}.';
+    });
   }
 
   @override
@@ -44,6 +183,19 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
+    final configured = _configuration?['configured'] == true;
+    final ready = _configuration?['paymentReady'] == true;
+    final connectionLabel = _loading
+        ? 'Checking'
+        : ready
+        ? 'Ready'
+        : !configured
+        ? 'Not connected'
+        : _configuration?['callbackUrl'] == null
+        ? 'Needs callback'
+        : _configuration?['verified'] == true
+        ? 'Ready'
+        : 'Needs test';
     return Scaffold(
       backgroundColor: palette.bgCanvas,
       body: SafeArea(
@@ -72,9 +224,13 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
                                 ),
                           ),
                           _statePill(
-                            'Not connected',
-                            Icons.link_off_rounded,
-                            palette.statusWarning,
+                            connectionLabel,
+                            ready
+                                ? Icons.verified_rounded
+                                : Icons.link_off_rounded,
+                            ready
+                                ? palette.statusSuccess
+                                : palette.statusWarning,
                           ),
                         ],
                       ),
@@ -84,6 +240,7 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
                         style: TextStyle(color: palette.textSecondary),
                       ),
                       const SizedBox(height: 18),
+                      if (_loading) const LinearProgressIndicator(),
                       TabBar(
                         controller: _tabs,
                         isScrollable: true,
@@ -125,16 +282,20 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
       LayoutBuilder(
         builder: (context, constraints) {
           final stacked = constraints.maxWidth < 760;
-          final status = _statusPanel();
+          final statusPanel = _statusPanel();
           final readiness = _readinessPanel();
           return stacked
               ? Column(
-                  children: [status, const SizedBox(height: 16), readiness],
+                  children: [
+                    statusPanel,
+                    const SizedBox(height: 16),
+                    readiness,
+                  ],
                 )
               : Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(flex: 6, child: status),
+                    Expanded(flex: 6, child: statusPanel),
                     const SizedBox(width: 20),
                     Expanded(flex: 5, child: readiness),
                   ],
@@ -146,6 +307,9 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
 
   Widget _statusPanel() {
     final palette = context.palette;
+    final configuration = _configuration;
+    final configured = configuration?['configured'] == true;
+    final ready = configuration?['paymentReady'] == true;
     return _section(
       title: 'M-Pesa',
       description: 'Safaricom Daraja payment integration',
@@ -155,52 +319,100 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: palette.statusWarningLight,
+              color: ready
+                  ? palette.statusSuccessLight
+                  : palette.statusWarningLight,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(
-                color: palette.statusWarning.withValues(alpha: 0.35),
+                color: (ready ? palette.statusSuccess : palette.statusWarning)
+                    .withValues(alpha: 0.35),
               ),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.info_outline_rounded, color: palette.statusWarning),
+                Icon(
+                  ready
+                      ? Icons.check_circle_outline
+                      : Icons.info_outline_rounded,
+                  color: ready ? palette.statusSuccess : palette.statusWarning,
+                ),
                 const SizedBox(width: 12),
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Daraja is not connected. No M-Pesa payments are being initiated or verified.',
-                    style: TextStyle(height: 1.45),
+                    _statusMessage,
+                    style: const TextStyle(height: 1.45),
                   ),
                 ),
               ],
             ),
           ),
           const SizedBox(height: 20),
-          _statusRow('Environment', 'Not selected', Icons.tune_rounded),
           _statusRow(
-            'Last connection check',
-            'Not available',
+            'Environment',
+            configuration?['environment']?.toString() ?? 'Not selected',
+            Icons.tune_rounded,
+          ),
+          _statusRow(
+            'Merchant shortcode',
+            configuration?['shortcode']?.toString() ?? 'Not configured',
+            Icons.storefront_outlined,
+          ),
+          _statusRow(
+            'Server encryption',
+            configuration?['encryptionReady'] == true ? 'Ready' : 'Unavailable',
+            Icons.lock_outline_rounded,
+          ),
+          _statusRow(
+            'Public HTTPS callback',
+            configuration?['callbackUrl']?.toString() ?? 'Not provisioned',
             Icons.schedule_rounded,
           ),
           _statusRow(
-            'Callback verification',
-            'Not configured',
-            Icons.webhook_rounded,
-          ),
-          _statusRow(
             'Payment processing',
-            'Unavailable',
+            ready ? 'Pickup payments enabled' : 'Unavailable',
             Icons.payments_outlined,
           ),
           const SizedBox(height: 18),
           OutlinedButton.icon(
-            onPressed: null,
-            icon: const Icon(Icons.wifi_tethering_rounded),
-            label: const Text('Test connection'),
+            onPressed: !_loading && configured && !_testing
+                ? _testConnection
+                : null,
+            icon: _testing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.wifi_tethering_rounded),
+            label: Text(_testing ? 'Testing connection…' : 'Test connection'),
           ),
         ],
       ),
     );
+  }
+
+  String get _statusMessage {
+    if (_loading) return 'Checking the shop server configuration.';
+    if (_configuration == null) {
+      return _feedback ??
+          'M-Pesa status could not be loaded from the shop server.';
+    }
+    if (_configuration?['paymentReady'] == true) {
+      return 'Daraja is configured. Online M-Pesa is enabled for pickup orders only.';
+    }
+    if (_configuration?['configured'] == true) {
+      if (_configuration?['callbackUrl'] == null) {
+        return 'Credentials are saved, but payment initiation stays disabled until a public HTTPS callback is configured.';
+      }
+      if (_configuration?['verified'] != true) {
+        return 'Credentials are saved. Test the Daraja connection before pickup payments can be enabled.';
+      }
+    }
+    if (_configuration?['encryptionReady'] != true) {
+      return 'Server-side encryption is not available. No credentials can be saved.';
+    }
+    return 'Daraja is not connected. No M-Pesa payments are being initiated or verified.';
   }
 
   Widget _readinessPanel() {
@@ -213,25 +425,29 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
         children: [
           _readinessItem(
             'Secure credential storage',
-            'Required before consumer keys or passkeys can be saved.',
+            _configuration?['encryptionReady'] == true
+                ? 'Server-side encryption is ready for credentials.'
+                : 'Server-side encryption key is unavailable.',
             Icons.lock_outline_rounded,
-            palette.statusWarning,
+            _configuration?['encryptionReady'] == true
+                ? palette.statusSuccess
+                : palette.statusWarning,
           ),
           _readinessItem(
             'Daraja server adapter',
-            'The server-side provider boundary is prepared; no live adapter is active.',
+            'Daraja OAuth, STK Push, and transaction query are available server-side.',
             Icons.hub_outlined,
             palette.statusInfo,
           ),
           _readinessItem(
             'Verified callback handling',
-            'Callbacks must be correlated with a recorded checkout and amount.',
+            'Callbacks are correlated with a recorded checkout, then verified with Daraja.',
             Icons.verified_user_outlined,
             palette.statusInfo,
           ),
           _readinessItem(
             'Payment-to-order reconciliation',
-            'Uncertain results must be resolved before an order is marked paid.',
+            'Uncertain payment results keep the stock hold until staff reconcile them.',
             Icons.sync_alt_rounded,
             palette.statusInfo,
             last: true,
@@ -257,15 +473,22 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
                 color: palette.statusInfo.withValues(alpha: 0.25),
               ),
             ),
-            child: const Row(
+            child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.shield_outlined, color: AppColors.status_info),
-                SizedBox(width: 12),
+                Icon(
+                  Icons.shield_outlined,
+                  color: _configuration?['encryptionReady'] == true
+                      ? palette.statusInfo
+                      : palette.statusWarning,
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'Setup preview only. Values stay in this screen and are not saved or sent. Saving and connection tests will be enabled after secure server-side credential storage is available.',
-                    style: TextStyle(height: 1.45),
+                    _configuration?['encryptionReady'] == true
+                        ? 'Credentials are sent directly to the shop API over HTTPS and encrypted before storage. They are never retained on this device.'
+                        : 'Server-side encryption is unavailable. The shop API will reject credential saves until its encryption key is provisioned.',
+                    style: const TextStyle(height: 1.45),
                   ),
                 ),
               ],
@@ -281,23 +504,47 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
                 final narrow = constraints.maxWidth < 620;
                 final fields = [
                   DropdownButtonFormField<String>(
-                    initialValue: _environment,
+                    value: _environment,
+                    isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'Environment',
                       prefixIcon: Icon(Icons.cloud_outlined),
                     ),
                     items: const [
                       DropdownMenuItem(
-                        value: 'Sandbox',
+                        value: 'sandbox',
                         child: Text('Sandbox'),
                       ),
                       DropdownMenuItem(
-                        value: 'Production',
+                        value: 'production',
                         child: Text('Production'),
                       ),
                     ],
                     onChanged: (value) {
                       if (value != null) setState(() => _environment = value);
+                    },
+                  ),
+                  DropdownButtonFormField<String>(
+                    value: _transactionType,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Transaction type',
+                      prefixIcon: Icon(Icons.receipt_long_outlined),
+                    ),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'CustomerPayBillOnline',
+                        child: Text('Paybill'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'CustomerBuyGoodsOnline',
+                        child: Text('Buy Goods / Till'),
+                      ),
+                    ],
+                    onChanged: (value) {
+                      if (value != null) {
+                        setState(() => _transactionType = value);
+                      }
                     },
                   ),
                   TextFormField(
@@ -318,28 +565,35 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
                     ),
                   ),
                 ];
-                return narrow
-                    ? Column(
-                        children: [
-                          for (final field in fields) ...[
-                            field,
-                            const SizedBox(height: 14),
-                          ],
-                        ],
-                      )
-                    : Column(
-                        children: [
-                          Row(
-                            children: [
-                              Expanded(child: fields[0]),
-                              const SizedBox(width: 16),
-                              Expanded(child: fields[1]),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-                          fields[2],
-                        ],
-                      );
+                if (narrow) {
+                  return Column(
+                    children: [
+                      for (final field in fields) ...[
+                        field,
+                        const SizedBox(height: 14),
+                      ],
+                    ],
+                  );
+                }
+                return Column(
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(child: fields[0]),
+                        const SizedBox(width: 16),
+                        Expanded(child: fields[2]),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(child: fields[1]),
+                        const SizedBox(width: 16),
+                        Expanded(child: fields[3]),
+                      ],
+                    ),
+                  ],
+                );
               },
             ),
           ),
@@ -362,9 +616,9 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
           _section(
             title: 'Callback endpoint',
             description:
-                'The callback URL will be provisioned and verified by the Shop API.',
-            child: const SelectableText(
-              'Not provisioned',
+                'Daraja sends payment results to this public HTTPS endpoint for server-side verification.',
+            child: SelectableText(
+              _configuration?['callbackUrl']?.toString() ?? 'Not provisioned',
               style: TextStyle(
                 fontFamily: AppFontFamily.mono,
                 fontSize: AppFontSize.base,
@@ -377,21 +631,42 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
             runSpacing: 8,
             children: [
               FilledButton.icon(
-                onPressed: null,
+                onPressed: _saving || _configuration?['encryptionReady'] != true
+                    ? null
+                    : _saveConfiguration,
                 icon: const Icon(Icons.save_outlined),
-                label: const Text('Save configuration'),
+                label: Text(
+                  _saving ? 'Saving securely…' : 'Save configuration',
+                ),
               ),
               OutlinedButton.icon(
-                onPressed: null,
+                onPressed: !_configurationReady || _testing
+                    ? null
+                    : _testConnection,
                 icon: const Icon(Icons.play_arrow_rounded),
-                label: const Text('Test connection'),
+                label: Text(_testing ? 'Testing…' : 'Test saved connection'),
               ),
             ],
           ),
+          if (_feedback != null) ...[
+            const SizedBox(height: 12),
+            Text(
+              _feedback!,
+              style: TextStyle(
+                color:
+                    _feedback!.toLowerCase().contains('could not') ||
+                        _feedback!.toLowerCase().contains('unavailable')
+                    ? palette.statusDanger
+                    : palette.textSecondary,
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
+
+  bool get _configurationReady => _configuration?['configured'] == true;
 
   Widget _transactions() {
     final palette = context.palette;
@@ -399,35 +674,42 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
       _section(
         title: 'M-Pesa transactions',
         description:
-            'Payment requests, callbacks, and provider receipts will be listed here.',
-        child: SizedBox(
-          width: double.infinity,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 42, horizontal: 16),
-            child: Column(
-              children: [
-                Icon(
-                  Icons.receipt_long_outlined,
-                  size: 42,
-                  color: palette.textTertiary,
+            'Recorded payment requests, verified receipts, and current settlement state.',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Align(
+              alignment: Alignment.centerRight,
+              child: OutlinedButton.icon(
+                onPressed: _refreshingTransactions
+                    ? null
+                    : _refreshTransactions,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(
+                  _refreshingTransactions ? 'Refreshing…' : 'Refresh',
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  'Transaction history is not connected',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    color: palette.textPrimary,
-                    fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(height: 12),
+            if (_paymentTransactions.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 32),
+                child: Center(
+                  child: Text(
+                    _loading
+                        ? 'Loading payment history…'
+                        : 'No M-Pesa transactions have been recorded.',
+                    style: TextStyle(color: palette.textSecondary),
                   ),
                 ),
-                const SizedBox(height: 6),
-                Text(
-                  'No live or sample transactions are shown. Connect and verify Daraja before payment records appear.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: palette.textSecondary),
-                ),
+              )
+            else
+              for (final payment in _paymentTransactions) ...[
+                _paymentRow(payment, reconciliable: false),
+                if (payment != _paymentTransactions.last)
+                  Divider(color: palette.borderSubtle, height: 1),
               ],
-            ),
-          ),
+          ],
         ),
       ),
     );
@@ -442,31 +724,45 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
           _section(
             title: 'Reconciliation',
             description:
-                'Resolve delayed, timed-out, and callback-mismatched payment results.',
+                'Recheck pending and uncertain results against Daraja before treating an order as paid.',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Reconciliation is unavailable until the Daraja adapter and verified callback pipeline are connected.',
+                  'Unresolved payments retain their stock reservation. Reconciliation never marks an order paid unless Daraja reports success and the callback details match the recorded amount and phone.',
                   style: TextStyle(color: palette.textSecondary, height: 1.5),
                 ),
                 const SizedBox(height: 18),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: null,
-                      icon: const Icon(Icons.refresh_rounded),
-                      label: const Text('Check pending payments'),
-                    ),
-                    OutlinedButton.icon(
-                      onPressed: null,
-                      icon: const Icon(Icons.download_outlined),
-                      label: const Text('Export reconciliation'),
-                    ),
-                  ],
+                OutlinedButton.icon(
+                  onPressed: _refreshingTransactions
+                      ? null
+                      : _refreshTransactions,
+                  icon: const Icon(Icons.refresh_rounded),
+                  label: Text(
+                    _refreshingTransactions
+                        ? 'Checking…'
+                        : 'Refresh unresolved payments',
+                  ),
                 ),
+                const SizedBox(height: 12),
+                for (final payment in _paymentTransactions.where(
+                  (entry) =>
+                      entry['status'] == 'PENDING' ||
+                      entry['status'] == 'UNKNOWN',
+                )) ...[
+                  _paymentRow(payment, reconciliable: true),
+                  Divider(color: palette.borderSubtle, height: 1),
+                ],
+                if (!_loading &&
+                    _paymentTransactions.every(
+                      (entry) =>
+                          entry['status'] != 'PENDING' &&
+                          entry['status'] != 'UNKNOWN',
+                    ))
+                  Text(
+                    'No unresolved payments need reconciliation.',
+                    style: TextStyle(color: palette.textSecondary),
+                  ),
               ],
             ),
           ),
@@ -482,7 +778,8 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    'No callback endpoint is active. Callback delivery attempts will be visible here after server-side verification is implemented.',
+                    _configuration?['callbackUrl']?.toString() ??
+                        'No public HTTPS callback endpoint is configured.',
                     style: TextStyle(color: palette.textSecondary, height: 1.5),
                   ),
                 ),
@@ -490,6 +787,87 @@ class _MpesaIntegrationViewState extends State<MpesaIntegrationView>
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _paymentRow(
+    Map<String, dynamic> payment, {
+    required bool reconciliable,
+  }) {
+    final palette = context.palette;
+    final status = payment['status']?.toString() ?? 'UNKNOWN';
+    final order = payment['order'] is Map
+        ? Map<String, dynamic>.from(payment['order'] as Map)
+        : <String, dynamic>{};
+    final amount = payment['amount'];
+    final paymentId = payment['id']?.toString();
+    final unresolved = status == 'PENDING' || status == 'UNKNOWN';
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final details = Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '${order['orderNumber'] ?? 'Order'} · ${amount is num ? amount.toStringAsFixed(2) : amount ?? '—'} KES',
+                style: TextStyle(
+                  color: palette.textPrimary,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${order['customerName'] ?? 'Customer'} · ${payment['phoneNumber'] ?? ''}',
+                style: TextStyle(color: palette.textSecondary),
+              ),
+              if (payment['receiptNumber'] is String)
+                Text(
+                  'Receipt ${payment['receiptNumber']}',
+                  style: TextStyle(color: palette.textSecondary),
+                ),
+              if (payment['message'] is String)
+                Text(
+                  payment['message'] as String,
+                  style: TextStyle(color: palette.textTertiary),
+                ),
+            ],
+          );
+          final action = reconciliable && unresolved && paymentId != null
+              ? OutlinedButton(
+                  onPressed: _refreshingTransactions
+                      ? null
+                      : () => _reconcile(paymentId),
+                  child: const Text('Reconcile'),
+                )
+              : _statePill(
+                  status,
+                  status == 'SUCCEEDED'
+                      ? Icons.check_circle_outline
+                      : status == 'FAILED'
+                      ? Icons.error_outline
+                      : Icons.schedule_rounded,
+                  status == 'SUCCEEDED'
+                      ? palette.statusSuccess
+                      : status == 'FAILED'
+                      ? palette.statusDanger
+                      : palette.statusWarning,
+                );
+          if (constraints.maxWidth < 620) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [details, const SizedBox(height: 10), action],
+            );
+          }
+          return Row(
+            children: [
+              Expanded(child: details),
+              const SizedBox(width: 12),
+              action,
+            ],
+          );
+        },
       ),
     );
   }
