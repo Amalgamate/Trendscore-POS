@@ -220,7 +220,7 @@ export function productsRouter(businessId: string): Router {
     const vatRate = body.vatRate ?? 0.16;
     const unit = body.unit ?? 'pc';
     const lowStockThreshold = body.lowStockThreshold ?? 5;
-    const { imageBase64, ...productData } = body;
+    const { imageBase64, initialStock: _initialStock, ...productData } = body;
 
     try {
       const product = await prisma.$transaction(async (tx) => {
