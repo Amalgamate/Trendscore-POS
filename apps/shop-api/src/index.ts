@@ -49,8 +49,13 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: 'same-origin' },
   crossOriginEmbedderPolicy: { policy: 'require-corp' },
 }));
+const corsOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:8080,http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN ?? ['http://localhost:8080', 'http://localhost:3000'],
+  origin: corsOrigins,
   credentials: true,
 }));
 app.use(express.json({ limit: '2mb' }));

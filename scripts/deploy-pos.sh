@@ -127,7 +127,8 @@ WEB_NAME="retailpos-web-${DEPLOY_ID}"
   -e NODE_ENV=production -e PORT=4000 -e "DATABASE_URL=$DATABASE_URL" -e "DIRECT_URL=$DATABASE_URL" \
   -e MPESA_CREDENTIALS_ENCRYPTION_KEY_FILE=/run/secrets/mpesa-encryption-key \
   -e "MPESA_CALLBACK_URL=https://${SHOP_DOMAIN}/api/payments/mpesa/callback" \
-  -e "JWT_SECRET=$JWT_SECRET" -e "BUSINESS_ID=$BUSINESS_ID" -e "CORS_ORIGIN=https://${DOMAIN}" \
+  -e "JWT_SECRET=$JWT_SECRET" -e "BUSINESS_ID=$BUSINESS_ID" \
+  -e "CORS_ORIGIN=https://${DOMAIN},https://${DOMAIN#www.}" \
   "$API_IMAGE" >/dev/null
 "${DOCKER[@]}" run -d --name "$POS_NAME" --restart unless-stopped \
   --label retailos.app=shop-pos --label "retailos.domain=$DOMAIN" \
