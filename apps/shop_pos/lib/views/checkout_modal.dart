@@ -1,8 +1,8 @@
-import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../cart.dart';
 import '../pos_state.dart';
+import '../services/api_service.dart';
 import '../theme/tokens.dart';
 import 'receipt_dialog.dart';
 
@@ -37,11 +37,9 @@ class CheckoutModal extends StatefulWidget {
 class _CheckoutModalState extends State<CheckoutModal> {
   SalePaymentMethod _method = SalePaymentMethod.mpesa;
 
-  // M-Pesa State
-  final _phoneController = TextEditingController(text: '0712345678');
-  bool _mpesaLoading = false;
-  String _mpesaStatusText = '';
-  Timer? _mpesaTimer;
+  // Manual M-Pesa Till payment
+  final _tillNumberController = TextEditingController();
+  final _mpesaReceiptController = TextEditingController();
 
   // Cash State
   final _cashController = TextEditingController();
@@ -57,49 +55,51 @@ class _CheckoutModalState extends State<CheckoutModal> {
   void initState() {
     super.initState();
     _selectedCreditCustomer = widget.state.selectedCustomer;
-    // Set default cash tendered to exact amount
     _cashTenderedMinor = widget.state.cart.subtotal.minorUnits;
-    _cashController.text = (widget.state.cart.subtotal.minorUnits ~/ 100)
-        .toString();
+    _cashController.text = _cashInput(widget.state.cart.subtotal.minorUnits);
   }
+
+  String _cashInput(int minorUnits) =>
+      '${minorUnits ~/ 100}.${(minorUnits % 100).toString().padLeft(2, '0')}';
 
   @override
   void dispose() {
-    _phoneController.dispose();
+    _tillNumberController.dispose();
+    _mpesaReceiptController.dispose();
     _cashController.dispose();
-    _mpesaTimer?.cancel();
     super.dispose();
   }
 
-  void _executeMpesaPush() {
-    setState(() {
-      _mpesaLoading = true;
-      _mpesaStatusText =
-          'Sending STK Push prompt to ${_phoneController.text}...';
-    });
-
-    _mpesaTimer = Timer(const Duration(milliseconds: 1400), () {
-      if (!mounted) return;
-      setState(() {
-        _mpesaStatusText =
-            'PIN prompt displayed on phone. Awaiting customer confirmation...';
-      });
-
-      _mpesaTimer = Timer(const Duration(milliseconds: 1600), () {
-        if (!mounted) return;
-        final refCode =
-            'QDH${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-        setState(() {
-          _mpesaLoading = false;
-          _mpesaStatusText = 'Payment Received! Receipt: $refCode';
-        });
-
-        _finishSale(
-          method: SalePaymentMethod.mpesa,
-          reference: 'MPESA: $refCode',
-        );
-      });
-    });
+  void _recordMpesaTillSale() {
+    if (!ApiService.instance.hasToken) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Reconnect to the shop before recording an M-Pesa Till sale.',
+          ),
+        ),
+      );
+      return;
+    }
+    final tillNumber = _tillNumberController.text.trim();
+    if (tillNumber.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter the M-Pesa Till number used.')),
+      );
+      return;
+    }
+    if (!RegExp(r'^\d{3,15}$').hasMatch(tillNumber)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid numeric Till number.')),
+      );
+      return;
+    }
+    final receipt = _mpesaReceiptController.text.trim();
+    final reference = [
+      'TILL: $tillNumber',
+      if (receipt.isNotEmpty) 'M-PESA REF: $receipt',
+    ].join(' · ');
+    _finishSale(method: SalePaymentMethod.mpesa, reference: reference);
   }
 
   void _executeCashSale() {
@@ -128,6 +128,16 @@ class _CheckoutModalState extends State<CheckoutModal> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Please select a customer for credit sale!'),
+        ),
+      );
+      return;
+    }
+    if (!ApiService.instance.hasToken) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Reconnect to the shop before recording a credit sale.',
+          ),
         ),
       );
       return;
@@ -284,8 +294,8 @@ class _CheckoutModalState extends State<CheckoutModal> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   _MethodTab(
-                    label: 'M-Pesa Express',
-                    icon: Icons.phone_android,
+                    label: 'M-Pesa Till',
+                    icon: Icons.storefront_outlined,
                     activeColor: const Color(0xFF16A34A),
                     isSelected: _method == SalePaymentMethod.mpesa,
                     onTap: _saleSubmitting
@@ -333,7 +343,7 @@ class _CheckoutModalState extends State<CheckoutModal> {
               children: [
                 Expanded(
                   child: OutlinedButton(
-                    onPressed: _mpesaLoading
+                    onPressed: _saleSubmitting
                         ? null
                         : () => Navigator.of(context).pop(),
                     style: OutlinedButton.styleFrom(
@@ -374,11 +384,15 @@ class _CheckoutModalState extends State<CheckoutModal> {
                   color: Color(0xFF16A34A),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.check, color: Colors.white, size: 18),
+                child: const Icon(
+                  Icons.storefront_outlined,
+                  color: Colors.white,
+                  size: 18,
+                ),
               ),
               const SizedBox(width: 10),
               const Text(
-                'Lipa na M-Pesa STK Push',
+                'M-Pesa Till payment',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 14,
@@ -389,16 +403,17 @@ class _CheckoutModalState extends State<CheckoutModal> {
           ),
           const SizedBox(height: 14),
           const Text(
-            'Customer Phone Number (Safaricom):',
+            'Business M-Pesa Till number:',
             style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
           ),
           const SizedBox(height: 6),
           TextField(
-            controller: _phoneController,
-            enabled: !_mpesaLoading,
+            controller: _tillNumberController,
+            enabled: !_saleSubmitting,
+            keyboardType: TextInputType.number,
             decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.phone_outlined, size: 18),
-              hintText: '07XX XXX XXX or 2547XX...',
+              prefixIcon: const Icon(Icons.storefront_outlined, size: 18),
+              hintText: 'Enter the Till number',
               filled: true,
               fillColor: Colors.white,
               contentPadding: const EdgeInsets.symmetric(
@@ -411,45 +426,44 @@ class _CheckoutModalState extends State<CheckoutModal> {
               ),
             ),
           ),
-          const SizedBox(height: 14),
-          if (_mpesaLoading) ...[
-            Row(
-              children: [
-                const SizedBox(
-                  width: 18,
-                  height: 18,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: Color(0xFF16A34A),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    _mpesaStatusText,
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Color(0xFF166534),
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ] else ...[
-            FilledButton.icon(
-              icon: const Icon(Icons.send_outlined, size: 18),
-              label: Text('Send STK Prompt for KES ${subtotal.formatted}'),
-              onPressed: _saleSubmitting ? null : _executeMpesaPush,
-              style: FilledButton.styleFrom(
-                backgroundColor: const Color(0xFF16A34A),
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _mpesaReceiptController,
+            enabled: !_saleSubmitting,
+            textCapitalization: TextCapitalization.characters,
+            decoration: InputDecoration(
+              prefixIcon: const Icon(Icons.receipt_long_outlined, size: 18),
+              labelText: 'M-Pesa receipt code (optional)',
+              hintText: 'e.g. QGH7X2P9',
+              filled: true,
+              fillColor: Colors.white,
+              contentPadding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(8),
               ),
             ),
-          ],
+          ),
+          const SizedBox(height: 10),
+          const Text(
+            'This records the sale for manual reconciliation; it does not send STK or confirm payment.',
+            style: TextStyle(fontSize: 12, color: Color(0xFF166534)),
+          ),
+          const SizedBox(height: 14),
+          FilledButton.icon(
+            icon: const Icon(Icons.fact_check_outlined, size: 18),
+            label: Text('Record Till Sale · KES ${subtotal.formatted}'),
+            onPressed: _saleSubmitting ? null : _recordMpesaTillSale,
+            style: FilledButton.styleFrom(
+              backgroundColor: const Color(0xFF16A34A),
+              padding: const EdgeInsets.symmetric(vertical: 14),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -489,11 +503,15 @@ class _CheckoutModalState extends State<CheckoutModal> {
           const SizedBox(height: 8),
           TextField(
             controller: _cashController,
-            keyboardType: TextInputType.number,
             onChanged: (text) {
-              final parsed = int.tryParse(text) ?? 0;
-              setState(() => _cashTenderedMinor = parsed * 100);
+              try {
+                final parsed = Money.parse(text);
+                setState(() => _cashTenderedMinor = parsed.minorUnits);
+              } on FormatException {
+                setState(() => _cashTenderedMinor = 0);
+              }
             },
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             decoration: InputDecoration(
               prefixText: 'KES ',
               filled: true,
@@ -518,8 +536,7 @@ class _CheckoutModalState extends State<CheckoutModal> {
                 onPressed: () {
                   setState(() {
                     _cashTenderedMinor = subtotal.minorUnits;
-                    _cashController.text = ((subtotal.minorUnits + 99) ~/ 100)
-                        .toString();
+                    _cashController.text = _cashInput(subtotal.minorUnits);
                   });
                 },
               ),
@@ -529,8 +546,7 @@ class _CheckoutModalState extends State<CheckoutModal> {
                   onPressed: () {
                     setState(() {
                       _cashTenderedMinor += denom * 100;
-                      _cashController.text = (_cashTenderedMinor ~/ 100)
-                          .toString();
+                      _cashController.text = _cashInput(_cashTenderedMinor);
                     });
                   },
                 );

@@ -68,6 +68,14 @@ class ApiService {
 
   /// Cashier login with PIN
   Future<Map<String, dynamic>?> login(String phone, String pin) async {
+    return _login({'phone': phone.replaceAll(RegExp(r'\D'), ''), 'pin': pin});
+  }
+
+  Future<Map<String, dynamic>?> loginWithUserId(String userId, String pin) {
+    return _login({'userId': userId, 'pin': pin});
+  }
+
+  Future<Map<String, dynamic>?> _login(Map<String, String> credentials) async {
     lastError = null;
     _authToken = null;
     _authTokenExpiresAt = null;
@@ -76,10 +84,7 @@ class ApiService {
           .post(
             Uri.parse('$baseUrl/auth/login'),
             headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'phone': phone.replaceAll(RegExp(r'\D'), ''),
-              'pin': pin,
-            }),
+            body: jsonEncode(credentials),
           )
           .timeout(const Duration(seconds: 5));
 
@@ -144,6 +149,28 @@ class ApiService {
     } catch (e) {
       lastError = 'Could not fetch staff accounts from the shop API.';
       debugPrint('API getStaffUsers error: $e');
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>?> getLoginUsers() async {
+    lastError = null;
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/auth/login-users'))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        return List<Map<String, dynamic>>.from(
+          decoded['data'] as List? ?? const [],
+        );
+      }
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not fetch sign-in accounts (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not fetch sign-in accounts from the shop API.';
+      debugPrint('API getLoginUsers error: $e');
     }
     return null;
   }
@@ -342,7 +369,7 @@ class ApiService {
   }
 
   /// Adjust product stock
-  Future<bool> adjustStock(
+  Future<int?> adjustStock(
     String productId,
     int delta,
     String type,
@@ -357,15 +384,22 @@ class ApiService {
             body: jsonEncode({'delta': delta, 'type': type, 'reason': reason}),
           )
           .timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return true;
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic> && decoded['newStock'] is num) {
+          return (decoded['newStock'] as num).toInt();
+        }
+        lastError = 'The shop API did not return the updated stock quantity.';
+        return null;
+      }
       lastError =
           _messageFromResponse(res.body) ??
           'Stock adjustment failed (${res.statusCode}).';
-      return false;
+      return null;
     } catch (e) {
       lastError = 'Could not adjust product stock on the shop API.';
       debugPrint('API adjustStock error: $e');
-      return false;
+      return null;
     }
   }
 
@@ -771,10 +805,12 @@ class ApiService {
   /// Delete a customer (only succeeds if balance is zero)
   Future<({bool ok, String? error})> deleteCustomer(String customerId) async {
     try {
-      final res = await http.delete(
-        Uri.parse('$baseUrl/customers/$customerId'),
-        headers: _headers,
-      ).timeout(const Duration(seconds: 5));
+      final res = await http
+          .delete(
+            Uri.parse('$baseUrl/customers/$customerId'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) return (ok: true, error: null);
       final body = jsonDecode(res.body) as Map<String, dynamic>;
       final msg = (body['error'] as Map?)?.containsKey('message') == true
@@ -842,13 +878,72 @@ class ApiService {
         }
       }
       lastError =
-          _messageFromResponse(res.body) ??
+          _saleErrorFromResponse(res.body) ??
           'Could not record the sale (${res.statusCode}).';
     } catch (e) {
       lastError = 'Could not record the sale on the shop API.';
       debugPrint('API submitSale error: $e');
     }
     return null;
+  }
+
+  String? _saleErrorFromResponse(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is! Map<String, dynamic>) return null;
+      final error = decoded['error'];
+      if (error is! Map<String, dynamic>) {
+        return decoded['message'] as String?;
+      }
+
+      final message = error['message'] as String?;
+      final details = error['details'];
+      if (message == 'Request body is invalid' && details is List) {
+        final issues = details
+            .whereType<Map>()
+            .map((issue) {
+              final path = issue['path'] as String?;
+              final issueMessage = issue['message'] as String?;
+              if (path == null || issueMessage == null) return null;
+              return '$path: $issueMessage';
+            })
+            .whereType<String>()
+            .toList();
+        if (issues.isNotEmpty) return '$message (${issues.join('; ')})';
+      }
+      return message;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Confirm a manually received M-Pesa payment against its original pending sale.
+  Future<bool> reconcileMpesaSale(
+    String saleId,
+    String mpesaReceipt, {
+    String? note,
+  }) async {
+    lastError = null;
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/sales/$saleId/reconcile-payment'),
+            headers: _headers,
+            body: jsonEncode({
+              'mpesaReceipt': mpesaReceipt,
+              if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not reconcile M-Pesa payment (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not reach the shop API to reconcile this payment.';
+      debugPrint('API reconcileMpesaSale error: $e');
+    }
+    return false;
   }
 
   /// Reverse a sale (append-only reversing entries)
@@ -955,26 +1050,330 @@ class ApiService {
     return null;
   }
 
+  // ── Storefront profile ──────────────────────────────────────────────
+
+  Future<Map<String, dynamic>?> getStorefrontSettings() async {
+    lastError = null;
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/business/storefront/settings'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned invalid storefront settings.';
+        return null;
+      }
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not fetch storefront settings (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not fetch storefront settings from the shop API.';
+      debugPrint('API getStorefrontSettings error: $e');
+    }
+    return null;
+  }
+
+  Future<bool> updateStorefrontSettings(Map<String, dynamic> settings) async {
+    lastError = null;
+    try {
+      final res = await http
+          .put(
+            Uri.parse('$baseUrl/business/storefront/settings'),
+            headers: _headers,
+            body: jsonEncode(settings),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not save storefront settings (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not save storefront settings to the shop API.';
+      debugPrint('API updateStorefrontSettings error: $e');
+    }
+    return false;
+  }
+
+  Future<Map<String, dynamic>?> getMpesaConfigurationStatus() async {
+    lastError = null;
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/payments/mpesa/config'), headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError =
+            'The shop API returned invalid M-Pesa configuration status.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not load M-Pesa configuration (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not reach the shop API to load M-Pesa configuration.';
+      debugPrint('API getMpesaConfigurationStatus error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> saveMpesaConfiguration(
+    Map<String, dynamic> configuration,
+  ) async {
+    lastError = null;
+    try {
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/payments/mpesa/config'),
+            headers: _headers,
+            body: jsonEncode(configuration),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned invalid saved M-Pesa status.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not save M-Pesa configuration (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not securely save M-Pesa configuration.';
+      debugPrint('API saveMpesaConfiguration error: $error');
+    }
+    return null;
+  }
+
+  Future<bool> testMpesaConnection() async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(Uri.parse('$baseUrl/payments/mpesa/test'), headers: _headers)
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(response.body) ??
+          'Could not verify Daraja connection (${response.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not reach the shop API to test Daraja connection.';
+      debugPrint('API testMpesaConnection error: $error');
+    }
+    return false;
+  }
+
+  Future<Map<String, dynamic>?> getMpesaTransactions({
+    String? status,
+    int page = 1,
+  }) async {
+    lastError = null;
+    try {
+      final query = <String, String>{'page': '$page', 'limit': '50'};
+      if (status != null) query['status'] = status;
+      final uri = Uri.parse(
+        '$baseUrl/payments/mpesa/transactions',
+      ).replace(queryParameters: query);
+      final response = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is List &&
+            decoded['meta'] is Map<String, dynamic>) {
+          return decoded;
+        }
+        lastError = 'The shop API returned invalid M-Pesa transaction data.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not load M-Pesa transactions (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not reach the shop API to load M-Pesa transactions.';
+      debugPrint('API getMpesaTransactions error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> reconcileMpesaTransaction(
+    String paymentId,
+  ) async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse(
+              '$baseUrl/payments/mpesa/transactions/$paymentId/reconcile',
+            ),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 15));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned invalid reconciliation status.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not reconcile M-Pesa transaction (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not reach the shop API to reconcile this transaction.';
+      debugPrint('API reconcileMpesaTransaction error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> getStorefrontOrders({
+    String? status,
+    int page = 1,
+  }) async {
+    lastError = null;
+    try {
+      final query = <String, String>{'page': '$page', 'limit': '50'};
+      if (status != null) query['status'] = status;
+      final uri = Uri.parse(
+        '$baseUrl/storefront/orders',
+      ).replace(queryParameters: query);
+      final response = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is List &&
+            decoded['meta'] is Map<String, dynamic>) {
+          return decoded;
+        }
+        lastError = 'The shop API returned an invalid online orders response.';
+      } else {
+        if (response.statusCode == 401) {
+          setToken(null);
+        }
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not load online orders (HTTP ${response.statusCode}).';
+      }
+    } catch (e) {
+      debugPrint('API getStorefrontOrders error: $e');
+      lastError = 'Could not reach the shop API to load online orders.';
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> cancelStorefrontOrder(String orderId) async {
+    lastError = null;
+    try {
+      final response = await http
+          .patch(
+            Uri.parse('$baseUrl/storefront/orders/$orderId/cancel'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned an invalid cancellation response.';
+      } else {
+        if (response.statusCode == 401) {
+          setToken(null);
+        }
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not cancel online order (HTTP ${response.statusCode}).';
+      }
+    } catch (e) {
+      debugPrint('API cancelStorefrontOrder error: $e');
+      lastError = 'Could not reach the shop API to cancel this order.';
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> setStorefrontOrderDeliveryFee(
+    String orderId,
+    double deliveryFee,
+  ) async {
+    lastError = null;
+    try {
+      final response = await http
+          .patch(
+            Uri.parse('$baseUrl/storefront/orders/$orderId/delivery-fee'),
+            headers: _headers,
+            body: jsonEncode({'deliveryFee': deliveryFee}),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['data'] is Map<String, dynamic>) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned an invalid delivery-fee response.';
+      } else {
+        if (response.statusCode == 401) {
+          setToken(null);
+        }
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not set the delivery fee (HTTP ${response.statusCode}).';
+      }
+    } catch (e) {
+      debugPrint('API setStorefrontOrderDeliveryFee error: $e');
+      lastError = 'Could not reach the shop API to set the delivery fee.';
+    }
+    return null;
+  }
+
   // ── Delivery config ─────────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> getDeliveryConfig() async {
     try {
-      final res = await http.get(Uri.parse('$baseUrl/delivery/config'), headers: _headers)
+      final res = await http
+          .get(Uri.parse('$baseUrl/delivery/config'), headers: _headers)
           .timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200)
+        return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('API getDeliveryConfig error: $e');
     }
     return null;
   }
 
-  Future<bool> updateDeliveryConfig(double baseFee, double distanceTopupRate) async {
+  Future<bool> updateDeliveryConfig(
+    double baseFee,
+    double distanceTopupRate,
+  ) async {
     try {
-      final res = await http.put(
-        Uri.parse('$baseUrl/delivery/config'),
-        headers: _headers,
-        body: jsonEncode({'baseFee': baseFee, 'distanceTopupRate': distanceTopupRate}),
-      ).timeout(const Duration(seconds: 5));
+      final res = await http
+          .put(
+            Uri.parse('$baseUrl/delivery/config'),
+            headers: _headers,
+            body: jsonEncode({
+              'baseFee': baseFee,
+              'distanceTopupRate': distanceTopupRate,
+            }),
+          )
+          .timeout(const Duration(seconds: 5));
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('API updateDeliveryConfig error: $e');
@@ -984,43 +1383,70 @@ class ApiService {
 
   // ── Delivery orders ─────────────────────────────────────────────────
 
-  Future<Map<String, dynamic>?> createDeliveryOrder(Map<String, dynamic> payload) async {
+  Future<Map<String, dynamic>?> createDeliveryOrder(
+    Map<String, dynamic> payload,
+  ) async {
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/delivery/orders'),
-        headers: _headers,
-        body: jsonEncode(payload),
-      ).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 201) return jsonDecode(res.body) as Map<String, dynamic>;
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/delivery/orders'),
+            headers: _headers,
+            body: jsonEncode(payload),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 201)
+        return jsonDecode(res.body) as Map<String, dynamic>;
     } catch (e) {
       debugPrint('API createDeliveryOrder error: $e');
     }
     return null;
   }
 
-  Future<Map<String, dynamic>?> getDeliveryOrders({String? status, int page = 1}) async {
+  Future<Map<String, dynamic>?> getDeliveryOrders({
+    String? status,
+    int page = 1,
+  }) async {
+    lastError = null;
     try {
       final params = <String, String>{'page': '$page', 'limit': '50'};
       if (status != null) params['status'] = status;
-      final uri = Uri.parse('$baseUrl/delivery/orders').replace(queryParameters: params);
-      final res = await http.get(uri, headers: _headers).timeout(const Duration(seconds: 8));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      final uri = Uri.parse(
+        '$baseUrl/delivery/orders',
+      ).replace(queryParameters: params);
+      final res = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      lastError = 'Could not load delivery orders (HTTP ${res.statusCode}).';
     } catch (e) {
       debugPrint('API getDeliveryOrders error: $e');
+      lastError = 'Could not reach the shop API to load delivery orders.';
     }
     return null;
   }
 
-  Future<Map<String, dynamic>?> assignRider(String orderId, String riderId) async {
+  Future<Map<String, dynamic>?> assignRider(
+    String orderId,
+    String riderId,
+  ) async {
+    lastError = null;
     try {
-      final res = await http.patch(
-        Uri.parse('$baseUrl/delivery/orders/$orderId/assign'),
-        headers: _headers,
-        body: jsonEncode({'riderId': riderId}),
-      ).timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/delivery/orders/$orderId/assign'),
+            headers: _headers,
+            body: jsonEncode({'riderId': riderId}),
+          )
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      lastError = 'Could not assign rider (HTTP ${res.statusCode}).';
     } catch (e) {
       debugPrint('API assignRider error: $e');
+      lastError = 'Could not reach the shop API to assign the rider.';
     }
     return null;
   }
@@ -1030,28 +1456,46 @@ class ApiService {
     String status, {
     String? failureReason,
   }) async {
+    lastError = null;
     try {
       final body = <String, dynamic>{'status': status};
       if (failureReason != null) body['failureReason'] = failureReason;
-      final res = await http.patch(
-        Uri.parse('$baseUrl/delivery/orders/$orderId/status'),
-        headers: _headers,
-        body: jsonEncode(body),
-      ).timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/delivery/orders/$orderId/status'),
+            headers: _headers,
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      if (res.statusCode == 401) {
+        setToken(null);
+        lastError =
+            'Your session expired. Sign in again to update this delivery.';
+      } else {
+        lastError =
+            _messageFromResponse(res.body) ??
+            'Could not update delivery status (HTTP ${res.statusCode}).';
+      }
     } catch (e) {
       debugPrint('API updateDeliveryStatus error: $e');
+      lastError =
+          'Could not reach the shop API. The delivery status was not changed; reconnect and retry.';
     }
     return null;
   }
 
   Future<bool> cancelDeliveryOrder(String orderId, String reason) async {
     try {
-      final res = await http.patch(
-        Uri.parse('$baseUrl/delivery/orders/$orderId/cancel'),
-        headers: _headers,
-        body: jsonEncode({'reason': reason}),
-      ).timeout(const Duration(seconds: 5));
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/delivery/orders/$orderId/cancel'),
+            headers: _headers,
+            body: jsonEncode({'reason': reason}),
+          )
+          .timeout(const Duration(seconds: 5));
       return res.statusCode == 200;
     } catch (e) {
       debugPrint('API cancelDeliveryOrder error: $e');
@@ -1062,25 +1506,76 @@ class ApiService {
   // ── Rider management ────────────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>?> getRiders() async {
+    lastError = null;
     try {
-      final res = await http.get(Uri.parse('$baseUrl/delivery/riders'), headers: _headers)
+      final res = await http
+          .get(Uri.parse('$baseUrl/delivery/riders'), headers: _headers)
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         return List<Map<String, dynamic>>.from(jsonDecode(res.body) as List);
       }
+      lastError = 'Could not load riders (HTTP ${res.statusCode}).';
     } catch (e) {
       debugPrint('API getRiders error: $e');
+      lastError = 'Could not reach the shop API to load riders.';
     }
     return null;
   }
 
-  Future<bool> initiateRiderPayout(String riderId, double amount, String mpesaPhone) async {
+  Future<List<Map<String, dynamic>>?> getActiveDeliveryLocations() async {
+    lastError = null;
     try {
-      final res = await http.post(
-        Uri.parse('$baseUrl/delivery/riders/$riderId/payout'),
-        headers: _headers,
-        body: jsonEncode({'amount': amount, 'mpesaPhone': mpesaPhone}),
-      ).timeout(const Duration(seconds: 10));
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/delivery/locations/active'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final decoded = jsonDecode(res.body);
+        if (decoded is! List) {
+          lastError = 'The shop API returned an invalid active delivery list.';
+          return null;
+        }
+        final entries = decoded.whereType<Map>().toList(growable: false);
+        if (entries.length != decoded.length) {
+          lastError = 'The shop API returned an invalid active delivery list.';
+          return null;
+        }
+        return entries
+            .map((entry) => Map<String, dynamic>.from(entry))
+            .toList(growable: false);
+      }
+      if (res.statusCode == 401) {
+        setToken(null);
+        lastError =
+            'Your session expired. Sign in again to view live locations.';
+      } else {
+        lastError =
+            _messageFromResponse(res.body) ??
+            'Could not load live delivery locations (HTTP ${res.statusCode}).';
+      }
+    } catch (e) {
+      debugPrint('API getActiveDeliveryLocations error: $e');
+      lastError =
+          'Could not reach the shop API to load live delivery locations.';
+    }
+    return null;
+  }
+
+  Future<bool> initiateRiderPayout(
+    String riderId,
+    double amount,
+    String mpesaPhone,
+  ) async {
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/delivery/riders/$riderId/payout'),
+            headers: _headers,
+            body: jsonEncode({'amount': amount, 'mpesaPhone': mpesaPhone}),
+          )
+          .timeout(const Duration(seconds: 10));
       return res.statusCode == 201;
     } catch (e) {
       debugPrint('API initiateRiderPayout error: $e');
@@ -1091,26 +1586,145 @@ class ApiService {
   // ── Rider-scoped endpoints ───────────────────────────────────────────
 
   Future<List<Map<String, dynamic>>?> getRiderOrders() async {
+    lastError = null;
     try {
-      final res = await http.get(Uri.parse('$baseUrl/delivery/rider/orders'), headers: _headers)
+      final res = await http
+          .get(Uri.parse('$baseUrl/delivery/rider/orders'), headers: _headers)
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         return List<Map<String, dynamic>>.from(jsonDecode(res.body) as List);
       }
+      if (res.statusCode == 401) {
+        setToken(null);
+        lastError = 'Your session expired. Sign in again to view deliveries.';
+      } else {
+        lastError =
+            _messageFromResponse(res.body) ??
+            'Could not load deliveries (HTTP ${res.statusCode}).';
+      }
     } catch (e) {
       debugPrint('API getRiderOrders error: $e');
+      lastError = 'Could not reach the shop API to load deliveries.';
     }
     return null;
   }
 
   Future<Map<String, dynamic>?> getRiderEarnings() async {
+    lastError = null;
     try {
-      final res = await http.get(Uri.parse('$baseUrl/delivery/rider/earnings'), headers: _headers)
+      final res = await http
+          .get(Uri.parse('$baseUrl/delivery/rider/earnings'), headers: _headers)
           .timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      if (res.statusCode == 401) {
+        setToken(null);
+        lastError = 'Your session expired. Sign in again to view earnings.';
+      } else {
+        lastError =
+            _messageFromResponse(res.body) ??
+            'Could not load earnings (HTTP ${res.statusCode}).';
+      }
     } catch (e) {
       debugPrint('API getRiderEarnings error: $e');
+      lastError = 'Could not reach the shop API to load earnings.';
     }
     return null;
+  }
+
+  Future<Map<String, dynamic>?> getRiderLocationConsent() async {
+    lastError = null;
+    try {
+      final res = await http
+          .get(
+            Uri.parse('$baseUrl/delivery/rider/location-consent'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      if (res.statusCode == 401) {
+        setToken(null);
+        lastError =
+            'Your session expired. Sign in again to check location sharing.';
+      } else {
+        lastError =
+            _messageFromResponse(res.body) ??
+            'Could not check location sharing (HTTP ${res.statusCode}).';
+      }
+    } catch (e) {
+      debugPrint('API getRiderLocationConsent error: $e');
+      lastError = 'Could not reach the shop API to check location sharing.';
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> setRiderLocationConsent(bool enabled) async {
+    lastError = null;
+    try {
+      final res = await http
+          .patch(
+            Uri.parse('$baseUrl/delivery/rider/location-consent'),
+            headers: _headers,
+            body: jsonEncode({'enabled': enabled}),
+          )
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode == 200) {
+        return jsonDecode(res.body) as Map<String, dynamic>;
+      }
+      if (res.statusCode == 401) {
+        setToken(null);
+        lastError =
+            'Your session expired. Sign in again to change location sharing.';
+      } else {
+        lastError =
+            _messageFromResponse(res.body) ??
+            'Could not update location sharing (HTTP ${res.statusCode}).';
+      }
+    } catch (e) {
+      debugPrint('API setRiderLocationConsent error: $e');
+      lastError = 'Could not reach the shop API to update location sharing.';
+    }
+    return null;
+  }
+
+  Future<bool> updateRiderLocation({
+    required String orderId,
+    required double latitude,
+    required double longitude,
+    required double accuracy,
+    required DateTime recordedAt,
+  }) async {
+    lastError = null;
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/delivery/orders/$orderId/location'),
+            headers: _headers,
+            body: jsonEncode({
+              'latitude': latitude,
+              'longitude': longitude,
+              'accuracy': accuracy,
+              'recordedAt': recordedAt.toUtc().toIso8601String(),
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) return true;
+      if (res.statusCode == 401) {
+        setToken(null);
+        lastError =
+            'Your session expired. Sign in again to share your location.';
+      } else {
+        lastError =
+            _messageFromResponse(res.body) ??
+            'Could not send your location (HTTP ${res.statusCode}).';
+      }
+    } catch (e) {
+      debugPrint('API updateRiderLocation error: $e');
+      lastError = 'Could not reach the shop API to share your location.';
+    }
+    return false;
   }
 }

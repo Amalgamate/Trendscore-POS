@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:shop_pos/main.dart';
 import 'package:shop_pos/pos_state.dart';
+import 'package:shop_pos/views/inventory_view.dart';
 
 /// Checkout smoke tests.
 ///
@@ -25,7 +26,9 @@ void main() {
     await tester.pump();
   }
 
-  testWidgets('checkout screen renders its core affordances', (WidgetTester tester) async {
+  testWidgets('checkout screen renders its core affordances', (
+    WidgetTester tester,
+  ) async {
     await pumpPos(tester);
 
     // The cashier must be able to find a product...
@@ -40,7 +43,9 @@ void main() {
     expect(find.text('Fresh milk 500ml'), findsOneWidget);
   });
 
-  testWidgets('tapping a product adds it to the basket', (WidgetTester tester) async {
+  testWidgets('tapping a product adds it to the basket', (
+    WidgetTester tester,
+  ) async {
     await pumpPos(tester);
 
     await tester.tap(find.text('Fresh milk 500ml'));
@@ -52,6 +57,31 @@ void main() {
     expect(find.textContaining('Charge KES'), findsOneWidget);
     expect(find.text('Add items to continue'), findsNothing);
   });
+
+  testWidgets('inventory and product editor fit a compact phone screen', (
+    WidgetTester tester,
+  ) async {
+    tester.view.devicePixelRatio = 1.0;
+    addTearDown(tester.view.reset);
+
+    for (final size in [const Size(360, 800), const Size(320, 640)]) {
+      tester.view.physicalSize = size;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: InventoryView(state: PosState(includeDemoProducts: true)),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull, reason: 'Inventory at $size');
+      expect(find.text('Inventory'), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Add product'));
+      await tester.pumpAndSettle();
+      expect(find.text('Add New Product'), findsOneWidget);
+      expect(tester.takeException(), isNull, reason: 'Product editor at $size');
+
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+    }
+  });
 }
-
-

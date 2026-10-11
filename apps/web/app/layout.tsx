@@ -3,10 +3,16 @@ import './globals.css';
 import { StoreFooter } from './store-footer';
 import { StoreHeader } from './store-header';
 import { WhatsAppButton } from './whatsapp-button';
+import { StoreCartProvider } from './store-cart';
 
 export const metadata: Metadata = {
-  title: 'Shop online',
-  description: 'Browse products from your local ShopSmart store.',
+  title: 'Online Store | ShopSmart',
+  description:
+    'Browse products published by this shop. Online ordering is not enabled yet.',
+  icons: {
+    icon: '/icon.svg',
+    apple: '/apple-icon.png',
+  },
 };
 
 export default function RootLayout({
@@ -17,10 +23,12 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <StoreHeader />
-        {children}
-        <StoreFooter />
-        <WhatsAppButton />
+        <StoreCartProvider>
+          <StoreHeader />
+          {children}
+          <StoreFooter />
+          <WhatsAppButton />
+        </StoreCartProvider>
       </body>
     </html>
   );

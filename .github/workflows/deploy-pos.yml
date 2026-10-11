@@ -32,10 +32,12 @@ jobs:
     environment: production
     env:
       DOMAIN: www.gutagala.trendscore.co.ke
+      SHOP_DOMAIN: webshop.trendscore.co.ke
       EXPECTED_IP: 185.127.16.124
       TLS_EMAIL: admin@trendscore.app
       POS_IMAGE: ghcr.io/amalgamate/shop-pos:sha-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       API_IMAGE: ghcr.io/amalgamate/shop-api:sha-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+      WEB_IMAGE: ghcr.io/amalgamate/shop-web:sha-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
       DEPLOY_ID: gha-${{ github.run_id }}-${{ github.run_attempt }}
       REMOTE_DIR: /tmp/retailpos-${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -55,6 +57,16 @@ jobs:
             echo "DNS must resolve to $EXPECTED_IP before deploy and certificate issuance." >&2
             exit 1
           }
+          for host in "$SHOP_DOMAIN" "www.$SHOP_DOMAIN"; do
+            resolved="$(dig +short A "$host" | sort -u)"
+            echo "Domain: $host"
+            echo "Expected IPv4: $EXPECTED_IP"
+            echo "Resolved IPv4: ${resolved:-<none>}"
+            printf '%s\n' "$resolved" | grep -Fxq "$EXPECTED_IP" || {
+              echo "DNS for $host must resolve to $EXPECTED_IP before deploy and certificate issuance." >&2
+              exit 1
+            }
+          done
 
       - name: Configure production SSH
         id: configure_ssh
@@ -98,15 +110,20 @@ jobs:
       - name: Deploy container, bind Nginx, and issue SSL
         run: |
           set -euo pipefail
-          ssh production "sudo env DOCKER_CONFIG='$REMOTE_DIR' bash '$REMOTE_DIR/deploy-pos.sh' '$POS_IMAGE' '$API_IMAGE' '$DOMAIN' '$TLS_EMAIL' '$DEPLOY_ID' '$REMOTE_DIR/super-admin.json'"
+          ssh production "sudo env DOCKER_CONFIG='$REMOTE_DIR' bash '$REMOTE_DIR/deploy-pos.sh' '$POS_IMAGE' '$API_IMAGE' '$WEB_IMAGE' '$DOMAIN' '$SHOP_DOMAIN' '$TLS_EMAIL' '$DEPLOY_ID' '$REMOTE_DIR/super-admin.json'"
 
       - name: Verify public HTTPS
         run: |
           set -euo pipefail
+          for host in "$DOMAIN" "$SHOP_DOMAIN" "www.$SHOP_DOMAIN"; do
+            curl --fail --show-error --silent --location --max-time 30 \
+              --output /dev/null --write-out "$host HTTPS %{http_code}\n" "https://$host/"
+            openssl s_client -connect "${host}:443" -servername "$host" </dev/null 2>/dev/null \
+              | openssl x509 -noout -checkhost "$host" -enddate
+          done
           curl --fail --show-error --silent --location --max-time 30 \
-            --output /dev/null --write-out 'HTTPS %{http_code}\n' "https://$DOMAIN/"
-          openssl s_client -connect "${DOMAIN}:443" -servername "$DOMAIN" </dev/null 2>/dev/null \
-            | openssl x509 -noout -checkhost "$DOMAIN" -enddate
+            --output /dev/null --write-out 'Catalog API HTTPS %{http_code}\n' \
+            "https://$SHOP_DOMAIN/api/products/storefront"
 
       - name: Remove temporary deployment files
         if: always() && steps.configure_ssh.outcome == 'success'

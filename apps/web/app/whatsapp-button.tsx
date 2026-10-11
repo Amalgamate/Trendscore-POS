@@ -9,11 +9,7 @@ const whatsappHref =
 
 export function WhatsAppButton() {
   if (!whatsappHref) {
-    return (
-      <p className="whatsapp-pending">
-        WhatsApp contact will appear when this shop completes setup.
-      </p>
-    );
+    return null;
   }
 
   return (

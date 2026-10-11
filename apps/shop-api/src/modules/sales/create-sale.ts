@@ -36,6 +36,8 @@ export interface CreateSaleInput {
   customerId?: string;
   /** Method of primary payment. */
   method: PaymentMethod;
+  paymentReference?: string;
+  cashTendered?: number;
   offline?: boolean;
   status?: SaleStatus;
   lines: Array<{ productId: string; quantity: number }>;
@@ -49,13 +51,25 @@ export interface CreateSaleResult {
   total: number;
   costTotal: number;
   items: number;
+  paymentStatus: 'PENDING' | 'SUCCESS';
+  paymentReference: string;
 }
 
 export async function createSale(
   prisma: PrismaClient,
   input: CreateSaleInput,
 ): Promise<CreateSaleResult> {
-  const { businessId, cashierId, idempotencyKey, customerId, method, offline, lines } = input;
+  const {
+    businessId,
+    cashierId,
+    idempotencyKey,
+    customerId,
+    method,
+    paymentReference,
+    cashTendered,
+    offline,
+    lines,
+  } = input;
 
   return await prisma.$transaction(async (tx) => {
     // 1. Check idempotency
@@ -75,9 +89,23 @@ export async function createSale(
     if (!lines || lines.length === 0) {
       throw new SaleValidationError({ kind: 'EMPTY_SALE' }, 'A sale must have at least one line item.');
     }
+    if (method === 'MPESA' && !paymentReference?.trim()) {
+      throw new SaleValidationError(
+        { kind: 'MPESA_REFERENCE_REQUIRED' },
+        'Enter the M-Pesa Till number before recording this sale.',
+      );
+    }
 
-    // 2. Fetch products and lock them FOR UPDATE
-    const productIds = lines.map((l) => l.productId);
+    // Lock stock rows in a stable order before reading balances so POS sales
+    // serialize with storefront reservations and other inventory mutations.
+    const productIds = [...new Set(lines.map((line) => line.productId))].sort();
+    await tx.$queryRaw(
+      Prisma.sql`SELECT "id" FROM "products"
+        WHERE "businessId" = ${businessId}::uuid
+          AND "id" IN (${Prisma.join(productIds.map((id) => Prisma.sql`${id}::uuid`))})
+        ORDER BY "id"
+        FOR UPDATE`,
+    );
     const products = await tx.product.findMany({
       where: { id: { in: productIds }, businessId },
     });
@@ -135,6 +163,13 @@ export async function createSale(
     const vatAmount = vatAmountCents / 100;
     const total = totalCents / 100;
     const costTotal = costTotalCents / 100;
+
+    if (method === 'CASH' && (cashTendered ?? total) < total) {
+      throw new SaleValidationError(
+        { kind: 'CASH_TENDER_INSUFFICIENT' },
+        'Cash tendered is less than the sale total.',
+      );
+    }
 
     if (method === 'CREDIT') {
       if (!customerId) {
@@ -240,10 +275,15 @@ export async function createSale(
       data: {
         saleId: sale.id,
         method,
-        status: 'SUCCESS',
+        status: method === 'MPESA' ? 'PENDING' : 'SUCCESS',
         amount: total,
+        cashTendered: method === 'CASH' ? cashTendered ?? total : null,
+        changeDue:
+          method === 'CASH' ? Math.max(0, (cashTendered ?? total) - total) : null,
+        reference: paymentReference?.trim() || null,
+        resultDesc: method === 'MPESA' ? 'Awaiting manual reconciliation.' : null,
         idempotencyKey: `pay-${idempotencyKey}`,
-        settledAt: new Date(),
+        settledAt: method === 'MPESA' ? null : new Date(),
       },
     });
 
@@ -281,6 +321,8 @@ export async function createSale(
       total,
       costTotal,
       items: lines.length,
+      paymentStatus: method === 'MPESA' ? 'PENDING' : 'SUCCESS',
+      paymentReference: paymentReference?.trim() ?? '',
     };
   });
 }

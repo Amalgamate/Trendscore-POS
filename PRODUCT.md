@@ -29,7 +29,12 @@ Shops may sell across varied industries, including fashion and electronics, and 
 - Planned setup captures business industry and configures appropriate product and inventory templates.
 - Online orders must reconcile with POS stock, sales, and reports.
 - WhatsApp should use official business integrations for messaging; the storefront may link directly to the shop's WhatsApp contact.
-- The shop API does not yet provide public storefront catalog endpoints or first-class server-side product variants.
+- Products support server-side descriptions, images, variant labels/groups, and
+  owner/manager-controlled web-shop publication. The public catalog returns
+  only active, published products and exposes availability without exact stock
+  or cost.
+- The storefront is a separate Next.js application. Production hosting and
+  shop-specific hostname/API routing still need configuration.
 - M-Pesa in the payment-provider package is currently a test provider. Production checkout requires the official Safaricom Daraja integration and verified callbacks.
 - Social publishing depends on each platform's official OAuth, app review, permissions, account eligibility, and API capabilities. Shops connect their own accounts.
 - Store policies are supplied and approved by each business; the product must not invent legal terms.

@@ -138,6 +138,28 @@ void main() {
       expect(cart.isEmpty, isTrue);
       expect(cart.itemCount, 0);
     });
+
+    test('catalogue sync remaps IDs and refreshes cart product data', () {
+      final cart = Cart();
+      final localMilk = milk();
+      cart.add(localMilk);
+      cart.add(localMilk);
+
+      cart.remapProducts({
+        'milk': CartLine(
+          productId: '936cd7a6-1dce-47e8-aebf-90a6af00e4f2',
+          name: 'Fresh milk 500ml',
+          unitPrice: Money.parse('70.00'),
+          stock: 8,
+        ),
+      });
+
+      final line = cart.lines.single;
+      expect(line.productId, '936cd7a6-1dce-47e8-aebf-90a6af00e4f2');
+      expect(line.quantity, 2);
+      expect(line.unitPrice, Money.parse('70.00'));
+      expect(line.stock, 8);
+    });
   });
 
   group('Cart totals', () {

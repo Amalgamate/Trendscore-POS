@@ -18,8 +18,11 @@ const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-production';
 const JWT_EXPIRY = process.env.JWT_EXPIRY ?? '8h'; // one shift
 
 const LoginSchema = z.object({
-  phone: z.string().min(9, 'Phone number required'),
+  phone: z.string().min(9, 'Phone number required').optional(),
+  userId: z.string().min(1).optional(),
   pin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4 to 6 digits'),
+}).refine((body) => Boolean(body.phone) !== Boolean(body.userId), {
+  message: 'Provide either a phone number or staff account ID.',
 });
 
 const StaffCreateSchema = z.object({
@@ -67,7 +70,9 @@ export function authRouter(): Router {
 
     try {
       const user = await prisma.user.findUnique({
-        where: { phone: normalizePhone(body.phone) },
+        where: body.userId
+          ? { id: body.userId }
+          : { phone: normalizePhone(body.phone!) },
         select: { id: true, fullName: true, phone: true, role: true, pinHash: true, active: true, mustChangePin: true },
       });
 
@@ -126,6 +131,22 @@ export function authRouter(): Router {
     } catch (err) {
       console.error('auth/change-pin error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Could not update the PIN.');
+    }
+  });
+
+  // Mobile sign-in needs an account picker before authentication; expose only
+  // active account labels and opaque IDs, never phone numbers or PIN material.
+  router.get('/login-users', async (_req, res) => {
+    try {
+      const users = await prisma.user.findMany({
+        where: { active: true },
+        select: { id: true, fullName: true, role: true },
+        orderBy: { fullName: 'asc' },
+      });
+      return send200(res, { data: users });
+    } catch (err) {
+      console.error('auth/login-users list error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch sign-in accounts.');
     }
   });
 

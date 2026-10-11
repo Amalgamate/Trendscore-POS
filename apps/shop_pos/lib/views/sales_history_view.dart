@@ -25,15 +25,23 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
 
   List<SaleRecord> get _filteredSales {
     return widget.state.sales.where((s) {
-      if (_filter == 'Cash' && s.paymentMethod != SalePaymentMethod.cash) return false;
-      if (_filter == 'M-Pesa' && s.paymentMethod != SalePaymentMethod.mpesa) return false;
-      if (_filter == 'Credit' && s.paymentMethod != SalePaymentMethod.credit) return false;
+      if (_filter == 'Cash' && s.paymentMethod != SalePaymentMethod.cash) {
+        return false;
+      }
+      if (_filter == 'M-Pesa' && s.paymentMethod != SalePaymentMethod.mpesa) {
+        return false;
+      }
+      if (_filter == 'Pending M-Pesa' && !s.paymentPending) return false;
+      if (_filter == 'Credit' && s.paymentMethod != SalePaymentMethod.credit) {
+        return false;
+      }
       if (_filter == 'Reversed' && !s.isReversed) return false;
 
       final query = _search.text.trim().toLowerCase();
       if (query.isNotEmpty) {
         final matchesReceipt = s.receiptNumber.toLowerCase().contains(query);
-        final matchesCust = s.customer?.name.toLowerCase().contains(query) ?? false;
+        final matchesCust =
+            s.customer?.name.toLowerCase().contains(query) ?? false;
         final matchesRef = s.paymentReference.toLowerCase().contains(query);
         return matchesReceipt || matchesCust || matchesRef;
       }
@@ -62,15 +70,27 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Sale ${sale.receiptNumber}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                    Text(
+                      'Sale ${sale.receiptNumber}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                     Text(
                       '${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, '0')}-${sale.timestamp.day.toString().padLeft(2, '0')} at ${sale.timestamp.hour.toString().padLeft(2, '0')}:${sale.timestamp.minute.toString().padLeft(2, '0')}',
-                      style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary),
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.text_tertiary,
+                      ),
                     ),
                   ],
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: sale.status.color.withAlpha(25),
                     borderRadius: BorderRadius.circular(6),
@@ -78,31 +98,75 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                   ),
                   child: Text(
                     sale.status.label.toUpperCase(),
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: sale.status.color),
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: sale.status.color,
+                    ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 16),
+            if (sale.paymentPending) ...[
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  border: Border.all(color: const Color(0xFFFDE68A)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text(
+                  'M-Pesa payment is pending manual reconciliation. The sale is recorded, but payment has not been confirmed by the API.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Color(0xFF92400E),
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+            ],
             const Divider(),
 
             // Item list preview
-            ...sale.items.map((item) => Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text('${item.quantity} × ${item.productName}', style: const TextStyle(fontSize: 13)),
-                      Text('KES ${item.lineTotal.formatted}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                )),
+            ...sale.items.map(
+              (item) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '${item.quantity} × ${item.productName}',
+                      style: const TextStyle(fontSize: 13),
+                    ),
+                    Text(
+                      'KES ${item.lineTotal.formatted}',
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             const Divider(height: 20),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text('Gross Total', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                Text('KES ${sale.subtotal.formatted}', style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: AppColors.accent_primary)),
+                const Text(
+                  'Gross Total',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                ),
+                Text(
+                  'KES ${sale.subtotal.formatted}',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 16,
+                    color: AppColors.accent_primary,
+                  ),
+                ),
               ],
             ),
             const SizedBox(height: 20),
@@ -110,7 +174,12 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
             // Actions
             LayoutBuilder(
               builder: (ctx, constraints) {
-                final isNarrow = constraints.maxWidth < 360;
+                final hasThreeActions =
+                    sale.paymentPending &&
+                    _canReconcilePayments &&
+                    !sale.isReversed;
+                final isNarrow =
+                    constraints.maxWidth < (hasThreeActions ? 620 : 360);
                 if (isNarrow) {
                   return Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -120,10 +189,28 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                         label: const Text('View Thermal Slip'),
                         onPressed: () {
                           Navigator.pop(context);
-                          ReceiptDialog.show(context, sale, onNewSale: () {}, state: widget.state);
+                          ReceiptDialog.show(
+                            context,
+                            sale,
+                            onNewSale: () {},
+                            state: widget.state,
+                          );
                         },
-                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
                       ),
+                      if (sale.paymentPending && _canReconcilePayments) ...[
+                        const SizedBox(height: 8),
+                        FilledButton.icon(
+                          icon: const Icon(Icons.fact_check_outlined, size: 18),
+                          label: const Text('Reconcile M-Pesa'),
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _promptReconcileMpesa(sale);
+                          },
+                        ),
+                      ],
                       if (!sale.isReversed) ...[
                         const SizedBox(height: 8),
                         FilledButton.icon(
@@ -150,11 +237,31 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                         label: const Text('View Thermal Slip'),
                         onPressed: () {
                           Navigator.pop(context);
-                          ReceiptDialog.show(context, sale, onNewSale: () {}, state: widget.state);
+                          ReceiptDialog.show(
+                            context,
+                            sale,
+                            onNewSale: () {},
+                            state: widget.state,
+                          );
                         },
-                        style: OutlinedButton.styleFrom(padding: const EdgeInsets.symmetric(vertical: 14)),
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                        ),
                       ),
                     ),
+                    if (sale.paymentPending && _canReconcilePayments) ...[
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: FilledButton.icon(
+                          icon: const Icon(Icons.fact_check_outlined, size: 18),
+                          label: const Text('Reconcile M-Pesa'),
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _promptReconcileMpesa(sale);
+                          },
+                        ),
+                      ),
+                    ],
                     if (!sale.isReversed) ...[
                       const SizedBox(width: 12),
                       Expanded(
@@ -182,6 +289,68 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
     );
   }
 
+  bool get _canReconcilePayments {
+    final role = widget.state.currentLoggedInUser?.role;
+    return role == PosUserRole.owner || role == PosUserRole.manager;
+  }
+
+  Future<void> _promptReconcileMpesa(SaleRecord sale) async {
+    final receiptController = TextEditingController();
+    final receipt = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Reconcile M-Pesa payment'),
+        content: TextField(
+          controller: receiptController,
+          autofocus: true,
+          textCapitalization: TextCapitalization.characters,
+          decoration: const InputDecoration(
+            labelText: 'Confirmed M-Pesa receipt code',
+            hintText: 'e.g. QGH7X2P9',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final code = receiptController.text.trim();
+              if (code.length < 3) return;
+              Navigator.pop(dialogContext, code);
+            },
+            child: const Text('Confirm payment'),
+          ),
+        ],
+      ),
+    );
+    receiptController.dispose();
+    if (receipt == null || !mounted) return;
+
+    try {
+      await widget.state.reconcileMpesaPayment(sale, receipt);
+      if (!mounted) return;
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('M-Pesa payment ${sale.receiptNumber} reconciled.'),
+        ),
+      );
+    } on PosException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not reconcile M-Pesa payment: $error')),
+      );
+    }
+  }
+
   void _promptReverseSale(SaleRecord sale) {
     final reasonController = TextEditingController(text: 'Customer return');
     showDialog<void>(
@@ -199,20 +368,32 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
             const SizedBox(height: 12),
             TextField(
               controller: reasonController,
-              decoration: const InputDecoration(labelText: 'Reason for return/reversal', border: OutlineInputBorder()),
+              decoration: const InputDecoration(
+                labelText: 'Reason for return/reversal',
+                border: OutlineInputBorder(),
+              ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: AppColors.status_danger),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.status_danger,
+            ),
             onPressed: () {
               widget.state.reverseSale(sale, reasonController.text);
               Navigator.pop(context);
               setState(() {});
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Sale ${sale.receiptNumber} successfully reversed and restocked.')),
+                SnackBar(
+                  content: Text(
+                    'Sale ${sale.receiptNumber} successfully reversed and restocked.',
+                  ),
+                ),
               );
             },
             child: const Text('Confirm Reversal'),
@@ -226,10 +407,22 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
   Widget build(BuildContext context) {
     final allSales = widget.state.sales;
     final activeSales = allSales.where((s) => !s.isReversed).toList();
-    final totalGrossMinor = activeSales.fold(0, (sum, s) => sum + s.subtotal.minorUnits);
-    final mpesaGrossMinor = activeSales.where((s) => s.paymentMethod == SalePaymentMethod.mpesa).fold(0, (sum, s) => sum + s.subtotal.minorUnits);
-    final cashGrossMinor = activeSales.where((s) => s.paymentMethod == SalePaymentMethod.cash).fold(0, (sum, s) => sum + s.subtotal.minorUnits);
-    final creditGrossMinor = activeSales.where((s) => s.paymentMethod == SalePaymentMethod.credit).fold(0, (sum, s) => sum + s.subtotal.minorUnits);
+    final totalGrossMinor = activeSales.fold(
+      0,
+      (sum, s) => sum + s.subtotal.minorUnits,
+    );
+    final mpesaGrossMinor = activeSales
+        .where(
+          (s) =>
+              s.paymentMethod == SalePaymentMethod.mpesa && !s.paymentPending,
+        )
+        .fold(0, (sum, s) => sum + s.subtotal.minorUnits);
+    final cashGrossMinor = activeSales
+        .where((s) => s.paymentMethod == SalePaymentMethod.cash)
+        .fold(0, (sum, s) => sum + s.subtotal.minorUnits);
+    final creditGrossMinor = activeSales
+        .where((s) => s.paymentMethod == SalePaymentMethod.credit)
+        .fold(0, (sum, s) => sum + s.subtotal.minorUnits);
 
     final isMobile = MediaQuery.sizeOf(context).width < 700;
 
@@ -249,7 +442,11 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                     icon: const Icon(Icons.download_outlined, size: 18),
                     tooltip: 'Export Day Ledger',
                     onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ledger exported to CSV/audit format.')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Ledger exported to CSV/audit format.'),
+                        ),
+                      );
                     },
                   ),
                 ],
@@ -262,7 +459,11 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                     icon: const Icon(Icons.download_outlined, size: 16),
                     label: const Text('Export Day Ledger'),
                     onPressed: () {
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Ledger exported to CSV/audit format.')));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Ledger exported to CSV/audit format.'),
+                        ),
+                      );
                     },
                   ),
                 ],
@@ -278,26 +479,70 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        _StatCard(title: 'Total Gross Sales', value: 'KES ${Money(totalGrossMinor).formatted}', subtitle: '${activeSales.length} transactions', color: AppColors.accent_primary, width: 160),
+                        _StatCard(
+                          title: 'Total Gross Sales',
+                          value: 'KES ${Money(totalGrossMinor).formatted}',
+                          subtitle: '${activeSales.length} transactions',
+                          color: AppColors.accent_primary,
+                          width: 160,
+                        ),
                         const SizedBox(width: 12),
-                        _StatCard(title: 'M-Pesa Volume', value: 'KES ${Money(mpesaGrossMinor).formatted}', subtitle: 'Lipa Na M-Pesa', color: const Color(0xFF16A34A), width: 160),
+                        _StatCard(
+                          title: 'M-Pesa Volume',
+                          value: 'KES ${Money(mpesaGrossMinor).formatted}',
+                          subtitle: 'Reconciled payments',
+                          color: const Color(0xFF16A34A),
+                          width: 160,
+                        ),
                         const SizedBox(width: 12),
-                        _StatCard(title: 'Cash Tendered', value: 'KES ${Money(cashGrossMinor).formatted}', subtitle: 'In till drawer', color: const Color(0xFF2563EB), width: 160),
+                        _StatCard(
+                          title: 'Cash Tendered',
+                          value: 'KES ${Money(cashGrossMinor).formatted}',
+                          subtitle: 'In till drawer',
+                          color: const Color(0xFF2563EB),
+                          width: 160,
+                        ),
                         const SizedBox(width: 12),
-                        _StatCard(title: 'Debtor Credit', value: 'KES ${Money(creditGrossMinor).formatted}', subtitle: 'On customer tab', color: const Color(0xFFD97706), width: 160),
+                        _StatCard(
+                          title: 'Debtor Credit',
+                          value: 'KES ${Money(creditGrossMinor).formatted}',
+                          subtitle: 'On customer tab',
+                          color: const Color(0xFFD97706),
+                          width: 160,
+                        ),
                       ],
                     ),
                   );
                 }
                 return Row(
                   children: [
-                    _StatCard(title: 'Total Gross Sales', value: 'KES ${Money(totalGrossMinor).formatted}', subtitle: '${activeSales.length} transactions', color: AppColors.accent_primary),
+                    _StatCard(
+                      title: 'Total Gross Sales',
+                      value: 'KES ${Money(totalGrossMinor).formatted}',
+                      subtitle: '${activeSales.length} transactions',
+                      color: AppColors.accent_primary,
+                    ),
                     const SizedBox(width: 12),
-                    _StatCard(title: 'M-Pesa Volume', value: 'KES ${Money(mpesaGrossMinor).formatted}', subtitle: 'Lipa Na M-Pesa', color: const Color(0xFF16A34A)),
+                    _StatCard(
+                      title: 'M-Pesa Volume',
+                      value: 'KES ${Money(mpesaGrossMinor).formatted}',
+                      subtitle: 'Reconciled payments',
+                      color: const Color(0xFF16A34A),
+                    ),
                     const SizedBox(width: 12),
-                    _StatCard(title: 'Cash Tendered', value: 'KES ${Money(cashGrossMinor).formatted}', subtitle: 'In till drawer', color: const Color(0xFF2563EB)),
+                    _StatCard(
+                      title: 'Cash Tendered',
+                      value: 'KES ${Money(cashGrossMinor).formatted}',
+                      subtitle: 'In till drawer',
+                      color: const Color(0xFF2563EB),
+                    ),
                     const SizedBox(width: 12),
-                    _StatCard(title: 'Debtor Credit', value: 'KES ${Money(creditGrossMinor).formatted}', subtitle: 'On customer tab', color: const Color(0xFFD97706)),
+                    _StatCard(
+                      title: 'Debtor Credit',
+                      value: 'KES ${Money(creditGrossMinor).formatted}',
+                      subtitle: 'On customer tab',
+                      color: const Color(0xFFD97706),
+                    ),
                   ],
                 );
               },
@@ -314,28 +559,52 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                   prefixIcon: const Icon(Icons.search, size: 20),
                   filled: true,
                   fillColor: Colors.white,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 10,
+                  ),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(8),
+                    borderSide: const BorderSide(
+                      color: AppColors.border_subtle,
+                    ),
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(
-                  children: ['All', 'Cash', 'M-Pesa', 'Credit', 'Reversed'].map((f) {
-                    final isSelected = _filter == f;
-                    return Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      child: FilterChip(
-                        selected: isSelected,
-                        label: Text(f, style: const TextStyle(fontSize: 12)),
-                        onSelected: (_) => setState(() => _filter = f),
-                        selectedColor: AppColors.accent_primary.withAlpha(30),
-                        checkmarkColor: AppColors.accent_primary,
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      ),
-                    );
-                  }).toList(),
+                  children:
+                      [
+                        'All',
+                        'Cash',
+                        'M-Pesa',
+                        'Pending M-Pesa',
+                        'Credit',
+                        'Reversed',
+                      ].map((f) {
+                        final isSelected = _filter == f;
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: FilterChip(
+                            selected: isSelected,
+                            label: Text(
+                              f,
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            onSelected: (_) => setState(() => _filter = f),
+                            selectedColor: AppColors.accent_primary.withAlpha(
+                              30,
+                            ),
+                            checkmarkColor: AppColors.accent_primary,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 4,
+                              vertical: 2,
+                            ),
+                          ),
+                        );
+                      }).toList(),
                 ),
               ),
             ] else
@@ -346,17 +615,33 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                       controller: _search,
                       onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
-                        hintText: 'Search by receipt number, customer name or Daraja code...',
+                        hintText:
+                            'Search by receipt number, customer name or Daraja code...',
                         prefixIcon: const Icon(Icons.search, size: 20),
                         filled: true,
                         fillColor: Colors.white,
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 14,
+                          vertical: 10,
+                        ),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                          borderSide: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                        ),
                       ),
                     ),
                   ),
                   const SizedBox(width: 12),
-                  ...['All', 'Cash', 'M-Pesa', 'Credit', 'Reversed'].map((f) {
+                  ...[
+                    'All',
+                    'Cash',
+                    'M-Pesa',
+                    'Pending M-Pesa',
+                    'Credit',
+                    'Reversed',
+                  ].map((f) {
                     final isSelected = _filter == f;
                     return Padding(
                       padding: const EdgeInsets.only(left: 6),
@@ -382,14 +667,22 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                   border: Border.all(color: AppColors.border_subtle),
                 ),
                 child: _filteredSales.isEmpty
-                    ? const Center(child: Text('No transactions match the selected criteria.'))
+                    ? const Center(
+                        child: Text(
+                          'No transactions match the selected criteria.',
+                        ),
+                      )
                     : ListView.separated(
                         itemCount: _filteredSales.length,
-                        separatorBuilder: (context, index) => const Divider(height: 1),
+                        separatorBuilder: (context, index) =>
+                            const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final s = _filteredSales[index];
                           return ListTile(
-                            contentPadding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 16, vertical: 4),
+                            contentPadding: EdgeInsets.symmetric(
+                              horizontal: isMobile ? 12 : 16,
+                              vertical: 4,
+                            ),
                             onTap: () => _showSaleDetails(s),
                             leading: Container(
                               width: 38,
@@ -397,32 +690,58 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                               decoration: BoxDecoration(
                                 color: s.isReversed
                                     ? AppColors.status_danger.withAlpha(20)
-                                    : (s.paymentMethod == SalePaymentMethod.mpesa
-                                        ? const Color(0xFF16A34A).withAlpha(20)
-                                        : AppColors.accent_primary.withAlpha(20)),
+                                    : (s.paymentMethod ==
+                                              SalePaymentMethod.mpesa
+                                          ? const Color(
+                                              0xFF16A34A,
+                                            ).withAlpha(20)
+                                          : AppColors.accent_primary.withAlpha(
+                                              20,
+                                            )),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Icon(
                                 s.isReversed
                                     ? Icons.undo
-                                    : (s.paymentMethod == SalePaymentMethod.mpesa ? Icons.phone_android : Icons.receipt_long),
+                                    : (s.paymentMethod ==
+                                              SalePaymentMethod.mpesa
+                                          ? Icons.phone_android
+                                          : Icons.receipt_long),
                                 color: s.isReversed
                                     ? AppColors.status_danger
-                                    : (s.paymentMethod == SalePaymentMethod.mpesa ? const Color(0xFF16A34A) : AppColors.accent_primary),
+                                    : (s.paymentMethod ==
+                                              SalePaymentMethod.mpesa
+                                          ? const Color(0xFF16A34A)
+                                          : AppColors.accent_primary),
                                 size: 19,
                               ),
                             ),
                             title: Row(
                               children: [
-                                Text(s.receiptNumber, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                Text(
+                                  s.receiptNumber,
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
                                 const SizedBox(width: 6),
                                 Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 5,
+                                    vertical: 2,
+                                  ),
                                   decoration: BoxDecoration(
                                     color: AppColors.bg_subtle,
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: Text(s.paymentMethod.label, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600)),
+                                  child: Text(
+                                    s.paymentMethod.label,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
                                 ),
                                 if (s.customer != null) ...[
                                   const SizedBox(width: 6),
@@ -431,7 +750,10 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                                       '· ${s.customer!.name}',
                                       overflow: TextOverflow.ellipsis,
                                       maxLines: 1,
-                                      style: const TextStyle(fontSize: 11, color: AppColors.text_secondary),
+                                      style: const TextStyle(
+                                        fontSize: 11,
+                                        color: AppColors.text_secondary,
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -441,7 +763,10 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                               '${s.totalUnits} items · ${s.timestamp.hour.toString().padLeft(2, '0')}:${s.timestamp.minute.toString().padLeft(2, '0')} · Ref: ${s.paymentReference}',
                               overflow: TextOverflow.ellipsis,
                               maxLines: 1,
-                              style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.text_tertiary,
+                              ),
                             ),
                             trailing: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -452,13 +777,25 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
                                   style: TextStyle(
                                     fontSize: 15,
                                     fontWeight: FontWeight.w800,
-                                    decoration: s.isReversed ? TextDecoration.lineThrough : null,
-                                    color: s.isReversed ? AppColors.text_tertiary : AppColors.text_primary,
+                                    decoration: s.isReversed
+                                        ? TextDecoration.lineThrough
+                                        : null,
+                                    color: s.isReversed
+                                        ? AppColors.text_tertiary
+                                        : AppColors.text_primary,
                                   ),
                                 ),
                                 Text(
-                                  s.status.label,
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: s.status.color),
+                                  s.paymentPending
+                                      ? 'PAYMENT PENDING'
+                                      : s.status.label,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                    color: s.paymentPending
+                                        ? const Color(0xFFB45309)
+                                        : s.status.color,
+                                  ),
                                 ),
                               ],
                             ),
@@ -475,7 +812,13 @@ class _SalesHistoryViewState extends State<SalesHistoryView> {
 }
 
 class _StatCard extends StatelessWidget {
-  const _StatCard({required this.title, required this.value, required this.subtitle, required this.color, this.width});
+  const _StatCard({
+    required this.title,
+    required this.value,
+    required this.subtitle,
+    required this.color,
+    this.width,
+  });
 
   final String title;
   final String value;
@@ -496,11 +839,31 @@ class _StatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary, fontWeight: FontWeight.w500)),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.text_tertiary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: color)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(fontSize: 11, color: AppColors.text_secondary)),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.text_secondary,
+            ),
+          ),
         ],
       ),
     );

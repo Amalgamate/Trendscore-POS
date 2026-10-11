@@ -8,9 +8,15 @@ import { authRouter } from './modules/auth/auth.router';
 import { productsRouter } from './modules/products/products.router';
 import { customersRouter } from './modules/customers/customers.router';
 import { salesRouter } from './modules/sales/sales.router';
+import { suppliersRouter } from './modules/suppliers/suppliers.router';
 import { categoriesRouter } from './modules/categories/categories.router';
 import { businessRouter } from './modules/business/business.router';
 import { deliveryRouter } from './modules/delivery/delivery.router';
+import {
+  expirePendingStorefrontOrders,
+  storefrontOrdersRouter,
+} from './modules/storefront/storefront-orders.router';
+import { mpesaRouter } from './modules/integrations/mpesa/mpesa.router';
 
 const PORT = Number(process.env.PORT ?? 4000);
 const VERSION = process.env.APP_VERSION ?? 'dev';
@@ -25,7 +31,15 @@ const BUSINESS_ID = process.env.BUSINESS_ID ?? '';
 
 const log = pino({
   level: process.env.LOG_LEVEL ?? 'info',
-  redact: ['req.headers.authorization', 'req.headers.cookie', '*.passwordHash', '*.pinHash'],
+  redact: [
+    'req.headers.authorization',
+    'req.headers.cookie',
+    'req.body.consumerKey',
+    'req.body.consumerSecret',
+    'req.body.passkey',
+    '*.passwordHash',
+    '*.pinHash',
+  ],
 });
 
 const app = express();
@@ -35,11 +49,16 @@ app.use(helmet({
   crossOriginOpenerPolicy: { policy: 'same-origin' },
   crossOriginEmbedderPolicy: { policy: 'require-corp' },
 }));
+const corsOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:8080,http://localhost:3000')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN ?? ['http://localhost:8080', 'http://localhost:3000'],
+  origin: corsOrigins,
   credentials: true,
 }));
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '2mb' }));
 app.use(pinoHttp({ logger: log }));
 
 // ─── Unauthenticated ─────────────────────────────────────────────────────────
@@ -52,8 +71,11 @@ if (BUSINESS_ID) {
   app.use('/categories', categoriesRouter(BUSINESS_ID));
   app.use('/customers', customersRouter(BUSINESS_ID));
   app.use('/sales', salesRouter(BUSINESS_ID));
+  app.use('/suppliers', suppliersRouter(BUSINESS_ID));
   app.use('/business', businessRouter(BUSINESS_ID));
   app.use('/delivery', deliveryRouter(BUSINESS_ID));
+  app.use('/storefront/orders', storefrontOrdersRouter(BUSINESS_ID));
+  app.use('/payments/mpesa', mpesaRouter(BUSINESS_ID));
 } else {
   log.warn('BUSINESS_ID is not set — business routes are disabled. Set the env var to enable them.');
 }
@@ -67,9 +89,19 @@ const server = app.listen(PORT, () => {
   log.info({ port: PORT, version: VERSION, businessId: BUSINESS_ID || 'unset' }, 'shop-api listening');
 });
 
+const storefrontOrderReaper = BUSINESS_ID
+  ? setInterval(() => {
+      void expirePendingStorefrontOrders(BUSINESS_ID).catch((err: unknown) => {
+        log.error({ err }, 'failed to expire pending storefront order reservations');
+      });
+    }, 60_000)
+  : null;
+storefrontOrderReaper?.unref();
+
 for (const signal of ['SIGTERM', 'SIGINT'] as const) {
   process.on(signal, () => {
     log.info({ signal }, 'shutting down');
+    if (storefrontOrderReaper) clearInterval(storefrontOrderReaper);
     server.close(() => process.exit(0));
   });
 }

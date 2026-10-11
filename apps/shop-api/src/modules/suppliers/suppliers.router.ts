@@ -45,7 +45,7 @@ export function suppliersRouter(businessId: string): Router {
   router.get(
     '/',
     requireAuth,
-    requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'),
+    requireRole('OWNER', 'MANAGER', 'SUPER_ADMIN', 'STOCK_CLERK'),
     async (_req, res) => {
       try {
         const suppliers = await prisma.supplier.findMany({
@@ -63,7 +63,7 @@ export function suppliersRouter(businessId: string): Router {
   router.post(
     '/',
     requireAuth,
-    requireRole('OWNER', 'MANAGER'),
+    requireRole('OWNER', 'MANAGER', 'SUPER_ADMIN'),
     async (req, res) => {
       const body = parseBody(CreateSupplierSchema, req, res);
       if (!body) return;
@@ -83,7 +83,7 @@ export function suppliersRouter(businessId: string): Router {
   router.delete(
     '/:id',
     requireAuth,
-    requireRole('OWNER', 'MANAGER'),
+    requireRole('OWNER', 'MANAGER', 'SUPER_ADMIN'),
     async (req, res) => {
       try {
         const supplier = await prisma.supplier.findFirst({

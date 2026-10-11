@@ -1,10 +1,10 @@
 import 'dart:math' as math;
 import 'package:file_picker/file_picker.dart';
-import 'package:file_picker_web/file_picker_web.dart' show FilePickerWebOptions;
 import 'package:flutter/material.dart';
 import '../cart.dart';
 import '../pos_state.dart';
 import '../services/api_service.dart';
+import '../services/credit_document_picker.dart';
 import '../theme/tokens.dart';
 
 enum _CreditTab { transactions, account, terms, notes, documents }
@@ -797,11 +797,7 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
       return;
     }
     try {
-      final file = await FilePicker.pickFile(
-        type: FileType.custom,
-        allowedExtensions: const ['pdf', 'jpg', 'jpeg', 'png'],
-        webOptions: const FilePickerWebOptions(cancelUploadOnWindowBlur: false),
-      );
+      final file = await pickCreditDocument();
       if (file == null) return;
       final bytes = await file.readAsBytes();
       if (bytes.lengthInBytes > 8 * 1024 * 1024) {
@@ -1841,7 +1837,8 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
                     ? const Center(child: Text('No transactions recorded.'))
                     : ListView.separated(
                         itemCount: customer.ledger.length,
-                        separatorBuilder: (_, index) => const Divider(height: 1),
+                        separatorBuilder: (_, index) =>
+                            const Divider(height: 1),
                         itemBuilder: (context, index) {
                           final entry = customer.ledger[index];
                           return _LedgerRow(entry: entry);

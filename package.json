@@ -14,6 +14,7 @@
   },
   "scripts": {
     "build:tokens": "node packages/design-tokens/build.mjs",
+    "sync:brand-icons": "node scripts/sync-brand-icons.mjs",
     "db:generate:control": "npm run prisma:generate -w control-plane-api",
     "db:generate:shop": "npm run prisma:generate -w shop-api",
     "db:migrate:control": "npm run prisma:migrate -w control-plane-api",
@@ -22,5 +23,8 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "plan:check": "node scripts/plan-progress.mjs"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.5"
   }
 }

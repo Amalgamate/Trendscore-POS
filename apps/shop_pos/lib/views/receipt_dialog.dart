@@ -27,7 +27,8 @@ class ReceiptDialog extends StatefulWidget {
     showDialog<void>(
       context: context,
       barrierDismissible: false,
-      builder: (context) => ReceiptDialog(sale: sale, onNewSale: onNewSale, state: state),
+      builder: (context) =>
+          ReceiptDialog(sale: sale, onNewSale: onNewSale, state: state),
     );
   }
 
@@ -50,7 +51,10 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
       backgroundColor: AppColors.bg_surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: Container(
-        width: math.min(_viewMode == 0 ? 440.0 : 620.0, MediaQuery.sizeOf(context).width - 24),
+        width: math.min(
+          _viewMode == 0 ? 440.0 : 620.0,
+          MediaQuery.sizeOf(context).width - 24,
+        ),
         constraints: const BoxConstraints(maxHeight: 720),
         padding: const EdgeInsets.all(20),
         child: Column(
@@ -67,7 +71,11 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                     color: Color(0xFFF0FDF4),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.check_circle, color: AppColors.status_success, size: 24),
+                  child: const Icon(
+                    Icons.check_circle,
+                    color: AppColors.status_success,
+                    size: 24,
+                  ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -76,11 +84,18 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                     children: [
                       const Text(
                         'Payment Approved',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.text_primary),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.text_primary,
+                        ),
                       ),
                       Text(
                         'Receipt ${sale.receiptNumber}',
-                        style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary),
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.text_tertiary,
+                        ),
                       ),
                     ],
                   ),
@@ -107,7 +122,9 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
             // Scrollable Receipt / Invoice Container
             Expanded(
               child: SingleChildScrollView(
-                child: _viewMode == 0 ? _buildThermalReceipt(sale) : _buildA4Invoice(sale),
+                child: _viewMode == 0
+                    ? _buildThermalReceipt(sale)
+                    : _buildA4Invoice(sale),
               ),
             ),
             const SizedBox(height: 16),
@@ -118,15 +135,21 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                 Expanded(
                   child: OutlinedButton.icon(
                     icon: const Icon(Icons.print_outlined, size: 18),
-                    label: Text(_viewMode == 0 ? 'Print Slip' : 'Print Invoice'),
+                    label: Text(
+                      _viewMode == 0 ? 'Print Slip' : 'Print Invoice',
+                    ),
                     style: OutlinedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                     onPressed: () {
                       ScaffoldMessenger.of(context).showSnackBar(
                         SnackBar(
-                          content: Text('${_viewMode == 0 ? "Thermal receipt" : "A4 Invoice"} sent to $_tillId printer!'),
+                          content: Text(
+                            '${_viewMode == 0 ? "Thermal receipt" : "A4 Invoice"} sent to $_tillId printer!',
+                          ),
                           backgroundColor: AppColors.accent_primary,
                           duration: const Duration(seconds: 2),
                         ),
@@ -137,10 +160,18 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                 const SizedBox(width: 10),
                 IconButton.outlined(
                   tooltip: 'Share via WhatsApp / SMS',
-                  icon: const Icon(Icons.share_outlined, color: AppColors.text_secondary, size: 20),
+                  icon: const Icon(
+                    Icons.share_outlined,
+                    color: AppColors.text_secondary,
+                    size: 20,
+                  ),
                   onPressed: () {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Receipt #${sale.receiptNumber} link copied to clipboard!')),
+                      SnackBar(
+                        content: Text(
+                          'Receipt #${sale.receiptNumber} link copied to clipboard!',
+                        ),
+                      ),
                     );
                   },
                 ),
@@ -154,9 +185,14 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                     style: FilledButton.styleFrom(
                       backgroundColor: AppColors.accent_primary,
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
-                    child: const Text('New Sale', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: const Text(
+                      'New Sale',
+                      style: TextStyle(fontWeight: FontWeight.bold),
+                    ),
                   ),
                 ),
               ],
@@ -177,7 +213,9 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
         decoration: BoxDecoration(
           color: isSel ? Colors.white : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
-          boxShadow: isSel ? const [BoxShadow(color: Color(0x0F000000), blurRadius: 4)] : null,
+          boxShadow: isSel
+              ? const [BoxShadow(color: Color(0x0F000000), blurRadius: 4)]
+              : null,
         ),
         child: Text(
           label,
@@ -202,7 +240,8 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (widget.state?.brandLogoBase64 != null && widget.state!.brandLogoBase64!.isNotEmpty) ...[
+          if (widget.state?.brandLogoBase64 != null &&
+              widget.state!.brandLogoBase64!.isNotEmpty) ...[
             Center(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -215,7 +254,8 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
               ),
             ),
             const SizedBox(height: 6),
-          ] else if (widget.state?.brandLogoUrl != null && widget.state!.brandLogoUrl.isNotEmpty) ...[
+          ] else if (widget.state?.brandLogoUrl != null &&
+              widget.state!.brandLogoUrl.isNotEmpty) ...[
             Center(
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(8),
@@ -233,23 +273,39 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
           Center(
             child: Text(
               _shopName.toUpperCase(),
-              style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15, letterSpacing: 1),
+              style: const TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 15,
+                letterSpacing: 1,
+              ),
             ),
           ),
           Center(
             child: Text(
               '$_branch · $_tillId',
-              style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary),
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.text_tertiary,
+              ),
             ),
           ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Cashier: ${sale.cashier}', style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+              Text(
+                'Cashier: ${sale.cashier}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.text_tertiary,
+                ),
+              ),
               Text(
                 '${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, '0')}-${sale.timestamp.day.toString().padLeft(2, '0')} ${sale.timestamp.hour.toString().padLeft(2, '0')}:${sale.timestamp.minute.toString().padLeft(2, '0')}',
-                style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary),
+                style: const TextStyle(
+                  fontSize: 11,
+                  color: AppColors.text_tertiary,
+                ),
               ),
             ],
           ),
@@ -258,8 +314,21 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('Customer: ${sale.customer!.name}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.text_secondary)),
-                Text(sale.customer!.phone, style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                Text(
+                  'Customer: ${sale.customer!.name}',
+                  style: const TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.text_secondary,
+                  ),
+                ),
+                Text(
+                  sale.customer!.phone,
+                  style: const TextStyle(
+                    fontSize: 11,
+                    color: AppColors.text_tertiary,
+                  ),
+                ),
               ],
             ),
           ],
@@ -275,12 +344,30 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(item.productName, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                        Text('${item.quantity} × KES ${item.unitPrice.formatted}', style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                        Text(
+                          item.productName,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          '${item.quantity} × KES ${item.unitPrice.formatted}',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.text_tertiary,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  Text('KES ${item.lineTotal.formatted}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  Text(
+                    'KES ${item.lineTotal.formatted}',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
                 ],
               ),
             );
@@ -289,25 +376,58 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
           const Divider(height: 20, thickness: 1),
 
           // Financial Breakdown
-          _TotalRow(label: 'Net Total (Excl. VAT)', value: 'KES ${Money(sale.subtotal.minorUnits - sale.vatAmount.minorUnits).formatted}'),
+          _TotalRow(
+            label: 'Net Total (Excl. VAT)',
+            value:
+                'KES ${Money(sale.subtotal.minorUnits - sale.vatAmount.minorUnits).formatted}',
+          ),
           const SizedBox(height: 4),
-          _TotalRow(label: 'VAT Rate 16%', value: 'KES ${sale.vatAmount.formatted}'),
+          _TotalRow(
+            label: 'VAT Rate 16%',
+            value: 'KES ${sale.vatAmount.formatted}',
+          ),
           const SizedBox(height: 8),
-          _TotalRow(label: 'TOTAL CHARGED', value: 'KES ${sale.subtotal.formatted}', isBold: true, fontSize: 16),
+          _TotalRow(
+            label: 'TOTAL CHARGED',
+            value: 'KES ${sale.subtotal.formatted}',
+            isBold: true,
+            fontSize: 16,
+          ),
           const Divider(height: 18),
 
           // Payment method
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Payment: ${sale.paymentMethod.label.toUpperCase()}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-              Text(sale.paymentReference, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppColors.text_secondary)),
+              Text(
+                'Payment: ${sale.paymentMethod.label.toUpperCase()}',
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              Text(
+                sale.paymentReference,
+                style: const TextStyle(
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  color: AppColors.text_secondary,
+                ),
+              ),
             ],
           ),
           if (sale.cashTendered != null) ...[
             const SizedBox(height: 4),
-            _TotalRow(label: 'Cash Tendered', value: 'KES ${sale.cashTendered!.formatted}', isSmall: true),
-            _TotalRow(label: 'Change Given', value: 'KES ${(sale.changeDue ?? const Money(0)).formatted}', isSmall: true),
+            _TotalRow(
+              label: 'Cash Tendered',
+              value: 'KES ${sale.cashTendered!.formatted}',
+              isSmall: true,
+            ),
+            _TotalRow(
+              label: 'Change Given',
+              value: 'KES ${(sale.changeDue ?? const Money(0)).formatted}',
+              isSmall: true,
+            ),
           ],
 
           const SizedBox(height: 16),
@@ -326,18 +446,39 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
-                    children: List.generate(24, (i) => Container(
-                      width: (i % 3 == 0) ? 3 : 1.5,
-                      margin: const EdgeInsets.symmetric(horizontal: 2),
-                      color: Colors.black87,
-                    )),
+                    children: List.generate(
+                      24,
+                      (i) => Container(
+                        width: (i % 3 == 0) ? 3 : 1.5,
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        color: Colors.black87,
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(sale.receiptNumber, style: const TextStyle(fontSize: 10, fontFamily: 'monospace', letterSpacing: 2, color: AppColors.text_tertiary)),
+                Text(
+                  sale.receiptNumber,
+                  style: const TextStyle(
+                    fontSize: 10,
+                    fontFamily: 'monospace',
+                    letterSpacing: 2,
+                    color: AppColors.text_tertiary,
+                  ),
+                ),
                 const SizedBox(height: 8),
-                const Text('Goods once sold are not returnable without valid receipt.', style: TextStyle(fontSize: 9, color: AppColors.text_tertiary)),
-                const Text('Thank you for shopping with us!', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: AppColors.accent_primary)),
+                const Text(
+                  'Goods once sold are not returnable without valid receipt.',
+                  style: TextStyle(fontSize: 9, color: AppColors.text_tertiary),
+                ),
+                const Text(
+                  'Thank you for shopping with us!',
+                  style: TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.accent_primary,
+                  ),
+                ),
               ],
             ),
           ),
@@ -365,11 +506,14 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  if (widget.state?.brandLogoBase64 != null && widget.state!.brandLogoBase64!.isNotEmpty) ...[
+                  if (widget.state?.brandLogoBase64 != null &&
+                      widget.state!.brandLogoBase64!.isNotEmpty) ...[
                     ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: Image.memory(
-                        base64Decode(widget.state!.brandLogoBase64!.split(',').last),
+                        base64Decode(
+                          widget.state!.brandLogoBase64!.split(',').last,
+                        ),
                         width: 48,
                         height: 48,
                         fit: BoxFit.cover,
@@ -380,10 +524,35 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(_shopName.toUpperCase(), style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: AppColors.accent_primary)),
-                      Text('Branch: $_branch · Terminal: $_tillId', style: const TextStyle(fontSize: 12, color: AppColors.text_secondary)),
-                      const Text('PIN: P051239845Z · Tax Reg: ET-2024-KRA', style: TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
-                      const Text('Email: accounts@shopsmartpos.ke · Tel: +254 700 000 000', style: TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                      Text(
+                        _shopName.toUpperCase(),
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.accent_primary,
+                        ),
+                      ),
+                      Text(
+                        'Branch: $_branch · Terminal: $_tillId',
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.text_secondary,
+                        ),
+                      ),
+                      const Text(
+                        'PIN: P051239845Z · Tax Reg: ET-2024-KRA',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.text_tertiary,
+                        ),
+                      ),
+                      const Text(
+                        'Email: accounts@shopsmartpos.ke · Tel: +254 700 000 000',
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.text_tertiary,
+                        ),
+                      ),
                     ],
                   ),
                 ],
@@ -392,14 +561,45 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(color: const Color(0xFFEFF6FF), borderRadius: BorderRadius.circular(6)),
-                    child: const Text('TAX INVOICE', style: TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF1D4ED8), fontSize: 13)),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: const Text(
+                      'TAX INVOICE',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF1D4ED8),
+                        fontSize: 13,
+                      ),
+                    ),
                   ),
                   const SizedBox(height: 6),
-                  Text('Invoice #: ${sale.receiptNumber}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                  Text('Date: ${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, "0")}-${sale.timestamp.day.toString().padLeft(2, "0")}', style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
-                  Text('Cashier: ${sale.cashier}', style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                  Text(
+                    'Invoice #: ${sale.receiptNumber}',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    'Date: ${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, "0")}-${sale.timestamp.day.toString().padLeft(2, "0")}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.text_tertiary,
+                    ),
+                  ),
+                  Text(
+                    'Cashier: ${sale.cashier}',
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.text_tertiary,
+                    ),
+                  ),
                 ],
               ),
             ],
@@ -409,31 +609,75 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
           // Bill To
           Container(
             padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(color: AppColors.bg_canvas, borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(
+              color: AppColors.bg_canvas,
+              borderRadius: BorderRadius.circular(8),
+            ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Billed To / Debtor Account:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.text_tertiary)),
-                    Text(sale.customer?.name ?? 'Walk-In Retail Client', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                    Text('Phone: ${sale.customer?.phone ?? "N/A"}', style: const TextStyle(fontSize: 11, color: AppColors.text_secondary)),
+                    const Text(
+                      'Billed To / Debtor Account:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
+                    Text(
+                      sale.customer?.name ?? 'Walk-In Retail Client',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Text(
+                      'Phone: ${sale.customer?.phone ?? "N/A"}',
+                      style: const TextStyle(
+                        fontSize: 11,
+                        color: AppColors.text_secondary,
+                      ),
+                    ),
                   ],
                 ),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    const Text('Payment Status:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.text_tertiary)),
+                    const Text(
+                      'Payment Status:',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
                     Text(
-                      sale.paymentMethod == SalePaymentMethod.credit ? 'CREDIT / PENDING' : 'PAID IN FULL',
+                      sale.paymentPending
+                          ? 'PENDING RECONCILIATION'
+                          : sale.paymentMethod == SalePaymentMethod.credit
+                          ? 'CREDIT / PENDING'
+                          : 'PAID IN FULL',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
-                        color: sale.paymentMethod == SalePaymentMethod.credit ? const Color(0xFFD97706) : AppColors.status_success,
+                        color:
+                            sale.paymentPending ||
+                                sale.paymentMethod == SalePaymentMethod.credit
+                            ? const Color(0xFFD97706)
+                            : AppColors.status_success,
                       ),
                     ),
-                    Text('Ref: ${sale.paymentReference}', style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: AppColors.text_tertiary)),
+                    Text(
+                      'Ref: ${sale.paymentReference}',
+                      style: const TextStyle(
+                        fontSize: 10,
+                        fontFamily: 'monospace',
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
                   ],
                 ),
               ],
@@ -454,20 +698,91 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
               TableRow(
                 decoration: const BoxDecoration(color: Color(0xFFF8FAFC)),
                 children: const [
-                  Padding(padding: EdgeInsets.all(8), child: Text('Product Description', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                  Padding(padding: EdgeInsets.all(8), child: Text('Qty', textAlign: TextAlign.center, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                  Padding(padding: EdgeInsets.all(8), child: Text('Unit Price', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
-                  Padding(padding: EdgeInsets.all(8), child: Text('Total (KES)', textAlign: TextAlign.right, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold))),
+                  Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Text(
+                      'Product Description',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Text(
+                      'Qty',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Text(
+                      'Unit Price',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: EdgeInsets.all(8),
+                    child: Text(
+                      'Total (KES)',
+                      textAlign: TextAlign.right,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
                 ],
               ),
-              ...sale.items.map((it) => TableRow(
-                children: [
-                  Padding(padding: const EdgeInsets.all(8), child: Text(it.productName, style: const TextStyle(fontSize: 11))),
-                  Padding(padding: const EdgeInsets.all(8), child: Text(it.quantity.toString(), textAlign: TextAlign.center, style: const TextStyle(fontSize: 11))),
-                  Padding(padding: const EdgeInsets.all(8), child: Text('KES ${it.unitPrice.formatted}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11))),
-                  Padding(padding: const EdgeInsets.all(8), child: Text('KES ${it.lineTotal.formatted}', textAlign: TextAlign.right, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600))),
-                ],
-              )),
+              ...sale.items.map(
+                (it) => TableRow(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        it.productName,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        it.quantity.toString(),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        'KES ${it.unitPrice.formatted}',
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(fontSize: 11),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Text(
+                        'KES ${it.lineTotal.formatted}',
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 14),
@@ -479,11 +794,23 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
               width: 260,
               child: Column(
                 children: [
-                  _TotalRow(label: 'Subtotal (Excl. VAT)', value: 'KES ${Money(sale.subtotal.minorUnits - sale.vatAmount.minorUnits).formatted}'),
+                  _TotalRow(
+                    label: 'Subtotal (Excl. VAT)',
+                    value:
+                        'KES ${Money(sale.subtotal.minorUnits - sale.vatAmount.minorUnits).formatted}',
+                  ),
                   const SizedBox(height: 4),
-                  _TotalRow(label: 'VAT (16.0%)', value: 'KES ${sale.vatAmount.formatted}'),
+                  _TotalRow(
+                    label: 'VAT (16.0%)',
+                    value: 'KES ${sale.vatAmount.formatted}',
+                  ),
                   const Divider(height: 12),
-                  _TotalRow(label: 'Grand Total Due', value: 'KES ${sale.subtotal.formatted}', isBold: true, fontSize: 15),
+                  _TotalRow(
+                    label: 'Grand Total Due',
+                    value: 'KES ${sale.subtotal.formatted}',
+                    isBold: true,
+                    fontSize: 15,
+                  ),
                 ],
               ),
             ),
@@ -493,17 +820,37 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
           // Compliance & Stamp
           Container(
             padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(border: Border.all(color: AppColors.border_subtle), borderRadius: BorderRadius.circular(8)),
+            decoration: BoxDecoration(
+              border: Border.all(color: AppColors.border_subtle),
+              borderRadius: BorderRadius.circular(8),
+            ),
             child: Row(
               children: [
-                const Icon(Icons.verified, color: AppColors.status_success, size: 24),
+                const Icon(
+                  Icons.verified,
+                  color: AppColors.status_success,
+                  size: 24,
+                ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: const [
-                      Text('Certified KRA eTIMS Validated Electronic Document', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.text_primary)),
-                      Text('Official electronic tax register verified by Trends Retail CORE OS', style: TextStyle(fontSize: 10, color: AppColors.text_tertiary)),
+                      Text(
+                        'Certified KRA eTIMS Validated Electronic Document',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.text_primary,
+                        ),
+                      ),
+                      Text(
+                        'Official electronic tax register verified by Trends Retail CORE OS',
+                        style: TextStyle(
+                          fontSize: 10,
+                          color: AppColors.text_tertiary,
+                        ),
+                      ),
                     ],
                   ),
                 ),

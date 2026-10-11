@@ -59,6 +59,8 @@ enum PaymentStatus {
 enum StockMovementType {
   PURCHASE
   SALE
+  STOREFRONT_RESERVATION
+  STOREFRONT_RELEASE
   RETURN_TO_SUPPLIER
   ADJUSTMENT_IN
   ADJUSTMENT_OUT
@@ -124,6 +126,25 @@ enum DeliveryStatus {
   CANCELLED
 }
 
+enum StorefrontOrderStatus {
+  AWAITING_PAYMENT
+  PAID
+  CANCELLED
+  EXPIRED
+}
+
+enum StorefrontPaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  UNKNOWN
+}
+
+enum StorefrontFulfillmentMethod {
+  DELIVERY
+  PICKUP
+}
+
 enum ExpenseStatus {
   DRAFT
   PENDING_APPROVAL
@@ -136,32 +157,36 @@ enum ExpenseStatus {
 // ---------------------------------------------------------------- users
 
 model User {
-  id           String   @id @default(uuid()) @db.Uuid
-  fullName     String
-  phone        String   @unique
+  id                            String    @id @default(uuid()) @db.Uuid
+  fullName                      String
+  phone                         String    @unique
   /// PIN for fast till login. Hashed with argon2. Rate-limited at the edge.
-  pinHash      String
+  pinHash                       String
   /// Bootstrap super-admins must replace the initial PIN before using the POS.
-  mustChangePin Boolean  @default(false)
-  isPlatformSuperAdmin Boolean @default(false)
-  role         UserRole @default(CASHIER)
-  active       Boolean  @default(true)
-  lastLoginAt  DateTime?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  mustChangePin                 Boolean   @default(false)
+  isPlatformSuperAdmin          Boolean   @default(false)
+  role                          UserRole  @default(CASHIER)
+  active                        Boolean   @default(true)
+  riderLocationConsentAt        DateTime?
+  riderLocationConsentRevokedAt DateTime?
+  lastLoginAt                   DateTime?
+  createdAt                     DateTime  @default(now())
+  updatedAt                     DateTime  @updatedAt
 
-  cashSessions      CashSession[]
-  sales             Sale[]
-  cashMovements     CashMovement[]
-  auditLogs         AuditLog[]
-  approvalsGiven    Approval[]        @relation("ApprovedBy")
-  approvalsRequested Approval[]       @relation("ApprovalRequestedBy")
-  expensesRequested Expense[]        @relation("RequestedBy")
-  stockMovements    StockMovement[]
-  riderDeliveries    DeliveryOrder[] @relation("RiderDeliveries")
-  deliveriesCreated  DeliveryOrder[] @relation("DeliveryCreatedBy")
-  riderLedgerEntries RiderLedger[]   @relation("RiderLedgerEntries")
-  riderPayouts       RiderPayout[]   @relation("RiderPayouts")
+  cashSessions           CashSession[]
+  sales                  Sale[]
+  reconciledSalePayments SalePayment[]   @relation("SalePaymentReconciledBy")
+  cashMovements          CashMovement[]
+  auditLogs              AuditLog[]
+  approvalsGiven         Approval[]      @relation("ApprovedBy")
+  approvalsRequested     Approval[]      @relation("ApprovalRequestedBy")
+  expensesRequested      Expense[]       @relation("RequestedBy")
+  stockMovements         StockMovement[]
+  riderDeliveries        DeliveryOrder[] @relation("RiderDeliveries")
+  deliveriesCreated      DeliveryOrder[] @relation("DeliveryCreatedBy")
+  riderLedgerEntries     RiderLedger[]   @relation("RiderLedgerEntries")
+  riderPayouts           RiderPayout[]   @relation("RiderPayouts")
+  riderLocations         RiderLocation[]
 
   @@map("users")
 }
@@ -189,36 +214,38 @@ model RolePermission {
 // ---------------------------------------------------------------- business
 
 model Business {
-  id       String @id @default(uuid()) @db.Uuid
-  name     String
-  slug     String @unique
-  logoUrl  String?
-  phone    String?
-  email    String?
-  address  String?
-  county   String?
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String
+  slug      String   @unique
+  logoUrl   String?
+  phone     String?
+  email     String?
+  address   String?
+  county    String?
   /// Kenyan VAT is 16%. Stored as a decimal rate, never a float.
-  vatRate  Decimal @default(0.16) @db.Decimal(5, 4)
-  currency String  @default("KES")
+  vatRate   Decimal  @default(0.16) @db.Decimal(5, 4)
+  currency  String   @default("KES")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  categories   Category[]
-  products     Product[]
-  customers    Customer[]
-  suppliers    Supplier[]
-  sales        Sale[]
-  purchases    Purchase[]
-  cashSessions CashSession[]
-  expenses     Expense[]
+  categories        Category[]
+  products          Product[]
+  customers         Customer[]
+  suppliers         Supplier[]
+  sales             Sale[]
+  purchases         Purchase[]
+  cashSessions      CashSession[]
+  expenses          Expense[]
   expenseCategories ExpenseCategory[]
-  cashMovements CashMovement[]
-  stockMovements  StockMovement[]
-  auditLogs        AuditLog[]
-  settings     BusinessSetting[]
-  deliveryOrders DeliveryOrder[]
-  riderLedger    RiderLedger[]
-  riderPayouts   RiderPayout[]
+  cashMovements     CashMovement[]
+  stockMovements    StockMovement[]
+  auditLogs         AuditLog[]
+  settings          BusinessSetting[]
+  deliveryOrders    DeliveryOrder[]
+  riderLedger       RiderLedger[]
+  riderPayouts      RiderPayout[]
+  riderLocations    RiderLocation[]
+  storefrontOrders  StorefrontOrder[]
 
   @@map("businesses")
 }
@@ -254,62 +281,86 @@ model Category {
 }
 
 model Product {
-  id         String   @id @default(uuid()) @db.Uuid
-  businessId String   @db.Uuid
-  categoryId String?  @db.Uuid
-  name       String
-  sku        String?
-  barcode    String?
+  id                String    @id @default(uuid()) @db.Uuid
+  businessId        String    @db.Uuid
+  categoryId        String?   @db.Uuid
+  name              String
+  description       String?   @db.Text
+  notes             String?   @db.Text
+  sku               String?
+  barcode           String?
+  groupId           String?
+  variantLabel      String?
   /// Denormalised for fast POS lookup; authoritative value is the
   /// product_cost below at the time of purchase.
-  costPrice  Decimal  @default(0) @db.Decimal(14, 2)
-  salePrice  Decimal  @db.Decimal(14, 2)
-  vatRate    Decimal  @default(0.16) @db.Decimal(5, 4)
-  unit       String   @default("pc")
-  stock      Decimal  @default(0) @db.Decimal(14, 3)
-  lowStockThreshold Decimal @default(5) @db.Decimal(14, 3)
-  active     Boolean  @default(true)
+  costPrice         Decimal   @default(0) @db.Decimal(14, 2)
+  salePrice         Decimal   @db.Decimal(14, 2)
+  vatRate           Decimal   @default(0.16) @db.Decimal(5, 4)
+  unit              String    @default("pc")
+  stock             Decimal   @default(0) @db.Decimal(14, 3)
+  lowStockThreshold Decimal   @default(5) @db.Decimal(14, 3)
+  active            Boolean   @default(true)
+  isPublished       Boolean   @default(false)
+  publishedAt       DateTime?
   /// Set when an offline sync drives stock negative. Must be resolved by a
   /// manager — we never silently clamp to zero.
-  varianceFlag Boolean @default(false)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  varianceFlag      Boolean   @default(false)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  business     Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
-  category     Category?       @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  stockMovements StockMovement[]
-  saleItems    SaleItem[]
-  purchaseItems PurchaseItem[]
-  refundItems  RefundItem[]
+  business             Business              @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  category             Category?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  stockMovements       StockMovement[]
+  saleItems            SaleItem[]
+  purchaseItems        PurchaseItem[]
+  refundItems          RefundItem[]
+  images               ProductImage[]
+  storefrontOrderItems StorefrontOrderItem[]
 
   @@unique([businessId, sku])
   @@unique([barcode])
   @@index([businessId, active])
+  @@index([businessId, isPublished, active])
   @@index([businessId, name])
   @@map("products")
+}
+
+model ProductImage {
+  id        String   @id @default(uuid()) @db.Uuid
+  productId String   @db.Uuid
+  imageData String   @db.Text
+  altText   String?
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, position])
+  @@index([productId])
+  @@map("product_images")
 }
 
 // ---------------------------------------------------------------- customers
 
 model Customer {
-  id          String   @id @default(uuid()) @db.Uuid
-  businessId  String   @db.Uuid
-  fullName    String
-  phone       String?
-  email       String?
-  address     String?
+  id           String   @id @default(uuid()) @db.Uuid
+  businessId   String   @db.Uuid
+  fullName     String
+  phone        String?
+  email        String?
+  address      String?
   /// KES. A customer may exceed this only if a manager approved it.
-  creditLimit Decimal  @default(0) @db.Decimal(14, 2)
+  creditLimit  Decimal  @default(0) @db.Decimal(14, 2)
   /// Denormalised running total. CustomerLedger is authoritative; this is
   /// a cache rebuilt from the ledger whenever the two disagree.
-  balance     Decimal  @default(0) @db.Decimal(14, 2)
-  creditFrozen Boolean @default(false)
-  status      String   @default("ACTIVE")
-  notes       String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  balance      Decimal  @default(0) @db.Decimal(14, 2)
+  creditFrozen Boolean  @default(false)
+  status       String   @default("ACTIVE")
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
-  business Business        @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business  Business           @relation(fields: [businessId], references: [id], onDelete: Cascade)
   sales     Sale[]
   ledger    CustomerLedger[]
   payments  CustomerPayment[]
@@ -393,7 +444,7 @@ model Supplier {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
-  business  Business      @relation(fields: [businessId], references: [id], onDelete: Cascade)
+  business  Business   @relation(fields: [businessId], references: [id], onDelete: Cascade)
   purchases Purchase[]
 
   @@index([businessId, active])
@@ -403,19 +454,19 @@ model Supplier {
 // ---------------------------------------------------------------- sales
 
 model Sale {
-  id            String     @id @default(uuid()) @db.Uuid
-  businessId    String     @db.Uuid
-  receiptNumber String     @unique
-  cashierId     String     @db.Uuid
-  customerId    String?    @db.Uuid
-  cashSessionId String?    @db.Uuid
+  id            String  @id @default(uuid()) @db.Uuid
+  businessId    String  @db.Uuid
+  receiptNumber String  @unique
+  cashierId     String? @db.Uuid
+  customerId    String? @db.Uuid
+  cashSessionId String? @db.Uuid
 
   /// Client-generated ULID for offline sales. Unique, so a retried sync can
   /// never create a second sale.
-  clientRef     String     @unique
-  idempotencyKey String    @unique
+  clientRef      String @unique
+  idempotencyKey String @unique
 
-  status   SaleStatus @default(DRAFT)
+  status SaleStatus @default(DRAFT)
 
   subtotal  Decimal @db.Decimal(14, 2)
   discount  Decimal @default(0) @db.Decimal(14, 2)
@@ -425,22 +476,24 @@ model Sale {
   costTotal Decimal @default(0) @db.Decimal(14, 2)
 
   /// True when the till had no connectivity. M-Pesa is unavailable offline.
-  offline  Boolean   @default(false)
-  syncedAt DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  voidedAt DateTime?
+  offline    Boolean   @default(false)
+  syncedAt   DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  voidedAt   DateTime?
   voidReason String?
 
-  business    Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  cashier     User          @relation(fields: [cashierId], references: [id], onDelete: Restrict)
-  customer    Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  cashSession CashSession?  @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
-  items SaleItem[]
-  payments SalePayment[]
-  refunds  Refund[]
-  stockMovements StockMovement[] @relation("SaleStockMovements")
-  deliveryOrders DeliveryOrder[]
+  business          Business           @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  cashier           User?              @relation(fields: [cashierId], references: [id], onDelete: Restrict)
+  customer          Customer?          @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  cashSession       CashSession?       @relation(fields: [cashSessionId], references: [id], onDelete: SetNull)
+  items             SaleItem[]
+  payments          SalePayment[]
+  refunds           Refund[]
+  stockMovements    StockMovement[]    @relation("SaleStockMovements")
+  deliveryOrders    DeliveryOrder[]
+  storefrontOrder   StorefrontOrder?
+  storefrontPayment StorefrontPayment?
 
   @@index([businessId, createdAt])
   @@index([cashierId, createdAt])
@@ -473,27 +526,34 @@ model SaleItem {
 /// A payment against a sale. One sale may be settled by several methods
 /// (part cash, part M-Pesa) — routine in Kenya.
 model SalePayment {
-  id        String        @id @default(uuid()) @db.Uuid
-  saleId    String        @db.Uuid
-  method    PaymentMethod
-  status    PaymentStatus @default(PENDING)
-  amount    Decimal       @db.Decimal(14, 2)
+  id           String        @id @default(uuid()) @db.Uuid
+  saleId       String        @db.Uuid
+  method       PaymentMethod
+  status       PaymentStatus @default(PENDING)
+  amount       Decimal       @db.Decimal(14, 2)
+  cashTendered Decimal?      @db.Decimal(14, 2)
+  changeDue    Decimal?      @db.Decimal(14, 2)
 
-  mpesaReceipt      String? @unique
+  mpesaReceipt      String?   @unique
   checkoutRequestId String?
-  idempotencyKey    String  @unique
+  idempotencyKey    String    @unique
   resultCode        String?
   resultDesc        String?
+  reference         String?
   settledAt         DateTime?
+  reconciledById    String?   @db.Uuid
+  reconciledAt      DateTime?
   /// Set when a late settlement forced a correcting entry.
-  reversalOfId      String? @db.Uuid
-  createdAt DateTime     @default(now())
-  updatedAt DateTime     @updatedAt
+  reversalOfId      String?   @db.Uuid
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
-  sale Sale @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  sale         Sale  @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  reconciledBy User? @relation("SalePaymentReconciledBy", fields: [reconciledById], references: [id], onDelete: Restrict)
 
   @@index([saleId])
   @@index([status])
+  @@index([reconciledById])
   @@map("sale_payments")
 }
 
@@ -507,8 +567,8 @@ model Refund {
   approvedById String?       @db.Uuid
   createdAt    DateTime      @default(now())
 
-  sale  Sale        @relation(fields: [saleId], references: [id], onDelete: Restrict)
-  items RefundItem[]
+  sale           Sale            @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  items          RefundItem[]
   stockMovements StockMovement[] @relation("RefundStockMovements")
 
   @@index([saleId])
@@ -535,31 +595,31 @@ model RefundItem {
 /// APPEND-ONLY. Every stock change in the system produces exactly one row
 /// here. `products.stock` is a cache of SUM(quantity); the ledger is truth.
 model StockMovement {
-  id          String            @id @default(uuid()) @db.Uuid
-  businessId  String            @db.Uuid
-  productId   String            @db.Uuid
-  type        StockMovementType
+  id           String            @id @default(uuid()) @db.Uuid
+  businessId   String            @db.Uuid
+  productId    String            @db.Uuid
+  type         StockMovementType
   /// Signed: positive adds stock, negative removes it.
-  quantity    Decimal           @db.Decimal(14, 3)
+  quantity     Decimal           @db.Decimal(14, 3)
   /// Stock level after this movement.
-  balanceAfter Decimal          @db.Decimal(14, 3)
-  unitCost    Decimal           @default(0) @db.Decimal(14, 2)
-  reference   String?
-  note        String?
+  balanceAfter Decimal           @db.Decimal(14, 3)
+  unitCost     Decimal           @default(0) @db.Decimal(14, 2)
+  reference    String?
+  note         String?
   /// Mandatory for ADJUSTMENT_* — an unexplained adjustment is not allowed.
-  reason      String?
-  saleId      String?           @db.Uuid
-  purchaseId  String?           @db.Uuid
-  refundId    String?           @db.Uuid
-  createdById String?           @db.Uuid
-  createdAt   DateTime          @default(now())
+  reason       String?
+  saleId       String?           @db.Uuid
+  purchaseId   String?           @db.Uuid
+  refundId     String?           @db.Uuid
+  createdById  String?           @db.Uuid
+  createdAt    DateTime          @default(now())
 
-  product  Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  sale     Sale?   @relation("SaleStockMovements", fields: [saleId], references: [id], onDelete: SetNull)
-  purchase Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
-  refund   Refund?   @relation("RefundStockMovements", fields: [refundId], references: [id], onDelete: SetNull)
+  product   Product   @relation(fields: [productId], references: [id], onDelete: Restrict)
+  business  Business  @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  createdBy User?     @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  sale      Sale?     @relation("SaleStockMovements", fields: [saleId], references: [id], onDelete: SetNull)
+  purchase  Purchase? @relation(fields: [purchaseId], references: [id], onDelete: SetNull)
+  refund    Refund?   @relation("RefundStockMovements", fields: [refundId], references: [id], onDelete: SetNull)
 
   @@index([productId, createdAt])
   @@index([businessId, type])
@@ -569,24 +629,24 @@ model StockMovement {
 // ---------------------------------------------------------------- purchasing
 
 model Purchase {
-  id         String   @id @default(uuid()) @db.Uuid
-  businessId String   @db.Uuid
-  supplierId String?  @db.Uuid
-  reference  String?
+  id            String   @id @default(uuid()) @db.Uuid
+  businessId    String   @db.Uuid
+  supplierId    String?  @db.Uuid
+  reference     String?
   invoiceNumber String?
-  status     String   @default("COMPLETED")
-  subtotal   Decimal  @db.Decimal(14, 2)
-  vatAmount  Decimal  @default(0) @db.Decimal(14, 2)
-  total      Decimal  @db.Decimal(14, 2)
-  paid       Decimal  @default(0) @db.Decimal(14, 2)
+  status        String   @default("COMPLETED")
+  subtotal      Decimal  @db.Decimal(14, 2)
+  vatAmount     Decimal  @default(0) @db.Decimal(14, 2)
+  total         Decimal  @db.Decimal(14, 2)
+  paid          Decimal  @default(0) @db.Decimal(14, 2)
   /// total - paid; what the shop owes this supplier.
-  balance    Decimal  @default(0) @db.Decimal(14, 2)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  balance       Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  business Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  supplier Supplier?      @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-  items    PurchaseItem[]
+  business  Business        @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  supplier  Supplier?       @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  items     PurchaseItem[]
   movements StockMovement[]
 
   @@index([businessId, createdAt])
@@ -630,17 +690,17 @@ model CashSession {
   otherOut     Decimal @default(0) @db.Decimal(14, 2)
 
   /// openingCash + cashSales + debtPayments + otherIn - refunds - expenses - drops
-  expectedCash Decimal? @db.Decimal(14, 2)
+  expectedCash   Decimal? @db.Decimal(14, 2)
   /// Physically counted at close.
-  countedCash  Decimal? @db.Decimal(14, 2)
+  countedCash    Decimal? @db.Decimal(14, 2)
   /// countedCash - expectedCash. Non-zero requires manager review.
-  variance     Decimal? @db.Decimal(14, 2)
+  variance       Decimal? @db.Decimal(14, 2)
   varianceReason String?
-  reconciledById String? @db.Uuid
+  reconciledById String?  @db.Uuid
 
-  business Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  cashier  User          @relation(fields: [cashierId], references: [id], onDelete: Restrict)
-  sales    Sale[]
+  business  Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  cashier   User?          @relation(fields: [cashierId], references: [id], onDelete: SetNull)
+  sales     Sale[]
   movements CashMovement[]
 
   @@index([businessId, status])
@@ -651,17 +711,17 @@ model CashSession {
 /// APPEND-ONLY record of cash in and out of a session, so the expected
 /// figure can be rebuilt from movements rather than trusted.
 model CashMovement {
-  id             String            @id @default(uuid()) @db.Uuid
-  businessId     String            @db.Uuid
-  cashSessionId  String            @db.Uuid
-  type           CashMovementType
-  direction      LedgerDirection
-  amount         Decimal           @db.Decimal(14, 2)
-  reason         String
-  reference      String?
-  expenseId      String?           @db.Uuid
-  createdById    String            @db.Uuid
-  createdAt      DateTime          @default(now())
+  id            String           @id @default(uuid()) @db.Uuid
+  businessId    String           @db.Uuid
+  cashSessionId String           @db.Uuid
+  type          CashMovementType
+  direction     LedgerDirection
+  amount        Decimal          @db.Decimal(14, 2)
+  reason        String
+  reference     String?
+  expenseId     String?          @db.Uuid
+  createdById   String           @db.Uuid
+  createdAt     DateTime         @default(now())
 
   cashSession CashSession @relation(fields: [cashSessionId], references: [id], onDelete: Restrict)
   business    Business    @relation(fields: [businessId], references: [id], onDelete: Restrict)
@@ -674,12 +734,12 @@ model CashMovement {
 // ---------------------------------------------------------------- expenses
 
 model ExpenseCategory {
-  id         String  @id @default(uuid()) @db.Uuid
-  businessId String  @db.Uuid
-  name       String
+  id                String   @id @default(uuid()) @db.Uuid
+  businessId        String   @db.Uuid
+  name              String
   /// Expenses above this need manager approval.
-  approvalThreshold Decimal @default(0) @db.Decimal(14, 2)
-  createdAt  DateTime @default(now())
+  approvalThreshold Decimal  @default(0) @db.Decimal(14, 2)
+  createdAt         DateTime @default(now())
 
   business Business  @relation(fields: [businessId], references: [id], onDelete: Cascade)
   expenses Expense[]
@@ -689,26 +749,26 @@ model ExpenseCategory {
 }
 
 model Expense {
-  id         String        @id @default(uuid()) @db.Uuid
-  businessId String        @db.Uuid
-  categoryId String?       @db.Uuid
-  amount     Decimal       @db.Decimal(14, 2)
-  method     PaymentMethod
-  status     ExpenseStatus @default(DRAFT)
-  note       String?
-  reference  String?
-  expenseDate DateTime     @default(now())
-  requestedById String     @db.Uuid
-  approvedById  String?    @db.Uuid
-  approvedAt    DateTime?
+  id             String        @id @default(uuid()) @db.Uuid
+  businessId     String        @db.Uuid
+  categoryId     String?       @db.Uuid
+  amount         Decimal       @db.Decimal(14, 2)
+  method         PaymentMethod
+  status         ExpenseStatus @default(DRAFT)
+  note           String?
+  reference      String?
+  expenseDate    DateTime      @default(now())
+  requestedById  String        @db.Uuid
+  approvedById   String?       @db.Uuid
+  approvedAt     DateTime?
   rejectedReason String?
-  cashSessionId String?    @db.Uuid
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
+  cashSessionId  String?       @db.Uuid
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
 
-  business   Business         @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  category   ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  requestedBy User            @relation("RequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  business    Business         @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  category    ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  requestedBy User             @relation("RequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
 
   @@index([businessId, expenseDate])
   @@index([status])
@@ -718,19 +778,19 @@ model Expense {
 /// Generic approval workflow for anything needing sign-off: large expenses,
 /// credit-limit overrides, stock adjustments, cash variances.
 model Approval {
-  id         String         @id @default(uuid()) @db.Uuid
-  entityType EntityType
-  entityId   String         @db.Uuid
-  amount     Decimal?       @db.Decimal(14, 2)
-  reason     String
-  status     ApprovalStatus @default(PENDING)
-  requestedById String      @db.Uuid
-  approvedById  String?     @db.Uuid
-  decidedAt  DateTime?
-  decisionNote String?
-  createdAt  DateTime       @default(now())
+  id            String         @id @default(uuid()) @db.Uuid
+  entityType    EntityType
+  entityId      String         @db.Uuid
+  amount        Decimal?       @db.Decimal(14, 2)
+  reason        String
+  status        ApprovalStatus @default(PENDING)
+  requestedById String         @db.Uuid
+  approvedById  String?        @db.Uuid
+  decidedAt     DateTime?
+  decisionNote  String?
+  createdAt     DateTime       @default(now())
 
-  requestedBy User @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
+  requestedBy User  @relation("ApprovalRequestedBy", fields: [requestedById], references: [id], onDelete: Restrict)
   approvedBy  User? @relation("ApprovedBy", fields: [approvedById], references: [id], onDelete: SetNull)
 
   @@index([status, createdAt])
@@ -757,7 +817,7 @@ model AuditLog {
   deviceId   String?
   createdAt  DateTime @default(now())
 
-  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
   business Business @relation(fields: [businessId], references: [id], onDelete: Cascade)
 
   @@index([businessId, createdAt])
@@ -802,15 +862,134 @@ model DeliveryOrder {
   createdAt       DateTime       @default(now())
   updatedAt       DateTime       @updatedAt
 
-  business  Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
-  sale      Sale?    @relation(fields: [saleId], references: [id], onDelete: SetNull)
-  rider     User?    @relation("RiderDeliveries", fields: [riderId], references: [id], onDelete: SetNull)
-  createdBy User     @relation("DeliveryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  business  Business       @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  sale      Sale?          @relation(fields: [saleId], references: [id], onDelete: SetNull)
+  rider     User?          @relation("RiderDeliveries", fields: [riderId], references: [id], onDelete: SetNull)
+  createdBy User           @relation("DeliveryCreatedBy", fields: [createdById], references: [id], onDelete: Restrict)
+  location  RiderLocation?
 
   @@index([businessId, createdAt])
   @@index([riderId, status])
   @@index([saleId])
   @@map("delivery_orders")
+}
+
+model StorefrontOrder {
+  id                    String                      @id @default(uuid()) @db.Uuid
+  businessId            String                      @db.Uuid
+  orderNumber           String                      @unique
+  idempotencyKeyHash    String                      @unique @db.VarChar(64)
+  requestHash           String                      @db.VarChar(64)
+  customerName          String
+  customerPhone         String
+  customerEmail         String?
+  fulfillmentMethod     StorefrontFulfillmentMethod
+  deliveryAddress       String?
+  subtotal              Decimal                     @db.Decimal(14, 2)
+  deliveryFee           Decimal?                    @db.Decimal(14, 2)
+  deliveryFeeQuotedAt   DateTime?
+  deliveryFeeAcceptedAt DateTime?
+  total                 Decimal                     @db.Decimal(14, 2)
+  status                StorefrontOrderStatus       @default(AWAITING_PAYMENT)
+  expiresAt             DateTime
+  saleId                String?                     @unique @db.Uuid
+  createdAt             DateTime                    @default(now())
+  updatedAt             DateTime                    @updatedAt
+
+  business     Business               @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  items        StorefrontOrderItem[]
+  statusEvents StorefrontOrderEvent[]
+  payments     StorefrontPayment[]
+  sale         Sale?                  @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  @@index([businessId, createdAt])
+  @@index([businessId, status, expiresAt])
+  @@map("storefront_orders")
+}
+
+model StorefrontOrderItem {
+  id           String  @id @default(uuid()) @db.Uuid
+  orderId      String  @db.Uuid
+  productId    String  @db.Uuid
+  productName  String
+  variantLabel String?
+  quantity     Decimal @db.Decimal(14, 3)
+  unitPrice    Decimal @db.Decimal(14, 2)
+  unitCost     Decimal @db.Decimal(14, 2)
+  vatRate      Decimal @default(0.16) @db.Decimal(5, 4)
+  lineTotal    Decimal @db.Decimal(14, 2)
+
+  order   StorefrontOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([productId])
+  @@map("storefront_order_items")
+}
+
+model StorefrontPayment {
+  id                        String                  @id @default(uuid()) @db.Uuid
+  orderId                   String                  @db.Uuid
+  idempotencyKeyHash        String                  @unique @db.VarChar(64)
+  requestHash               String                  @db.VarChar(64)
+  status                    StorefrontPaymentStatus @default(PENDING)
+  amount                    Decimal                 @db.Decimal(14, 2)
+  phoneNumber               String
+  checkoutRequestId         String?                 @unique
+  merchantRequestId         String?
+  mpesaReceipt              String?                 @unique
+  callbackReceiptNumber     String?
+  resultCode                String?
+  resultDescription         String?
+  callbackAmount            Decimal?                @db.Decimal(14, 2)
+  callbackPhoneNumber       String?
+  callbackMerchantRequestId String?
+  callbackReceivedAt        DateTime?
+  verifiedAt                DateTime?
+  saleId                    String?                 @unique @db.Uuid
+  createdAt                 DateTime                @default(now())
+  updatedAt                 DateTime                @updatedAt
+
+  order StorefrontOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  sale  Sale?           @relation(fields: [saleId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+  @@index([status, updatedAt])
+  @@map("storefront_payments")
+}
+
+model StorefrontOrderEvent {
+  id         String                 @id @default(uuid()) @db.Uuid
+  orderId    String                 @db.Uuid
+  fromStatus StorefrontOrderStatus?
+  toStatus   StorefrontOrderStatus
+  detail     String
+  createdAt  DateTime               @default(now())
+
+  order StorefrontOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderId, createdAt])
+  @@map("storefront_order_events")
+}
+
+model RiderLocation {
+  id              String   @id @default(uuid()) @db.Uuid
+  businessId      String   @db.Uuid
+  deliveryOrderId String   @unique @db.Uuid
+  riderId         String   @db.Uuid
+  latitude        Decimal  @db.Decimal(9, 6)
+  longitude       Decimal  @db.Decimal(9, 6)
+  accuracy        Decimal  @db.Decimal(8, 2)
+  recordedAt      DateTime
+  updatedAt       DateTime @updatedAt
+
+  business      Business      @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  deliveryOrder DeliveryOrder @relation(fields: [deliveryOrderId], references: [id], onDelete: Cascade)
+  rider         User          @relation(fields: [riderId], references: [id], onDelete: Cascade)
+
+  @@index([businessId, recordedAt])
+  @@index([riderId, recordedAt])
+  @@map("rider_locations")
 }
 
 /// APPEND-ONLY. Corrections are always new entries, never UPDATE or DELETE.
@@ -830,8 +1009,8 @@ model RiderLedger {
   createdAt   DateTime        @default(now())
   createdById String?         @db.Uuid
 
-  rider    User     @relation("RiderLedgerEntries", fields: [riderId], references: [id], onDelete: Restrict)
-  business Business @relation(fields: [businessId], references: [id], onDelete: Restrict)
+  rider    User         @relation("RiderLedgerEntries", fields: [riderId], references: [id], onDelete: Restrict)
+  business Business     @relation(fields: [businessId], references: [id], onDelete: Restrict)
   /// Back-relation required by Prisma — no column, navigation only.
   /// The ledger never holds a FK to payouts; the payout holds the FK to the ledger.
   payout   RiderPayout?
