@@ -161,7 +161,6 @@ class _SettingsViewState extends State<SettingsView> {
     final assignableRoles = PosUserRole.values.where((r) {
       if (r == PosUserRole.superAdmin)
         return currentRole == PosUserRole.superAdmin;
-      if (r == PosUserRole.rider) return false; // riders are system accounts
       return true;
     }).toList();
 
