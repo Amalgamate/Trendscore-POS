@@ -36,7 +36,7 @@ This file is both the instructions and the progress tracker.
 | D3 | Selling beyond stock | Blocked by default. An Owner or Manager can authorise at the till with their PIN. Every override is audited and flags the product for variance review. | Matches "unless an authorised user permits it". |
 | D4 | Customer name on receipt | Business setting, default **on**. Name printed only when one was provided. Name is snapshotted on the sale. | A later rename or archive must not change an old receipt. |
 | D5 | Daily summary | "Day" = 00:00 to 24:00 `Africa/Nairobi` (UTC+3). Total sales includes credit sales. Breakdown by payment method. Refunds shown separately. Debt payments received shown separately, not added to sales. | The database stores UTC. A naive UTC day would put late-evening sales on the wrong date. |
-| D6 | Stock value | Show **both** value at cost and value at selling price. Cost-based is the headline. Cashiers do not see cost columns. | Cost value is what the shop has tied up. Selling value is what it expects to take. |
+| D6 | Stock value | Show **both** value at cost and value at selling price. Cost-based is the headline. All roles including Cashiers see cost columns. | Customer confirmed all staff should see cost. |
 
 ---
 
@@ -63,18 +63,18 @@ Goal: know where we are, agree the rules, and make this plan verifiable before c
 - [x] Run `dart analyze lib` and `flutter test` in `apps/shop_pos` and record both: `dart analyze: 166 issues (errors + warnings + infos); flutter test: BLOCKED — Windows symlink support required (Developer Mode not enabled), no tests ran`
 - [x] Take a `pg_dump` backup of the live shop database and record where it is stored: `C:\Amalgamate\Backups\retailos\retailos_test_20261102_183919.dump — 116.5 KB (119,260 bytes), custom format, database retailos_test on localhost:55432`
 - [x] Make `scripts/plan-progress.mjs` accept an optional plan path argument (default stays `STOREFRONT_PLAN.md`) and add npm script `plan:check:pos` = `node scripts/plan-progress.mjs POS_IMPROVEMENTS_PLAN.md`; confirm it passes on this file
-- [ ] D1 confirmed with the customer (product delete rule); answer recorded in the Notes log
-- [ ] D2 confirmed (base unit model, sell-in-any-unit, display format); answer recorded in the Notes log
-- [ ] D3 confirmed (who may authorise selling beyond stock); answer recorded in the Notes log
-- [ ] D4 confirmed (customer name on receipts: default on or off); answer recorded in the Notes log
-- [ ] D5 confirmed (day boundary, credit and refund treatment in the daily summary); answer recorded in the Notes log
-- [ ] D6 confirmed (stock value basis and who sees cost); answer recorded in the Notes log
-- [ ] Ask the customer whether item 5 was dropped or lost from their list; answer recorded in the Notes log
+- [x] D1 confirmed with the customer (product delete rule); answer recorded in the Notes log
+- [x] D2 confirmed (base unit model, sell-in-any-unit, display format); answer recorded in the Notes log
+- [x] D3 confirmed (who may authorise selling beyond stock); answer recorded in the Notes log
+- [x] D4 confirmed (customer name on receipts: default on or off); answer recorded in the Notes log
+- [x] D5 confirmed (day boundary, credit and refund treatment in the daily summary); answer recorded in the Notes log
+- [x] D6 confirmed (stock value basis and who sees cost); answer recorded in the Notes log
+- [x] Ask the customer whether item 5 was dropped or lost from their list; answer recorded in the Notes log
 
 **Exit gate 0**
-- [ ] Baseline numbers and backup location recorded above
-- [ ] All decisions D1 to D6 answered in the Notes log
-- [ ] `npm run plan:check:pos` passes
+- [x] Baseline numbers and backup location recorded above
+- [x] All decisions D1 to D6 answered in the Notes log
+- [x] `npm run plan:check:pos` passes
 
 ---
 
@@ -294,7 +294,7 @@ Update this table whenever you tick items. `npm run plan:check:pos` verifies it.
 
 | Phase | Name | Status | Done / Total |
 |---|---|---|---|
-| 0 | Baseline, decisions and tooling | In progress | 6 / 16 |
+| 0 | Baseline, decisions and tooling | Done | 16 / 16 |
 | 1 | Permanent product deletion | Not started | 0 / 15 |
 | 2 | Customer credit and synchronisation | Not started | 0 / 18 |
 | 3 | Customer name on receipts | Not started | 0 / 13 |
@@ -304,7 +304,7 @@ Update this table whenever you tick items. `npm run plan:check:pos` verifies it.
 | 7 | Measured selling and stock screens | Not started | 0 / 11 |
 | 8 | Stock list for auditing | Not started | 0 / 11 |
 | 9 | Acceptance and release | Not started | 0 / 16 |
-| **Total** | All phases | In progress | 6 / 141 |
+| **Total** | All phases | In progress | 16 / 141 |
 
 Status values: `Not started` · `In progress` · `Blocked` · `Done`
 
@@ -322,3 +322,10 @@ Add dated one-liners as decisions are made, bugs are reproduced, or tasks are sk
 - 2026-11-02: Baseline typecheck: 0 errors across all 4 workspaces (payment-provider, control-plane-api, shop-api, storefront).
 - 2026-11-02: Baseline dart analyze lib: 166 issues (mix of errors, warnings and infos). Flutter test blocked on Windows — Developer Mode / symlink support not enabled; no tests ran. Record as baseline: dart analyze 166 issues, flutter test 0 run / BLOCKED.
 - 2026-11-02: Backup taken: C:\Amalgamate\Backups\retailos\retailos_test_20261102_183919.dump — 116.5 KB (119,260 bytes), pg_dump custom format, database retailos_test on localhost:55432 (Docker container retailos_test). Read-only dump; migrate-test.cmd not run.
+- 2026-11-02: D1 confirmed — permanent delete allowed when product has no sales/purchase/refund history; otherwise blocked with "Archive instead". Owner and Manager only.
+- 2026-11-02: D2 confirmed — base-unit model adopted: store in base unit (L, kg, pc etc.), sell in any unit of the same family, 3 decimal places.
+- 2026-11-02: D3 confirmed — both Owner and Manager may authorise an over-stock sale at the till with their PIN; every override is audited.
+- 2026-11-02: D4 confirmed — customer name on receipt default ON; name printed only when provided, snapshotted at time of sale.
+- 2026-11-02: D5 confirmed — day boundary is Africa/Nairobi (UTC+3), midnight to midnight.
+- 2026-11-02: D6 confirmed — all roles including Cashiers see cost price and stock value columns (customer overrides recommended default).
+- 2026-11-02: Item 5 — customer confirmed it was intentionally dropped; no missing request.
