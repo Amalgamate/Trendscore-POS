@@ -983,6 +983,63 @@ class ApiService {
     }
   }
 
+  /// Permanently delete a product. Pass discardStock:true when stock > 0.
+  /// Returns a record with ok, errorCode (e.g. 'PRODUCT_HAS_HISTORY' or
+  /// 'NON_ZERO_STOCK'), and details map from the API error body.
+  Future<({bool ok, String? errorCode, Map<String, dynamic>? details})>
+      deleteProduct(String productId, {bool discardStock = false}) async {
+    lastError = null;
+    try {
+      final res = await http
+          .delete(
+            Uri.parse('$baseUrl/products/$productId'),
+            headers: _headers,
+            body: discardStock ? jsonEncode({'discardStock': true}) : null,
+          )
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) return (ok: true, errorCode: null, details: null);
+      final decoded = _tryDecodeBody(res.body);
+      final error = decoded?['error'] as Map<String, dynamic>?;
+      final code = error?['code'] as String?;
+      final det = error?['details'] as Map<String, dynamic>?;
+      lastError = error?['message'] as String? ?? 'Could not delete product.';
+      return (ok: false, errorCode: code, details: det);
+    } catch (e) {
+      lastError = 'Could not delete the product on the shop API.';
+      debugPrint('API deleteProduct error: $e');
+      return (ok: false, errorCode: null, details: null);
+    }
+  }
+
+  /// Archive a product (sets active=false; preserves history).
+  Future<bool> archiveProduct(String productId) async {
+    lastError = null;
+    try {
+      final res = await http
+          .post(
+            Uri.parse('$baseUrl/products/$productId/archive'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 10));
+      if (res.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Archive failed (${res.statusCode}).';
+    } catch (e) {
+      lastError = 'Could not archive the product on the shop API.';
+      debugPrint('API archiveProduct error: $e');
+    }
+    return false;
+  }
+
+  Map<String, dynamic>? _tryDecodeBody(String body) {
+    try {
+      return jsonDecode(body) as Map<String, dynamic>?;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<bool> setProductActive(String productId, bool active) async {
     lastError = null;
     try {

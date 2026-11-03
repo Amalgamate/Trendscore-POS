@@ -410,26 +410,107 @@ export function productsRouter(businessId: string): Router {
     }
   });
 
-  // DELETE /products/:id — deactivate, preserving references from receipts,
-  // stock movements, and historical reports.
-  router.delete('/:id', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
+  // DELETE /products/:id — permanently purge a product with no transaction history.
+  // Requires discardStock:true if the product has stock on hand.
+  const DeleteProductSchema = z.object({ discardStock: z.boolean().optional() });
+
+  router.delete('/:id', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
+    // Parse optional body — a plain DELETE with no body is valid (discardStock defaults to false).
+    const bodyResult = DeleteProductSchema.safeParse(
+      req.body && Object.keys(req.body).length > 0 ? req.body : {},
+    );
+    if (!bodyResult.success) {
+      return sendError(res, 422, 'VALIDATION_ERROR', 'Request body is invalid.');
+    }
+    const body = bodyResult.data;
+    const id = req.params.id;
+    const auth = res.locals.auth as { userId: string; role: string };
+
+    try {
+      // (b) Scope by businessId; 404 if not found.
+      const existing = await prisma.product.findFirst({
+        where: { id, businessId },
+        select: { id: true, name: true, sku: true, barcode: true, salePrice: true, costPrice: true, stock: true, active: true },
+      });
+      if (!existing) return sendError(res, 404, 'NOT_FOUND', 'Product not found.');
+
+      // (c) History check — run three counts in parallel.
+      const [saleItems, purchaseItems, refundItems] = await Promise.all([
+        prisma.saleItem.count({ where: { productId: id } }),
+        prisma.purchaseItem.count({ where: { productId: id } }),
+        prisma.refundItem.count({ where: { productId: id } }),
+      ]);
+      if (saleItems > 0 || purchaseItems > 0 || refundItems > 0) {
+        return sendError(
+          res, 409, 'PRODUCT_HAS_HISTORY',
+          'Product has transaction history and cannot be permanently deleted. Archive it instead.',
+          { counts: { saleItems, purchaseItems, refundItems } },
+        );
+      }
+
+      // (d) Stock guard — use Decimal-safe comparison.
+      const stockNum = Number(existing.stock);
+      if (stockNum > 0 && body.discardStock !== true) {
+        return sendError(
+          res, 422, 'NON_ZERO_STOCK',
+          'Product has stock on hand. Set discardStock:true to discard it and proceed.',
+          { stock: stockNum },
+        );
+      }
+
+      // (e) Purge transaction.
+      await prisma.$transaction(async (tx) => {
+        // Lock the row first.
+        await tx.$queryRaw(Prisma.sql`SELECT id FROM products WHERE id = ${id}::uuid FOR UPDATE`);
+        // SET LOCAL scopes the purge permission to this transaction only.
+        await tx.$queryRaw(Prisma.sql`SET LOCAL "app.purge_product_id" = ${id}`);
+        // Delete stock movements (trigger now allows this for this transaction).
+        await tx.stockMovement.deleteMany({ where: { productId: id } });
+        // Hard-delete the product (cascades product_images via onDelete: Cascade).
+        await tx.product.delete({ where: { id } });
+        // Audit log.
+        await tx.auditLog.create({
+          data: {
+            businessId,
+            userId: auth.userId,
+            action: 'PRODUCT_PURGE',
+            entityType: 'PRODUCT',
+            entityId: id,
+            beforeJson: {
+              name: existing.name,
+              sku: existing.sku,
+              barcode: existing.barcode,
+              salePrice: existing.salePrice.toString(),
+              costPrice: existing.costPrice.toString(),
+              stock: existing.stock.toString(),
+              discardedQty: stockNum > 0 ? existing.stock.toString() : '0',
+            },
+          },
+        });
+      });
+
+      return send200(res, { id, deleted: true });
+    } catch (err) {
+      console.error('products/purge error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to delete product.');
+    }
+  });
+
+  // POST /products/:id/archive — set active=false (preserves all history).
+  router.post('/:id/archive', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
     try {
       const existing = await prisma.product.findFirst({
         where: { id: req.params.id, businessId },
         select: { id: true, active: true },
       });
       if (!existing) return sendError(res, 404, 'NOT_FOUND', 'Product not found.');
+      // Idempotent: already inactive is fine.
       if (!existing.active) return send200(res, { id: existing.id, active: false });
-
-      const product = await prisma.product.update({
-        where: { id: existing.id },
-        data: { active: false },
-        select: { id: true, active: true },
-      });
-      return send200(res, product);
+      await prisma.product.update({ where: { id: existing.id }, data: { active: false } });
+      return send200(res, { id: existing.id, active: false });
     } catch (err) {
-      console.error('products/deactivate error:', err);
-      return sendError(res, 500, 'SERVER_ERROR', 'Failed to deactivate product.');
+      console.error('products/archive error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to archive product.');
     }
   });
 

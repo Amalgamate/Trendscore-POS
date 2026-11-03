@@ -16,6 +16,24 @@ class PosException implements Exception {
   String toString() => message;
 }
 
+/// Thrown when a permanent delete is blocked because the product has history.
+class ProductHasHistoryException implements Exception {
+  ProductHasHistoryException({required this.counts});
+  // {'saleItems': N, 'purchaseItems': N, 'refundItems': N}
+  final Map<String, dynamic> counts;
+  @override
+  String toString() => 'Product has transaction history and cannot be deleted.';
+}
+
+/// Thrown when a permanent delete is blocked because stock is non-zero
+/// and discardStock was not confirmed.
+class ProductHasStockException implements Exception {
+  ProductHasStockException({required this.stock});
+  final int stock;
+  @override
+  String toString() => 'Product has $stock unit(s) in stock. Confirm discard to proceed.';
+}
+
 /// Icons a shop owner can pick for a category.
 const Map<String, IconData> kCategoryIcons = {
   'box': AppIcons.inventory,
@@ -1079,10 +1097,66 @@ class PosState extends ChangeNotifier {
     }
   }
 
-  Future<void> deleteProduct(String productId) async {
-    // Keep the older delete entry point safe too: product history is retained
-    // by the API, and local-only products are hidden rather than erased.
-    await deactivateProduct(productId);
+  Future<void> deleteProduct(String productId, {bool discardStock = false}) async {
+    final isApiProduct = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+    ).hasMatch(productId);
+    if (isApiProduct) {
+      if (!ApiService.instance.hasToken) {
+        throw PosException('Sign in before deleting a product.');
+      }
+      final result = await ApiService.instance.deleteProduct(
+        productId,
+        discardStock: discardStock,
+      );
+      if (!result.ok) {
+        if (result.errorCode == 'PRODUCT_HAS_HISTORY') {
+          throw ProductHasHistoryException(counts: result.details ?? {});
+        }
+        if (result.errorCode == 'NON_ZERO_STOCK') {
+          throw ProductHasStockException(
+            stock: (result.details?['stock'] as num?)?.toInt() ?? 0,
+          );
+        }
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not delete product.',
+        );
+      }
+    }
+    products.removeWhere((p) => p.id == productId);
+    notifyListeners();
+    await _persistAll();
+    // Re-fetch catalogue from server to ensure consistency.
+    if (isApiProduct && ApiService.instance.hasToken) {
+      await syncCatalogueFromApi();
+    }
+  }
+
+  /// Archive a product (history preserved, active=false).
+  Future<void> archiveProduct(String productId) async {
+    final isApiProduct = RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
+    ).hasMatch(productId);
+    if (isApiProduct) {
+      if (!ApiService.instance.hasToken) {
+        throw PosException('Sign in before archiving a product.');
+      }
+      final ok = await ApiService.instance.archiveProduct(productId);
+      if (!ok) {
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not archive product.',
+        );
+      }
+    }
+    final idx = products.indexWhere((p) => p.id == productId);
+    if (idx != -1) {
+      products[idx] = products[idx].copyWith(isActive: false);
+    }
+    notifyListeners();
+    await _persistAll();
+    if (isApiProduct && ApiService.instance.hasToken) {
+      await syncCatalogueFromApi();
+    }
   }
 
   Future<void> deactivateProduct(String productId) async {

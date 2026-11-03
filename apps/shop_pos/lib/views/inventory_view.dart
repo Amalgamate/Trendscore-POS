@@ -1074,90 +1074,161 @@ class _InventoryViewState extends State<InventoryView> {
   }
 
   Future<void> _confirmDelete(PosProduct product) async {
+    // Stage 1: confirm dialog with optional discard-stock checkbox.
+    bool discardStock = false;
+
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        title: const Row(
-          children: [
-            Icon(AppIcons.warning, color: AppColors.status_danger),
-            SizedBox(width: 8),
-            Text('Deactivate Product?'),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            RichText(
-              text: TextSpan(
-                style: const TextStyle(
-                  fontSize: 14,
-                  color: AppColors.text_secondary,
-                ),
-                children: [
-                  const TextSpan(text: 'You are about to deactivate '),
-                  TextSpan(
-                    text: product.name,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                      color: AppColors.text_primary,
-                    ),
+      barrierDismissible: false,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setModal) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          title: const Row(
+            children: [
+              Icon(AppIcons.deleteForever, color: AppColors.status_danger),
+              SizedBox(width: 8),
+              Text('Permanently Delete Product?'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              RichText(
+                text: TextSpan(
+                  style: const TextStyle(
+                    fontSize: 14,
+                    color: AppColors.text_secondary,
                   ),
-                  const TextSpan(text: ' from the catalog.'),
-                ],
-              ),
-            ),
-            const SizedBox(height: 10),
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: AppColors.status_danger.withAlpha(15),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: AppColors.status_danger.withAlpha(60),
+                  children: [
+                    const TextSpan(text: 'You are about to permanently delete '),
+                    TextSpan(
+                      text: product.name,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.text_primary,
+                      ),
+                    ),
+                    TextSpan(text: ' (SKU: ${product.sku}).'),
+                  ],
                 ),
               ),
-              child: const Text(
-                'The product will be hidden from active stock and checkout. Its history is retained.',
-                style: TextStyle(fontSize: 12, color: AppColors.status_danger),
+              const SizedBox(height: 8),
+              Text(
+                'Current stock: ${product.stock} units',
+                style: const TextStyle(fontSize: 13, color: AppColors.text_secondary),
               ),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppColors.status_danger.withAlpha(15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: AppColors.status_danger.withAlpha(60)),
+                ),
+                child: const Text(
+                  'This cannot be undone. Only products with no sales history can be permanently deleted.',
+                  style: TextStyle(fontSize: 12, color: AppColors.status_danger),
+                ),
+              ),
+              // Discard-stock checkbox — shown only when stock > 0.
+              if (product.stock > 0) ...[
+                const SizedBox(height: 10),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(
+                    'Discard current stock (${product.stock} units)',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  value: discardStock,
+                  onChanged: (v) => setModal(() => discardStock = v ?? false),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton.icon(
+              icon: const Icon(AppIcons.deleteForever, size: 16),
+              label: const Text('Delete Permanently'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.status_danger,
+              ),
+              // Disable button if stock > 0 and discard not ticked.
+              onPressed: (product.stock > 0 && !discardStock)
+                  ? null
+                  : () => Navigator.pop(ctx, true),
             ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton.icon(
-            icon: const Icon(AppIcons.deleteForever, size: 16),
-            label: const Text('Deactivate'),
-            style: FilledButton.styleFrom(
-              backgroundColor: AppColors.status_danger,
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-          ),
-        ],
       ),
     );
-    if (confirmed == true && mounted) {
-      try {
-        await widget.state.deactivateProduct(product.id);
-        if (!mounted) return;
-        if (_selectedProduct?.id == product.id)
-          setState(() => _selectedProduct = null);
-        else
-          setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('"${product.name}" deactivated.')),
-        );
-      } catch (error) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not deactivate product: $error')),
-        );
-      }
+
+    if (confirmed != true || !mounted) return;
+
+    // Stage 2: attempt the delete.
+    try {
+      await widget.state.deleteProduct(product.id, discardStock: discardStock);
+      if (!mounted) return;
+      if (_selectedProduct?.id == product.id) setState(() => _selectedProduct = null);
+      else setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('"${product.name}" permanently deleted.')),
+      );
+    } on ProductHasHistoryException catch (e) {
+      // Stage 3a: product has history — offer archive instead.
+      if (!mounted) return;
+      final counts = e.counts;
+      final detail = [
+        if ((counts['saleItems'] as int? ?? 0) > 0)
+          '${counts['saleItems']} sale(s)',
+        if ((counts['purchaseItems'] as int? ?? 0) > 0)
+          '${counts['purchaseItems']} purchase(s)',
+        if ((counts['refundItems'] as int? ?? 0) > 0)
+          '${counts['refundItems']} refund(s)',
+      ].join(', ');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 8),
+          content: Text(
+            '"${product.name}" has history ($detail) and cannot be deleted. Use Archive to hide it.',
+          ),
+          action: SnackBarAction(
+            label: 'Archive instead',
+            onPressed: () async {
+              try {
+                await widget.state.archiveProduct(product.id);
+                if (!mounted) return;
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('"${product.name}" archived.')),
+                );
+              } catch (archiveErr) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('Could not archive: $archiveErr')),
+                );
+              }
+            },
+          ),
+        ),
+      );
+    } on ProductHasStockException {
+      // Stage 3b: should not reach here (button is disabled above) — defensive fallback.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tick "Discard current stock" to delete a product with stock.'),
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not delete product: $error')),
+      );
     }
   }
 

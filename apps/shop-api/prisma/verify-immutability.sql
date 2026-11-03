@@ -172,6 +172,54 @@ BEGIN
 END;
 $$;
 
+\echo '--- 3d. stock_movements DELETE without app.purge_product_id must be rejected (post-0006) ---'
+DO $$
+BEGIN
+  BEGIN
+    -- No SET LOCAL — purge_id will be NULL, trigger must reject.
+    DELETE FROM stock_movements WHERE id = '66666666-6666-6666-6666-666666666666';
+    RAISE EXCEPTION 'FAIL: stock_movements DELETE was allowed without purge_product_id';
+  EXCEPTION WHEN restrict_violation THEN
+    RAISE NOTICE 'PASS: stock_movements DELETE blocked without purge_product_id';
+  END;
+END;
+$$;
+
+\echo '--- 3e. stock_movements DELETE with purge_product_id but product has sale_items must be rejected ---'
+DO $$
+BEGIN
+  -- Outer block so we can use sub-transactions to test and rollback the test data.
+  BEGIN
+    -- Insert a sale and a sale_item referencing our fixture product to simulate history.
+    -- Wrap in an inner block so the inserts are rolled back at the end regardless.
+    INSERT INTO sales
+      (id, "businessId", "receiptNumber", "cashierId", "clientRef", "idempotencyKey",
+       status, subtotal, total, "createdAt", "updatedAt")
+    VALUES ('dddddddd-dddd-dddd-dddd-dddddddddddd',
+            '11111111-1111-1111-1111-111111111111', 'RCP-PURGE-TEST',
+            '77777777-7777-7777-7777-777777777777', 'ULID-TEST-PURGE', 'idem-purge-1',
+            'COMPLETED', 140.00, 140.00, now(), now());
+
+    INSERT INTO sale_items
+      (id, "saleId", "productId", "productName", quantity, "unitPrice",
+       "costPrice", "lineTotal", "vatAmount", "createdAt")
+    VALUES ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
+            'dddddddd-dddd-dddd-dddd-dddddddddddd',
+            '55555555-5555-5555-5555-555555555555',
+            'Milk 1L', 1, 140.00, 120.00, 140.00, 0.00, now());
+
+    BEGIN
+      PERFORM set_config('app.purge_product_id',
+                         '55555555-5555-5555-5555-555555555555', true);
+      DELETE FROM stock_movements WHERE id = '66666666-6666-6666-6666-666666666666';
+      RAISE EXCEPTION 'FAIL: purge was allowed when product has sale_items';
+    EXCEPTION WHEN restrict_violation THEN
+      RAISE NOTICE 'PASS: purge blocked when product has sale_items';
+    END;
+  END;
+END;
+$$;
+
 \echo '--- 5. INSERT into the ledger must still work ---'
 INSERT INTO customer_ledger
   (id, "customerId", "businessId", "entryType", amount, balance, "entityType", "createdAt")

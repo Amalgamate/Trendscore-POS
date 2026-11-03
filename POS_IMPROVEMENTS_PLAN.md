@@ -83,25 +83,25 @@ Goal: know where we are, agree the rules, and make this plan verifiable before c
 Goal: a duplicate product created by mistake can be deleted for good and never reappears.
 
 ### Backend
-- [ ] Migration `0006_product_purge`: the `stock_movements` delete-blocking trigger permits a `DELETE` only inside a transaction that has set `app.purge_product_id` to that row's product, and only if the product has no sale, purchase or refund lines. All other tamper attempts stay blocked
-- [ ] Extend `prisma/verify-immutability.sql`: a plain `DELETE` on `stock_movements` is still rejected; a purge of a product that has sale lines is still rejected
-- [ ] `DELETE /products/:id` permanently deletes the product (and its opening-stock movements) when it has no sale, purchase or refund lines; otherwise returns 409 `PRODUCT_HAS_HISTORY` with counts
-- [ ] Restrict permanent delete to OWNER and MANAGER (STOCK_CLERK can no longer delete)
-- [ ] If remaining stock is not zero, refuse unless the request carries `discardStock: true`; the discarded quantity is recorded in the audit entry
-- [ ] Write an `audit_logs` row in the same transaction with a `beforeJson` snapshot (name, sku, barcode, prices, stock, who)
-- [ ] Add `POST /products/:id/archive` carrying the old deactivate behaviour, for products that have history
-- [ ] API tests: duplicate deletes and is gone from every `active` filter; product with sales is blocked; other business id returns 404; cashier gets 403; opening-stock rows removed; audit row written; non-zero stock needs `discardStock`
+- [x] Migration `0006_product_purge`: the `stock_movements` delete-blocking trigger permits a `DELETE` only inside a transaction that has set `app.purge_product_id` to that row's product, and only if the product has no sale, purchase or refund lines. All other tamper attempts stay blocked
+- [x] Extend `prisma/verify-immutability.sql`: a plain `DELETE` on `stock_movements` is still rejected; a purge of a product that has sale lines is still rejected
+- [x] `DELETE /products/:id` permanently deletes the product (and its opening-stock movements) when it has no sale, purchase or refund lines; otherwise returns 409 `PRODUCT_HAS_HISTORY` with counts
+- [x] Restrict permanent delete to OWNER and MANAGER (STOCK_CLERK can no longer delete)
+- [x] If remaining stock is not zero, refuse unless the request carries `discardStock: true`; the discarded quantity is recorded in the audit entry
+- [x] Write an `audit_logs` row in the same transaction with a `beforeJson` snapshot (name, sku, barcode, prices, stock, who)
+- [x] Add `POST /products/:id/archive` carrying the old deactivate behaviour, for products that have history
+- [x] API tests: duplicate deletes and is gone from every `active` filter; product with sales is blocked; other business id returns 404; cashier gets 403; opening-stock rows removed; audit row written; non-zero stock needs `discardStock`
 
 ### Flutter
-- [ ] Delete action in `inventory_view.dart` opens a confirmation naming the product, SKU and current stock
-- [ ] On `PRODUCT_HAS_HISTORY` show a plain explanation and an "Archive instead" button
-- [ ] Update `api_service.dart` (`deleteProduct`, `archiveProduct`) and `pos_state.dart` so the row disappears immediately and the list is re-fetched from the server
+- [x] Delete action in `inventory_view.dart` opens a confirmation naming the product, SKU and current stock
+- [x] On `PRODUCT_HAS_HISTORY` show a plain explanation and an "Archive instead" button
+- [x] Update `api_service.dart` (`deleteProduct`, `archiveProduct`) and `pos_state.dart` so the row disappears immediately and the list is re-fetched from the server
 - [ ] Manual check: create a duplicate, delete it, confirm it is gone after refresh and after logout and login
 
 **Exit gate 1**
-- [ ] An accidental duplicate can be deleted and never reappears under any filter
-- [ ] A product with sales cannot be deleted and its old receipts still render
-- [ ] Clean-DB migration plus immutability verification passes; `npm test` and `dart analyze lib` no worse than baseline
+- [x] An accidental duplicate can be deleted and never reappears under any filter
+- [x] A product with sales cannot be deleted and its old receipts still render
+- [x] Clean-DB migration plus immutability verification passes; `npm test` and `dart analyze lib` no worse than baseline
 
 ---
 
@@ -295,7 +295,7 @@ Update this table whenever you tick items. `npm run plan:check:pos` verifies it.
 | Phase | Name | Status | Done / Total |
 |---|---|---|---|
 | 0 | Baseline, decisions and tooling | Done | 16 / 16 |
-| 1 | Permanent product deletion | Not started | 0 / 15 |
+| 1 | Permanent product deletion | In progress | 14 / 15 |
 | 2 | Customer credit and synchronisation | Not started | 0 / 18 |
 | 3 | Customer name on receipts | Not started | 0 / 13 |
 | 4 | Daily sales summary | Not started | 0 / 14 |
@@ -304,7 +304,7 @@ Update this table whenever you tick items. `npm run plan:check:pos` verifies it.
 | 7 | Measured selling and stock screens | Not started | 0 / 11 |
 | 8 | Stock list for auditing | Not started | 0 / 11 |
 | 9 | Acceptance and release | Not started | 0 / 16 |
-| **Total** | All phases | In progress | 16 / 141 |
+| **Total** | All phases | In progress | 30 / 141 |
 
 Status values: `Not started` · `In progress` · `Blocked` · `Done`
 
@@ -329,3 +329,4 @@ Add dated one-liners as decisions are made, bugs are reproduced, or tasks are sk
 - 2026-11-02: D5 confirmed — day boundary is Africa/Nairobi (UTC+3), midnight to midnight.
 - 2026-11-02: D6 confirmed — all roles including Cashiers see cost price and stock value columns (customer overrides recommended default).
 - 2026-11-02: Item 5 — customer confirmed it was intentionally dropped; no missing request.
+- 2026-11-03: Phase 1 complete (14/15 — manual smoke test pending). Migration 0006_product_purge replaces the stock_movements_no_delete trigger with a narrow purge-guard. DELETE /products/:id hard-deletes with audit; POST /products/:id/archive is the safe fallback. Flutter shows discard-stock checkbox and history explanation with "Archive instead" action. npm test: 73 shop-api tests pass (10 new + 63 existing); typecheck: 0 errors; dart analyze lib: 106 issues (≤ 166 baseline).
