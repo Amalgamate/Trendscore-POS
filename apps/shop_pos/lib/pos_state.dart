@@ -1853,9 +1853,11 @@ class PosState extends ChangeNotifier {
     }
   }
 
-  void addCustomer(PosCustomer c) {
+  Future<void> addCustomer(PosCustomer c) async {
+    customers.removeWhere((existing) => existing.id == c.id);
     customers.insert(0, c);
     notifyListeners();
+    await _persistAll();
   }
 
   /// Deletes a customer via the API. Returns null on success, or an error
@@ -2412,6 +2414,7 @@ class PosState extends ChangeNotifier {
     final saleVat = cart.vatAmount;
 
     String? saleId;
+    Money? customerBalanceFromServer;
     if (ApiService.instance.hasToken) {
       final response = await ApiService.instance.submitSale({
         'idempotencyKey': idempotencyKey,
@@ -2440,6 +2443,10 @@ class PosState extends ChangeNotifier {
       }
       receiptNum = data['receiptNumber'] as String? ?? receiptNum;
       saleId = data['saleId'] as String?;
+      final serverBalance = data['customerBalance'];
+      if (serverBalance is num) {
+        customerBalanceFromServer = Money((serverBalance * 100).round());
+      }
     }
 
     // 1. Deduct shelf stock
@@ -2450,7 +2457,8 @@ class PosState extends ChangeNotifier {
 
     // 2. If Credit, append to Customer Credit Ledger
     if (method == SalePaymentMethod.credit && saleCustomer != null) {
-      final newBalance = saleCustomer.currentBalance + saleSubtotal;
+      final newBalance = customerBalanceFromServer ??
+          saleCustomer.currentBalance + saleSubtotal;
       saleCustomer.currentBalance = newBalance;
       saleCustomer.ledger.insert(
         0,
@@ -2640,32 +2648,70 @@ class PosState extends ChangeNotifier {
 
   // --- Customer Credit Payment ---
 
-  void recordCustomerPayment(
+  Future<void> recordCustomerPayment(
     String customerId,
     Money amount,
     String reference,
-  ) {
+    {String method = 'CASH', String? note}
+  ) async {
     final cust = customers.firstWhere((c) => c.id == customerId);
-    final newBal = Money(
-      cust.currentBalance.minorUnits >= amount.minorUnits
-          ? cust.currentBalance.minorUnits - amount.minorUnits
-          : 0,
-    );
+    if (amount.minorUnits <= 0) {
+      throw PosException('Payment must be greater than zero.');
+    }
+    if (amount.minorUnits > cust.currentBalance.minorUnits) {
+      throw PosException('Payment cannot exceed the outstanding balance.');
+    }
+
+    var newBal = Money(cust.currentBalance.minorUnits - amount.minorUnits);
+    CustomerLedgerEntry? remoteEntry;
+    if (_isRemoteProductId(customerId)) {
+      if (!ApiService.instance.hasToken) {
+        throw PosException('Reconnect to the shop before recording payment.');
+      }
+      final response = await ApiService.instance.recordCustomerPayment(
+        customerId,
+        amount.minorUnits / 100,
+        method,
+        reference,
+        note: note,
+      );
+      if (response == null) {
+        throw PosException(
+          ApiService.instance.lastError ?? 'Could not record customer payment.',
+        );
+      }
+      final serverBalance = response['newBalance'];
+      final entry = response['payment'];
+      if (serverBalance is num) {
+        newBal = Money((serverBalance * 100).round());
+      }
+      if (entry is Map<String, dynamic>) {
+        remoteEntry = CustomerLedgerEntry(
+          id: entry['id'] as String? ?? 'pmt_${DateTime.now().microsecondsSinceEpoch}',
+          timestamp: DateTime.tryParse(entry['createdAt'] as String? ?? '') ?? DateTime.now(),
+          type: LedgerEntryType.paymentCredit,
+          amount: Money(((entry['amount'] as num? ?? amount.minorUnits / 100) * 100).round()),
+          reference: entry['reference'] as String? ?? reference,
+          runningBalance: Money(((entry['balance'] as num? ?? newBal.minorUnits / 100) * 100).round()),
+        );
+      }
+    }
+
     cust.currentBalance = newBal;
     cust.ledger.insert(
       0,
-      CustomerLedgerEntry(
-        id: 'pmt_${DateTime.now().millisecondsSinceEpoch}',
-        timestamp: DateTime.now(),
-        type: LedgerEntryType.paymentCredit,
-        amount: amount,
-        reference: reference,
-        runningBalance: newBal,
-      ),
+      remoteEntry ?? CustomerLedgerEntry(
+          id: 'pmt_${DateTime.now().millisecondsSinceEpoch}',
+          timestamp: DateTime.now(),
+          type: LedgerEntryType.paymentCredit,
+          amount: amount,
+          reference: reference,
+          runningBalance: newBal,
+        ),
     );
 
-    // If payment was cash, it goes into till
-    if (reference.toUpperCase().contains('CASH')) {
+    // Cash debt payments are part of drawer inflow as well as the customer ledger.
+    if (method.toUpperCase() == 'CASH') {
       shift.cashPaidIn = shift.cashPaidIn + amount;
       shift.movements.insert(
         0,
@@ -2681,6 +2727,7 @@ class PosState extends ChangeNotifier {
     }
 
     notifyListeners();
+    await _persistAll();
   }
 
   // --- Cash Drawer Drops & Expenses ---

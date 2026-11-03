@@ -9,7 +9,7 @@ import { productsRouter } from '../src/modules/products/products.router';
 interface MockTx {
   $queryRaw: ReturnType<typeof vi.fn>;
   stockMovement: { deleteMany: ReturnType<typeof vi.fn> };
-  product: { delete: ReturnType<typeof vi.fn> };
+  product: { delete: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
   auditLog: { create: ReturnType<typeof vi.fn> };
 }
 
@@ -21,6 +21,7 @@ const mocks = vi.hoisted(() => {
     },
     product: {
       delete: vi.fn().mockResolvedValue({}),
+      update: vi.fn().mockResolvedValue({}),
     },
     auditLog: {
       create: vi.fn().mockResolvedValue({}),
@@ -107,6 +108,7 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
     mocks.tx.$queryRaw.mockResolvedValue([]);
     mocks.tx.stockMovement.deleteMany.mockResolvedValue({ count: 0 });
     mocks.tx.product.delete.mockResolvedValue({});
+    mocks.tx.product.update.mockResolvedValue({});
     mocks.tx.auditLog.create.mockResolvedValue({});
 
     const app = express();
@@ -236,7 +238,7 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
     expect(mocks.tx.stockMovement.deleteMany).toHaveBeenCalledWith({
       where: { productId },
     });
-    // SET LOCAL call must come before deleteMany
+    // Transaction-local purge capability must be set before deleteMany.
     const queryRawOrder = mocks.tx.$queryRaw.mock.invocationCallOrder[1]!;
     const deleteManyOrder = mocks.tx.stockMovement.deleteMany.mock.invocationCallOrder[0]!;
     expect(queryRawOrder).toBeLessThan(deleteManyOrder);
@@ -261,12 +263,6 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
 
   // ── 8. Non-zero stock without discardStock → 422 ──────────────────────────
   it('returns 422 NON_ZERO_STOCK when product has stock and discardStock is not set', async () => {
-    mocks.prisma.product.findFirst.mockResolvedValue(
-      makeProduct({ stock: { toString: () => '5' } }),
-    );
-    // Number(stock) must be > 0; override stock as a Decimal-like
-    // The test product above has toString()=>'5' which Number() will return NaN for.
-    // We need a value where Number(existing.stock) > 0.
     mocks.prisma.product.findFirst.mockResolvedValue({
       ...makeProduct(),
       stock: 5,
@@ -281,6 +277,24 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
     expect(res.status).toBe(422);
     expect(body.error.code).toBe('NON_ZERO_STOCK');
     expect(body.error.details.stock).toBe(5);
+    expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('also requires explicit discard for negative stock', async () => {
+    mocks.prisma.product.findFirst.mockResolvedValue({
+      ...makeProduct(),
+      stock: -0.25,
+    });
+
+    const res = await fetch(`${baseUrl}/products/${productId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    const body = (await res.json()) as { error: { code: string; details: { stock: number } } };
+
+    expect(res.status).toBe(422);
+    expect(body.error.code).toBe('NON_ZERO_STOCK');
+    expect(body.error.details.stock).toBe(-0.25);
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
   });
 
@@ -307,7 +321,7 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
   it('POST /archive sets active=false and is idempotent', async () => {
     // First call: product is active
     mocks.prisma.product.findFirst.mockResolvedValue(makeProduct({ active: true }));
-    mocks.prisma.product.update.mockResolvedValue({ id: productId, active: false });
+    mocks.tx.product.update.mockResolvedValue({ id: productId, active: false });
 
     const res1 = await fetch(`${baseUrl}/products/${productId}/archive`, {
       method: 'POST',
@@ -317,9 +331,17 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
 
     expect(res1.status).toBe(200);
     expect(body1).toEqual({ id: productId, active: false });
-    expect(mocks.prisma.product.update).toHaveBeenCalledWith({
+    expect(mocks.tx.product.update).toHaveBeenCalledWith({
       where: { id: productId },
       data: { active: false },
+    });
+    expect(mocks.tx.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        action: 'PRODUCT_ARCHIVED',
+        entityType: 'PRODUCT',
+        entityId: productId,
+        beforeJson: { name: 'Test Product', sku: 'T-001', active: true },
+      }),
     });
 
     // Second call: product is already inactive — update must NOT be called again
@@ -328,6 +350,7 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
       id: ownerId, fullName: 'Test Owner', role: 'OWNER', active: true, mustChangePin: false,
     });
     mocks.prisma.product.findFirst.mockResolvedValue(makeProduct({ active: false }));
+    mocks.tx.product.update.mockResolvedValue({});
 
     const res2 = await fetch(`${baseUrl}/products/${productId}/archive`, {
       method: 'POST',
@@ -337,6 +360,6 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
 
     expect(res2.status).toBe(200);
     expect(body2).toEqual({ id: productId, active: false });
-    expect(mocks.prisma.product.update).not.toHaveBeenCalled();
+    expect(mocks.tx.product.update).not.toHaveBeenCalled();
   });
 });

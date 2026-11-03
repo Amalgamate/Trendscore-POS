@@ -770,7 +770,7 @@ class ApiService {
   }
 
   /// Record customer debt payment
-  Future<bool> recordCustomerPayment(
+  Future<Map<String, dynamic>?> recordCustomerPayment(
     String customerId,
     double amount,
     String method,
@@ -791,7 +791,9 @@ class ApiService {
             }),
           )
           .timeout(const Duration(seconds: 5));
-      if (res.statusCode == 201) return true;
+      if (res.statusCode == 201) {
+        return Map<String, dynamic>.from(jsonDecode(res.body) as Map);
+      }
       lastError =
           _messageFromResponse(res.body) ??
           'Could not record customer payment (${res.statusCode}).';
@@ -799,7 +801,7 @@ class ApiService {
       lastError = 'Could not record customer payment on the shop API.';
       debugPrint('API recordCustomerPayment error: $e');
     }
-    return false;
+    return null;
   }
 
   /// Delete a customer (only succeeds if balance is zero)
@@ -963,13 +965,13 @@ class ApiService {
     }
   }
 
-  /// Soft-delete a product (sets active=false on the API).
+  /// Soft-deactivate a product (sets active=false on the API via the archive endpoint).
   /// Returns true if the server responded 200.
   Future<bool> deactivateProduct(String productId) async {
     lastError = null;
     try {
       final res = await http
-          .delete(Uri.parse('$baseUrl/products/$productId'), headers: _headers)
+          .post(Uri.parse('$baseUrl/products/$productId/archive'), headers: _headers)
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) return true;
       lastError =

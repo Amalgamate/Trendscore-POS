@@ -188,10 +188,10 @@ $$;
 \echo '--- 3e. stock_movements DELETE with purge_product_id but product has sale_items must be rejected ---'
 DO $$
 BEGIN
-  -- Outer block so we can use sub-transactions to test and rollback the test data.
+  -- This exception block is a PL/pgSQL subtransaction: when the guard raises,
+  -- the sale fixtures are rolled back with the attempted purge.
   BEGIN
     -- Insert a sale and a sale_item referencing our fixture product to simulate history.
-    -- Wrap in an inner block so the inserts are rolled back at the end regardless.
     INSERT INTO sales
       (id, "businessId", "receiptNumber", "cashierId", "clientRef", "idempotencyKey",
        status, subtotal, total, "createdAt", "updatedAt")
@@ -208,14 +208,12 @@ BEGIN
             '55555555-5555-5555-5555-555555555555',
             'Milk 1L', 1, 140.00, 120.00, 140.00, 0.00, now());
 
-    BEGIN
-      PERFORM set_config('app.purge_product_id',
-                         '55555555-5555-5555-5555-555555555555', true);
-      DELETE FROM stock_movements WHERE id = '66666666-6666-6666-6666-666666666666';
-      RAISE EXCEPTION 'FAIL: purge was allowed when product has sale_items';
-    EXCEPTION WHEN restrict_violation THEN
-      RAISE NOTICE 'PASS: purge blocked when product has sale_items';
-    END;
+    PERFORM set_config('app.purge_product_id',
+                       '55555555-5555-5555-5555-555555555555', true);
+    DELETE FROM stock_movements WHERE id = '66666666-6666-6666-6666-666666666666';
+    RAISE EXCEPTION 'FAIL: purge was allowed when product has sale_items';
+  EXCEPTION WHEN restrict_violation THEN
+    RAISE NOTICE 'PASS: purge blocked when product has sale_items';
   END;
 END;
 $$;

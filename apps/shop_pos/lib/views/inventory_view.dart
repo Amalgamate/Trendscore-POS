@@ -1131,8 +1131,8 @@ class _InventoryViewState extends State<InventoryView> {
                   style: TextStyle(fontSize: 12, color: AppColors.status_danger),
                 ),
               ),
-              // Discard-stock checkbox — shown only when stock > 0.
-              if (product.stock > 0) ...[
+              // Require explicit acknowledgement for positive or negative stock.
+              if (product.stock != 0) ...[
                 const SizedBox(height: 10),
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
@@ -1157,8 +1157,8 @@ class _InventoryViewState extends State<InventoryView> {
               style: FilledButton.styleFrom(
                 backgroundColor: AppColors.status_danger,
               ),
-              // Disable button if stock > 0 and discard not ticked.
-              onPressed: (product.stock > 0 && !discardStock)
+              // Disable button if stock is non-zero and discard not ticked.
+              onPressed: (product.stock != 0 && !discardStock)
                   ? null
                   : () => Navigator.pop(ctx, true),
             ),

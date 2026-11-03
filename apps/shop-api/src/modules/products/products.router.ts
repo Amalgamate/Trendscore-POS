@@ -449,12 +449,13 @@ export function productsRouter(businessId: string): Router {
       }
 
       // (d) Stock guard — use Decimal-safe comparison.
-      const stockNum = Number(existing.stock);
-      if (stockNum > 0 && body.discardStock !== true) {
+      const stock = new Prisma.Decimal(existing.stock.toString());
+      const hasStock = !stock.isZero();
+      if (hasStock && body.discardStock !== true) {
         return sendError(
           res, 422, 'NON_ZERO_STOCK',
           'Product has stock on hand. Set discardStock:true to discard it and proceed.',
-          { stock: stockNum },
+          { stock: Number(stock.toString()) },
         );
       }
 
@@ -463,7 +464,7 @@ export function productsRouter(businessId: string): Router {
         // Lock the row first.
         await tx.$queryRaw(Prisma.sql`SELECT id FROM products WHERE id = ${id}::uuid FOR UPDATE`);
         // SET LOCAL scopes the purge permission to this transaction only.
-        await tx.$queryRaw(Prisma.sql`SET LOCAL "app.purge_product_id" = ${id}`);
+        await tx.$queryRaw(Prisma.sql`SELECT set_config('app.purge_product_id', ${id}, true)`);
         // Delete stock movements (trigger now allows this for this transaction).
         await tx.stockMovement.deleteMany({ where: { productId: id } });
         // Hard-delete the product (cascades product_images via onDelete: Cascade).
@@ -483,7 +484,7 @@ export function productsRouter(businessId: string): Router {
               salePrice: existing.salePrice.toString(),
               costPrice: existing.costPrice.toString(),
               stock: existing.stock.toString(),
-              discardedQty: stockNum > 0 ? existing.stock.toString() : '0',
+              discardedQty: hasStock ? existing.stock.toString() : '0',
             },
           },
         });
@@ -498,15 +499,28 @@ export function productsRouter(businessId: string): Router {
 
   // POST /products/:id/archive — set active=false (preserves all history).
   router.post('/:id/archive', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
+    const auth = res.locals.auth as { userId: string; role: string };
     try {
       const existing = await prisma.product.findFirst({
         where: { id: req.params.id, businessId },
-        select: { id: true, active: true },
+        select: { id: true, name: true, sku: true, active: true },
       });
       if (!existing) return sendError(res, 404, 'NOT_FOUND', 'Product not found.');
       // Idempotent: already inactive is fine.
       if (!existing.active) return send200(res, { id: existing.id, active: false });
-      await prisma.product.update({ where: { id: existing.id }, data: { active: false } });
+      await prisma.$transaction(async (tx) => {
+        await tx.product.update({ where: { id: existing.id }, data: { active: false } });
+        await tx.auditLog.create({
+          data: {
+            businessId,
+            userId: auth.userId,
+            action: 'PRODUCT_ARCHIVED',
+            entityType: 'PRODUCT',
+            entityId: existing.id,
+            beforeJson: { name: existing.name, sku: existing.sku, active: true },
+          },
+        });
+      });
       return send200(res, { id: existing.id, active: false });
     } catch (err) {
       console.error('products/archive error:', err);
