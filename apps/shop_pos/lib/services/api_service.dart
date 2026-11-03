@@ -841,6 +841,28 @@ class ApiService {
     return null;
   }
 
+  Future<Map<String, dynamic>?> getSalesSummary({String? date}) async {
+    lastError = null;
+    try {
+      final uri = Uri.parse('$baseUrl/sales/summary').replace(
+        queryParameters: date == null ? null : {'date': date},
+      );
+      final res = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        return Map<String, dynamic>.from(jsonDecode(res.body) as Map);
+      }
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not load the daily sales summary (${res.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not reach the shop API for the daily sales summary.';
+      debugPrint('API getSalesSummary error: $error');
+    }
+    return null;
+  }
+
   /// Submit completed sale
   Future<Map<String, dynamic>?> submitSale(
     Map<String, dynamic> salePayload,

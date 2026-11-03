@@ -798,8 +798,8 @@ class PosState extends ChangeNotifier {
   }
 
   // ─── Customizable Brand & Store Identity ───────────────────────────────
-  String shopName = 'ShopSmart POS';
-  String storeBranch = 'Kilimani Market · Counter 01';
+  String shopName = 'Guta Gala';
+  String storeBranch = 'Counter 01';
   String tillId = 'TILL-01';
   String brandLogoUrl = '';
 
@@ -1912,8 +1912,15 @@ class PosState extends ChangeNotifier {
     try {
       final prefs = await SharedPreferences.getInstance();
 
-      shopName = prefs.getString('shop_name') ?? shopName;
-      storeBranch = prefs.getString('store_branch') ?? storeBranch;
+      final savedShopName = prefs.getString('shop_name');
+      shopName = savedShopName == null || savedShopName == 'ShopSmart POS'
+          ? 'Guta Gala'
+          : savedShopName;
+      final savedBranch = prefs.getString('store_branch');
+      storeBranch = savedBranch == null ||
+              savedBranch == 'Kilimani Market · Counter 01'
+          ? 'Counter 01'
+          : savedBranch;
       tillId = prefs.getString('till_id') ?? tillId;
       brandLogoUrl = prefs.getString('brand_logo_url') ?? brandLogoUrl;
       brandLogoBase64 = prefs.getString('brand_logo_base64');
@@ -2652,8 +2659,10 @@ class PosState extends ChangeNotifier {
     String customerId,
     Money amount,
     String reference,
-    {String method = 'CASH', String? note}
-  ) async {
+    {
+    String method = 'CASH',
+    String? note,
+  }) async {
     final cust = customers.firstWhere((c) => c.id == customerId);
     if (amount.minorUnits <= 0) {
       throw PosException('Payment must be greater than zero.');
