@@ -45,6 +45,31 @@ void main() {
 
     // The catalogue actually renders goods to sell.
     expect(find.text('Fresh milk 500ml'), findsOneWidget);
+    expect(find.text('Fast Picks:'), findsNothing);
+    expect(find.byTooltip('Compact view'), findsOneWidget);
+    expect(find.byTooltip('Grid view'), findsOneWidget);
+    expect(find.byTooltip('List view'), findsOneWidget);
+  });
+
+  testWidgets('catalogue can switch between compact, photo grid and list', (
+    WidgetTester tester,
+  ) async {
+    await pumpPos(tester);
+
+    await tester.tap(find.byTooltip('List view'));
+    await tester.pumpAndSettle();
+    expect(find.text('Fresh milk 500ml'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Grid view'));
+    await tester.pumpAndSettle();
+    expect(find.text('Fresh milk 500ml'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.byTooltip('Compact view'));
+    await tester.pumpAndSettle();
+    expect(find.text('Fresh milk 500ml'), findsOneWidget);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('tapping a product adds it to the basket', (

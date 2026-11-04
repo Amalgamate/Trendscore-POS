@@ -1232,9 +1232,8 @@ class _MeasuredQuantityDialogState extends State<_MeasuredQuantityDialog> {
                   ),
                 )
                 .toList(),
-            onChanged: (unit) => setState(
-              () => _selectedUnit = unit ?? _selectedUnit,
-            ),
+            onChanged: (unit) =>
+                setState(() => _selectedUnit = unit ?? _selectedUnit),
           ),
         ],
       ),
@@ -1270,6 +1269,7 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
   final _search = TextEditingController();
   final _barcodeInput = TextEditingController();
   String _category = 'All items';
+  _CatalogView _catalogView = _CatalogView.compact;
 
   @override
   void dispose() {
@@ -1565,8 +1565,9 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
                 categories: _categories,
                 selectedCategory: _category,
                 products: _visibleProducts,
-                allProducts: widget.state.products,
+                viewMode: _catalogView,
                 onCategory: (cat) => setState(() => _category = cat),
+                onViewMode: (view) => setState(() => _catalogView = view),
                 onSearch: (_) => setState(() {}),
                 onBarcodeSubmit: _handleQuickBarcode,
                 onProductTap: _onProductTap,
@@ -1846,6 +1847,8 @@ class _MobileCartBanner extends StatelessWidget {
   }
 }
 
+enum _CatalogView { grid, compact, list }
+
 class _Catalog extends StatelessWidget {
   const _Catalog({
     required this.search,
@@ -1853,8 +1856,9 @@ class _Catalog extends StatelessWidget {
     required this.categories,
     required this.selectedCategory,
     required this.products,
-    required this.allProducts,
+    required this.viewMode,
     required this.onCategory,
+    required this.onViewMode,
     required this.onSearch,
     required this.onBarcodeSubmit,
     required this.onProductTap,
@@ -1867,8 +1871,9 @@ class _Catalog extends StatelessWidget {
   final List<String> categories;
   final String selectedCategory;
   final List<PosProduct> products;
-  final List<PosProduct> allProducts;
+  final _CatalogView viewMode;
   final ValueChanged<String> onCategory;
+  final ValueChanged<_CatalogView> onViewMode;
   final ValueChanged<String> onSearch;
   final ValueChanged<String> onBarcodeSubmit;
   final ValueChanged<PosProduct> onProductTap;
@@ -1879,9 +1884,6 @@ class _Catalog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Fast moving popular products for quick addition
-    final fastMoving = allProducts.take(5).toList();
-
     return Container(
       color: AppColors.bg_canvas,
       padding: const EdgeInsets.all(16),
@@ -2007,63 +2009,7 @@ class _Catalog extends StatelessWidget {
               );
             },
           ),
-          const SizedBox(height: 10),
-
-          // Fast-Moving Quick Picks Strip
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFEF3C7),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(AppIcons.bolt, size: 14, color: Color(0xFFD97706)),
-                      SizedBox(width: 4),
-                      Text(
-                        'Fast Picks:',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: Color(0xFF92400E),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                ...fastMoving.map(
-                  (p) => Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ActionChip(
-                      avatar: Icon(
-                        p.icon,
-                        size: 14,
-                        color: AppColors.accent_primary,
-                      ),
-                      label: Text('${p.name} (KES ${p.unitPrice.formatted})'),
-                      backgroundColor: Colors.white,
-                      side: const BorderSide(color: AppColors.border_subtle),
-                      labelStyle: const TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        color: AppColors.text_primary,
-                      ),
-                      onPressed: () => onProductTap(p),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
+          const SizedBox(height: 14),
 
           // Category Pills
           SingleChildScrollView(
@@ -2094,33 +2040,98 @@ class _Catalog extends StatelessWidget {
               }).toList(),
             ),
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 8),
 
-          // Product Grid
+          // A quiet product count and view switch keep the catalogue in focus.
+          Row(
+            children: [
+              Text(
+                '${products.length} ${products.length == 1 ? 'product' : 'products'}',
+                style: const TextStyle(
+                  color: AppColors.text_secondary,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              SegmentedButton<_CatalogView>(
+                showSelectedIcon: false,
+                segments: const [
+                  ButtonSegment(
+                    value: _CatalogView.compact,
+                    icon: Icon(Icons.apps_rounded),
+                    tooltip: 'Compact view',
+                  ),
+                  ButtonSegment(
+                    value: _CatalogView.grid,
+                    icon: Icon(Icons.grid_view_rounded),
+                    tooltip: 'Grid view',
+                  ),
+                  ButtonSegment(
+                    value: _CatalogView.list,
+                    icon: Icon(Icons.view_list_rounded),
+                    tooltip: 'List view',
+                  ),
+                ],
+                selected: {viewMode},
+                onSelectionChanged: (selection) => onViewMode(selection.first),
+                style: ButtonStyle(
+                  visualDensity: VisualDensity.compact,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  padding: const WidgetStatePropertyAll(
+                    EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+                  ),
+                  shape: WidgetStatePropertyAll(
+                    RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(9),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
           Expanded(
             child: products.isEmpty
                 ? const Center(child: Text('No products match your filter.'))
+                : viewMode == _CatalogView.list
+                ? ListView.separated(
+                    itemCount: products.length,
+                    separatorBuilder: (_, _) => const SizedBox(height: 7),
+                    itemBuilder: (context, index) {
+                      final product = products[index];
+                      return _CompactProductTile(
+                        product: product,
+                        cartQty: cartQty(product.id),
+                        isList: true,
+                        onTap: () => onProductTap(product),
+                      );
+                    },
+                  )
                 : GridView.builder(
-                    gridDelegate:
-                        const SliverGridDelegateWithMaxCrossAxisExtent(
-                          maxCrossAxisExtent: 230,
-                          childAspectRatio: 0.78,
-                          crossAxisSpacing: 14,
-                          mainAxisSpacing: 14,
-                        ),
+                    gridDelegate: SliverGridDelegateWithMaxCrossAxisExtent(
+                      maxCrossAxisExtent: 230,
+                      childAspectRatio: viewMode == _CatalogView.compact
+                          ? 1.42
+                          : 0.82,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                    ),
                     itemCount: products.length,
                     itemBuilder: (context, index) {
                       final p = products[index];
-                      return _StaggeredFadeIn(
-                        delay: Duration(
-                          milliseconds: (index * 28).clamp(0, 400),
-                        ),
-                        child: _ProductTile(
-                          product: p,
-                          cartQty: cartQty(p.id),
-                          onTap: () => onProductTap(p),
-                        ),
-                      );
+                      return viewMode == _CatalogView.grid
+                          ? _ProductTile(
+                              product: p,
+                              cartQty: cartQty(p.id),
+                              onTap: () => onProductTap(p),
+                            )
+                          : _CompactProductTile(
+                              product: p,
+                              cartQty: cartQty(p.id),
+                              onTap: () => onProductTap(p),
+                            );
                     },
                   ),
           ),
@@ -2130,51 +2141,200 @@ class _Catalog extends StatelessWidget {
   }
 }
 
-/// Lightweight stagger fade+slide for grid items.
-class _StaggeredFadeIn extends StatefulWidget {
-  const _StaggeredFadeIn({required this.child, required this.delay});
-  final Widget child;
-  final Duration delay;
+/// Dense catalogue tile for cashiers who prefer to scan more items at once.
+/// The same tile also supports a full-width, stock-forward list row.
+class _CompactProductTile extends StatelessWidget {
+  const _CompactProductTile({
+    required this.product,
+    required this.cartQty,
+    required this.onTap,
+    this.isList = false,
+  });
+
+  final PosProduct product;
+  final int cartQty;
+  final VoidCallback onTap;
+  final bool isList;
 
   @override
-  State<_StaggeredFadeIn> createState() => _StaggeredFadeInState();
-}
+  Widget build(BuildContext context) {
+    final out = product.isOutOfStock;
+    final stockColor = out
+        ? AppColors.status_danger
+        : product.isLowStock
+        ? const Color(0xFFD97706)
+        : AppColors.status_success;
+    final stockLabel = out
+        ? 'Out of stock'
+        : '${StockUnitFormatter.format((product.stock * 1000).round(), product.unit)} in stock';
 
-class _StaggeredFadeInState extends State<_StaggeredFadeIn>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _ctrl;
-  late Animation<double> _opacity;
-  late Animation<Offset> _slide;
+    Widget thumbnail() {
+      final image = product.imageBase64;
+      if (image != null && image.isNotEmpty) {
+        try {
+          return Image.memory(
+            base64Decode(image.split(',').last),
+            fit: BoxFit.cover,
+            errorBuilder: (_, _, _) => Icon(product.icon, size: 20),
+          );
+        } catch (_) {
+          // Fall through to the category icon for malformed legacy images.
+        }
+      }
+      return Icon(product.icon, size: 20, color: AppColors.text_secondary);
+    }
 
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 300),
+    final leading = Container(
+      width: 40,
+      height: 40,
+      alignment: Alignment.center,
+      clipBehavior: Clip.antiAlias,
+      decoration: BoxDecoration(
+        color: product.tint.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: thumbnail(),
     );
-    _opacity = CurvedAnimation(parent: _ctrl, curve: Curves.easeOut);
-    _slide = Tween<Offset>(
-      begin: const Offset(0, 0.06),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(parent: _ctrl, curve: Curves.easeOutCubic));
 
-    Future.delayed(widget.delay, () {
-      if (mounted) _ctrl.forward();
-    });
+    return Opacity(
+      opacity: out ? 0.58 : 1,
+      child: Material(
+        color: Colors.white,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(11),
+          side: const BorderSide(color: AppColors.border_subtle),
+        ),
+        child: InkWell(
+          onTap: out ? null : onTap,
+          borderRadius: BorderRadius.circular(11),
+          child: Padding(
+            padding: EdgeInsets.symmetric(
+              horizontal: 10,
+              vertical: isList ? 9 : 10,
+            ),
+            child: isList
+                ? Row(
+                    children: [
+                      leading,
+                      const SizedBox(width: 11),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              product.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AppColors.text_primary,
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            const SizedBox(height: 3),
+                            Text(
+                              '${product.sku}  ·  $stockLabel',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: stockColor,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'KES ${product.unitPrice.formatted}',
+                        style: const TextStyle(
+                          color: AppColors.text_primary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Icon(
+                        cartQty > 0
+                            ? Icons.check_circle_rounded
+                            : Icons.add_circle_outline_rounded,
+                        size: 20,
+                        color: out
+                            ? AppColors.text_tertiary
+                            : AppColors.accent_primary,
+                      ),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          leading,
+                          const Spacer(),
+                          Icon(
+                            cartQty > 0
+                                ? Icons.check_circle_rounded
+                                : Icons.add_circle_outline_rounded,
+                            size: 19,
+                            color: out
+                                ? AppColors.text_tertiary
+                                : AppColors.accent_primary,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 9),
+                      Expanded(
+                        child: Text(
+                          product.name,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.text_primary,
+                            fontSize: 12,
+                            height: 1.25,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Text(
+                              'KES ${product.unitPrice.formatted}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: AppColors.accent_primary,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                          Text(
+                            out
+                                ? 'Out'
+                                : StockUnitFormatter.format(
+                                    (product.stock * 1000).round(),
+                                    product.unit,
+                                  ),
+                            style: TextStyle(
+                              color: stockColor,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+      ),
+    );
   }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => FadeTransition(
-    opacity: _opacity,
-    child: SlideTransition(position: _slide, child: widget.child),
-  );
 }
 
 /// Large, photo-first product tile for the POS grid.
