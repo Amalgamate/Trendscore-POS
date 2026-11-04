@@ -22,8 +22,9 @@ const mocks = vi.hoisted(() => {
     },
     cashSession: {
       findFirst: vi.fn().mockResolvedValue({ id: 'session-id' }),
-      updateMany: vi.fn().mockResolvedValue({ count: 1 }),
+      update: vi.fn().mockResolvedValue({}),
     },
+    cashMovement: { create: vi.fn().mockResolvedValue({ id: 'movement-id' }) },
     customerLedger: {
       create: vi.fn(),
       findMany: vi.fn().mockResolvedValue([]),
@@ -103,9 +104,17 @@ describe('customer credit synchronisation', () => {
 
   it('adds cash debt receipts to the open cashier session only for cash', async () => {
     await postPayment('CASH', 'CASH-RCPT');
-    expect(mocks.tx.cashSession.updateMany).toHaveBeenCalledWith({
-      where: { id: 'session-id', status: 'OPEN' },
+    expect(mocks.tx.cashSession.update).toHaveBeenCalledWith({
+      where: { id: 'session-id' },
       data: { debtPayments: { increment: expect.anything() } },
+    });
+    expect(mocks.tx.cashMovement.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        cashSessionId: 'session-id',
+        type: 'PAID_IN',
+        direction: 'CREDIT',
+        reference: 'DEBT_PAYMENT:payment-id',
+      }),
     });
     vi.clearAllMocks();
     mocks.prisma.user.findUnique.mockResolvedValue({ id: ids.user, fullName: 'Test', role: 'CASHIER', active: true, mustChangePin: false });
@@ -113,7 +122,7 @@ describe('customer credit synchronisation', () => {
     mocks.tx.customerLedger.create.mockResolvedValue({ id: 'ledger-id', amount: 25, balance: 75, reference: 'MPESA-RCPT', createdAt: new Date() });
     mocks.tx.cashSession.findFirst.mockResolvedValue({ id: 'session-id' });
     await postPayment('MPESA', 'MPESA-RCPT');
-    expect(mocks.tx.cashSession.updateMany).not.toHaveBeenCalled();
+    expect(mocks.tx.cashSession.update).not.toHaveBeenCalled();
   });
 
   it('pages the statement and includes ledger entity details', async () => {

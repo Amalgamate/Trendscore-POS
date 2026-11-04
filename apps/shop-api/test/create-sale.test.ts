@@ -54,6 +54,10 @@ function makePrisma() {
       update: vi.fn().mockResolvedValue({}),
     },
     customerLedger: { create: vi.fn().mockResolvedValue({}) },
+    cashSession: {
+      findFirst: vi.fn().mockResolvedValue({ id: 'session-id' }),
+      update: vi.fn().mockResolvedValue({}),
+    },
   };
   const client = {
     $transaction: vi.fn(
@@ -104,7 +108,7 @@ describe('createSale payment methods', () => {
     const result = await createSale(client, input('CASH', { cashTendered: 120 }));
 
     expect(result.paymentStatus).toBe('SUCCESS');
-    expect(tx.$queryRaw).toHaveBeenCalledOnce();
+    expect(tx.$queryRaw).toHaveBeenCalledTimes(3);
     expect(tx.$queryRaw.mock.invocationCallOrder[0]!).toBeLessThan(
       tx.product.findMany.mock.invocationCallOrder[0]!,
     );
