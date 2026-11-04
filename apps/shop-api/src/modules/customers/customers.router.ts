@@ -468,17 +468,35 @@ export function customersRouter(businessId: string): Router {
         });
 
         if (body.method === 'CASH') {
+          await tx.$queryRaw`SELECT "id" FROM "users" WHERE "id" = ${auth.userId}::uuid FOR UPDATE`;
           const openSession = await tx.cashSession.findFirst({
             where: { businessId, cashierId: auth.userId, status: 'OPEN' },
             orderBy: { openedAt: 'desc' },
             select: { id: true },
           });
-          if (openSession) {
-            await tx.cashSession.updateMany({
-              where: { id: openSession.id, status: 'OPEN' },
-              data: { debtPayments: { increment: paymentAmount } },
-            });
-          }
+          if (!openSession) throw new Error('CUSTOMER_CASH_SESSION_REQUIRED');
+          await tx.$queryRaw`SELECT "id" FROM "cash_sessions" WHERE "id" = ${openSession.id}::uuid AND "status" = 'OPEN'::"CashSessionStatus" FOR UPDATE`;
+          const stillOpen = await tx.cashSession.findFirst({
+            where: { id: openSession.id, businessId, cashierId: auth.userId, status: 'OPEN' },
+            select: { id: true },
+          });
+          if (!stillOpen) throw new Error('CUSTOMER_CASH_SESSION_REQUIRED');
+          await tx.cashSession.update({
+            where: { id: openSession.id },
+            data: { debtPayments: { increment: paymentAmount } },
+          });
+          await tx.cashMovement.create({
+            data: {
+              businessId,
+              cashSessionId: openSession.id,
+              type: 'PAID_IN',
+              direction: 'CREDIT',
+              amount: paymentAmount,
+              reason: `Debt payment from ${customer.fullName}`,
+              reference: `DEBT_PAYMENT:${customerPayment.id}`,
+              createdById: auth.userId,
+            },
+          });
         }
 
         return {
@@ -498,6 +516,9 @@ export function customersRouter(businessId: string): Router {
       }
       if (err instanceof Error && err.message === 'PAYMENT_EXCEEDS_BALANCE') {
         return sendError(res, 409, 'PAYMENT_EXCEEDS_BALANCE', 'Payment cannot exceed the current outstanding balance.');
+      }
+      if (err instanceof Error && err.message === 'CUSTOMER_CASH_SESSION_REQUIRED') {
+        return sendError(res, 409, 'CASH_SESSION_REQUIRED', 'Open a till shift before recording a cash customer payment.');
       }
       console.error('customers/payment error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Failed to record payment.');

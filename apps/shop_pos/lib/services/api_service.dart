@@ -1465,6 +1465,213 @@ class ApiService {
     return false;
   }
 
+  Future<String?> getMpesaTillNumber() async {
+    lastError = null;
+    try {
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/business/settings/payments.mpesaTillNumber'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded['value'] is String) {
+          return decoded['value'] as String;
+        }
+        lastError = 'The shop API returned an invalid Till number setting.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not load the M-Pesa Till number (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not load the shop M-Pesa Till number.';
+      debugPrint('API getMpesaTillNumber error: $error');
+    }
+    return null;
+  }
+
+  Future<bool> updateMpesaTillNumber(String tillNumber) async {
+    lastError = null;
+    try {
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/business/settings/payments.mpesaTillNumber'),
+            headers: _headers,
+            body: jsonEncode({'value': tillNumber.trim()}),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(response.body) ??
+          'Could not save the M-Pesa Till number (${response.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not save the M-Pesa Till number to the shop API.';
+      debugPrint('API updateMpesaTillNumber error: $error');
+    }
+    return false;
+  }
+
+  Future<Map<String, dynamic>?> getCurrentCashSession() async {
+    lastError = null;
+    try {
+      final response = await http
+          .get(Uri.parse('$baseUrl/cash/sessions/current'), headers: _headers)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded.containsKey('data')) {
+          final data = decoded['data'];
+          return data is Map ? Map<String, dynamic>.from(data) : null;
+        }
+        lastError = 'The shop API returned an invalid till session.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not load the till session (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not load the till session from the shop API.';
+      debugPrint('API getCurrentCashSession error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> openCashSession(num openingCash) async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/cash/sessions'),
+            headers: _headers,
+            body: jsonEncode({'openingCash': openingCash}),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded['data'] is Map) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned an invalid opened till session.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not open the till shift (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not open a till shift on the shop API.';
+      debugPrint('API openCashSession error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> createCashMovement({
+    required String sessionId,
+    required String type,
+    required num amount,
+    required String reason,
+    required String idempotencyKey,
+  }) async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/cash/sessions/$sessionId/movements'),
+            headers: _headers,
+            body: jsonEncode({
+              'type': type,
+              'amount': amount,
+              'reason': reason,
+              'idempotencyKey': idempotencyKey,
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 201 || response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded['data'] is Map) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned an invalid cash movement.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not record the till movement (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not record the till movement on the shop API.';
+      debugPrint('API createCashMovement error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> closeCashSession({
+    required String sessionId,
+    required num countedCash,
+    String? varianceReason,
+  }) async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/cash/sessions/$sessionId/close'),
+            headers: _headers,
+            body: jsonEncode({
+              'countedCash': countedCash,
+              if (varianceReason != null && varianceReason.trim().isNotEmpty)
+                'varianceReason': varianceReason.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded['data'] is Map) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned an invalid closed till session.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not close the till shift (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not close the till shift on the shop API.';
+      debugPrint('API closeCashSession error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> reconcileCashSession({
+    required String sessionId,
+    required String note,
+  }) async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/cash/sessions/$sessionId/reconcile'),
+            headers: _headers,
+            body: jsonEncode({'note': note}),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded['data'] is Map) {
+          return Map<String, dynamic>.from(decoded['data'] as Map);
+        }
+        lastError = 'The shop API returned an invalid reconciled till session.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not reconcile the till shift (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not reconcile the till shift on the shop API.';
+      debugPrint('API reconcileCashSession error: $error');
+    }
+    return null;
+  }
+
   // ── Storefront profile ──────────────────────────────────────────────
 
   Future<Map<String, dynamic>?> getStorefrontSettings() async {

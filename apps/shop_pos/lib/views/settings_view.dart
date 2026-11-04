@@ -22,6 +22,8 @@ class _SettingsViewState extends State<SettingsView> {
   late final TextEditingController _shopNameController;
   late final TextEditingController _storeBranchController;
   late final TextEditingController _tillIdController;
+  late final TextEditingController _mpesaTillController;
+  String _initialMpesaTillNumber = '';
   late final TextEditingController _brandTaglineController;
   late final TextEditingController _brandLogoUrlController;
   late final TextEditingController _heroImageUrlController;
@@ -51,6 +53,7 @@ class _SettingsViewState extends State<SettingsView> {
       text: widget.state.storeBranch,
     );
     _tillIdController = TextEditingController(text: widget.state.tillId);
+    _mpesaTillController = TextEditingController();
     _brandTaglineController = TextEditingController(
       text: widget.state.brandTagline,
     );
@@ -69,6 +72,15 @@ class _SettingsViewState extends State<SettingsView> {
     _requirePinForReversal = widget.state.requirePinForReversal;
     _printerPaperSize = widget.state.printerPaperSize;
     _pendingLogoBase64 = widget.state.brandLogoBase64;
+    _loadMpesaTillNumber();
+  }
+
+  Future<void> _loadMpesaTillNumber() async {
+    if (!ApiService.instance.hasToken) return;
+    final value = await ApiService.instance.getMpesaTillNumber();
+    if (!mounted || value == null) return;
+    _initialMpesaTillNumber = value;
+    _mpesaTillController.text = value;
   }
 
   @override
@@ -76,6 +88,7 @@ class _SettingsViewState extends State<SettingsView> {
     _shopNameController.dispose();
     _storeBranchController.dispose();
     _tillIdController.dispose();
+    _mpesaTillController.dispose();
     _brandTaglineController.dispose();
     _brandLogoUrlController.dispose();
     _heroImageUrlController.dispose();
@@ -85,6 +98,38 @@ class _SettingsViewState extends State<SettingsView> {
 
   Future<void> _saveAllSettings() async {
     setState(() => _isSaving = true);
+
+    final mpesaTillNumber = _mpesaTillController.text.trim();
+    if (mpesaTillNumber != _initialMpesaTillNumber) {
+      if (!ApiService.instance.hasToken || !widget.state.canCreateUsers) {
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sign in online as the shop owner to update the M-Pesa Till number.',
+            ),
+          ),
+        );
+        return;
+      }
+      final saved = await ApiService.instance.updateMpesaTillNumber(
+        mpesaTillNumber,
+      );
+      if (!mounted) return;
+      if (!saved) {
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              ApiService.instance.lastError ??
+                  'Could not save the M-Pesa Till number.',
+            ),
+          ),
+        );
+        return;
+      }
+      _initialMpesaTillNumber = mpesaTillNumber;
+    }
 
     if (_showCustomerNameOnReceipt != _initialShowCustomerNameOnReceipt) {
       if (!ApiService.instance.hasToken || !widget.state.canCreateUsers) {
@@ -663,6 +708,25 @@ class _SettingsViewState extends State<SettingsView> {
                       ],
                     );
                   },
+                ),
+                const SizedBox(height: 16),
+
+                _buildTextField(
+                  'Shop M-Pesa Till Number',
+                  _mpesaTillController,
+                  hint: 'e.g. 1234567',
+                  inputFormatters: [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(10)],
+                ),
+                const SizedBox(height: 5),
+                const Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Saved Till number is prefilled at checkout. M-Pesa payments still require receipt confirmation.',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: AppColors.text_tertiary,
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 16),
 
@@ -1689,6 +1753,7 @@ class _SettingsViewState extends State<SettingsView> {
     String label,
     TextEditingController ctrl, {
     String? hint,
+    List<TextInputFormatter>? inputFormatters,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1704,6 +1769,7 @@ class _SettingsViewState extends State<SettingsView> {
         const SizedBox(height: 6),
         TextField(
           controller: ctrl,
+          inputFormatters: inputFormatters,
           style: const TextStyle(color: AppColors.text_primary, fontSize: 14),
           decoration: InputDecoration(
             hintText: hint,

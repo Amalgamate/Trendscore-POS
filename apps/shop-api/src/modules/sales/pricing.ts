@@ -77,6 +77,7 @@ export type SaleRejection =
   | { kind: 'EMPTY_SALE' }
   | { kind: 'MPESA_REFERENCE_REQUIRED' }
   | { kind: 'CASH_TENDER_INSUFFICIENT' }
+  | { kind: 'CASH_SESSION_REQUIRED' }
   | { kind: 'CUSTOMER_REQUIRED' }
   | { kind: 'CREDIT_ACCOUNT_UNAVAILABLE'; customerId: string }
   | { kind: 'CREDIT_FROZEN'; customerId: string }

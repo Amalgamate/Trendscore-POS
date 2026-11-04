@@ -222,6 +222,41 @@ export async function createSale(
       );
     }
 
+    let cashSessionId: string | undefined;
+    if (method === 'CASH') {
+      // Serialize against shift open/close and prevent cash sales from silently
+      // landing outside the cashier's accountable till session.
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "users" WHERE "id" = ${cashierId}::uuid FOR UPDATE`,
+      );
+      const openSession = await tx.cashSession.findFirst({
+        where: { businessId, cashierId, status: 'OPEN' },
+        select: { id: true },
+      });
+      if (!openSession) {
+        throw new SaleValidationError(
+          { kind: 'CASH_SESSION_REQUIRED' },
+          'Open a till shift before recording a cash sale.',
+        );
+      }
+      await tx.$queryRaw(
+        Prisma.sql`SELECT "id" FROM "cash_sessions"
+          WHERE "id" = ${openSession.id}::uuid AND "status" = 'OPEN'::"CashSessionStatus"
+          FOR UPDATE`,
+      );
+      const stillOpen = await tx.cashSession.findFirst({
+        where: { id: openSession.id, businessId, cashierId, status: 'OPEN' },
+        select: { id: true },
+      });
+      if (!stillOpen) {
+        throw new SaleValidationError(
+          { kind: 'CASH_SESSION_REQUIRED' },
+          'The till shift closed before this sale was recorded. Open a new shift and retry.',
+        );
+      }
+      cashSessionId = openSession.id;
+    }
+
     let customerBalance: number | undefined;
     let receiptCustomerName = customerName?.trim() || undefined;
     if (method === 'CREDIT') {
@@ -287,6 +322,7 @@ export async function createSale(
         cashierId,
         customerId,
         customerName: receiptCustomerName,
+        cashSessionId,
         receiptNumber,
         clientRef,
         idempotencyKey,
@@ -403,6 +439,13 @@ export async function createSale(
         settledAt: method === 'MPESA' ? null : new Date(),
       },
     });
+
+    if (cashSessionId) {
+      await tx.cashSession.update({
+        where: { id: cashSessionId },
+        data: { cashSales: { increment: total } },
+      });
+    }
 
     // 7. If Credit method, update Customer balance & append to CustomerLedger
     if (method === 'CREDIT' && customerId) {

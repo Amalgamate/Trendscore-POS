@@ -53,6 +53,9 @@ const UpsertSettingSchema = z.object({
 const ReceiptCustomerNameSettingSchema = z.object({
   value: z.boolean(),
 });
+const MpesaTillSettingSchema = z.object({
+  value: z.string().trim().regex(/^(?:\d{5,10})?$/, 'Enter a 5 to 10 digit M-Pesa Till or Paybill number.'),
+});
 
 export function businessRouter(businessId: string): Router {
   const router = ExpressRouter();
@@ -225,6 +228,53 @@ export function businessRouter(businessId: string): Router {
       } catch (err) {
         console.error('business/receipt setting update error:', err);
         return sendError(res, 500, 'SERVER_ERROR', 'Failed to update receipt settings.');
+      }
+    },
+  );
+
+  router.get('/settings/payments.mpesaTillNumber', requireAuth, async (_req, res) => {
+    try {
+      const setting = await prisma.businessSetting.findUnique({
+        where: { businessId_key: { businessId, key: 'payments.mpesaTillNumber' } },
+        select: { value: true },
+      });
+      const value = setting?.value;
+      return send200(res, {
+        key: 'payments.mpesaTillNumber',
+        value: typeof value === 'string' ? value : '',
+      });
+    } catch (error) {
+      console.error('business/M-Pesa Till setting get error:', error);
+      return sendError(res, 500, 'SERVER_ERROR', 'Could not load the shop M-Pesa Till number.');
+    }
+  });
+
+  router.put(
+    '/settings/payments.mpesaTillNumber',
+    requireAuth,
+    requireRole('OWNER'),
+    async (req, res) => {
+      const body = parseBody(MpesaTillSettingSchema, req, res);
+      if (!body) return;
+      try {
+        const setting = await prisma.businessSetting.upsert({
+          where: {
+            businessId_key: { businessId, key: 'payments.mpesaTillNumber' },
+          },
+          update: { value: body.value },
+          create: {
+            businessId,
+            key: 'payments.mpesaTillNumber',
+            value: body.value,
+          },
+        });
+        return send200(res, {
+          key: setting.key,
+          value: typeof setting.value === 'string' ? setting.value : '',
+        });
+      } catch (error) {
+        console.error('business/M-Pesa Till setting update error:', error);
+        return sendError(res, 500, 'SERVER_ERROR', 'Could not save the shop M-Pesa Till number.');
       }
     },
   );

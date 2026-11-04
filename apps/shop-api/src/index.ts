@@ -13,6 +13,7 @@ import { stockRouter } from './modules/stock/stock.router';
 import { categoriesRouter } from './modules/categories/categories.router';
 import { businessRouter } from './modules/business/business.router';
 import { deliveryRouter } from './modules/delivery/delivery.router';
+import { cashRouter } from './modules/cash/cash.router';
 import {
   expirePendingStorefrontOrders,
   storefrontOrdersRouter,
@@ -72,6 +73,7 @@ if (BUSINESS_ID) {
   app.use('/categories', categoriesRouter(BUSINESS_ID));
   app.use('/customers', customersRouter(BUSINESS_ID));
   app.use('/sales', salesRouter(BUSINESS_ID));
+  app.use('/cash', cashRouter(BUSINESS_ID));
   app.use('/suppliers', suppliersRouter(BUSINESS_ID));
   app.use('/stock', stockRouter(BUSINESS_ID));
   app.use('/business', businessRouter(BUSINESS_ID));

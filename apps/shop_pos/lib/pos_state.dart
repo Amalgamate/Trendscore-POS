@@ -636,7 +636,10 @@ class PosCustomer {
 enum CashMovementType {
   floatIn('Opening Float', true),
   saleCash('Cash Sale', true),
+  paidIn('Cash In', true),
+  debtPayment('Debt Payment', true),
   expenseOut('Expense Out', false),
+  cashRefund('Cash Refund', false),
   dropOut('Cash Drop', false);
 
   const CashMovementType(this.label, this.isInflow);
@@ -660,28 +663,117 @@ class CashMovement {
   final Money amount;
   final String reason;
   final String cashier;
+
+  factory CashMovement.fromApi(Map<String, dynamic> data) {
+    final type = data['type'] as String? ?? '';
+    final direction = data['direction'] as String? ?? '';
+    final reason = data['reason'] as String? ?? '';
+    final lowerReason = reason.toLowerCase();
+    final movementType = switch (type) {
+      'SALE_CASH' => CashMovementType.saleCash,
+      'EXPENSE' || 'PAID_OUT' => CashMovementType.expenseOut,
+      'DROP_TO_BANK' => CashMovementType.dropOut,
+      'CASH_REFUND' => CashMovementType.cashRefund,
+      'PAID_IN' =>
+        lowerReason.contains('opening')
+            ? CashMovementType.floatIn
+            : lowerReason.contains('debt payment')
+            ? CashMovementType.debtPayment
+            : CashMovementType.paidIn,
+      _ =>
+        direction == 'CREDIT'
+            ? CashMovementType.paidIn
+            : CashMovementType.expenseOut,
+    };
+    final rawAmount = data['amount'];
+    final amount = rawAmount is num
+        ? rawAmount.toDouble()
+        : double.tryParse(rawAmount?.toString() ?? '') ?? 0;
+    return CashMovement(
+      id:
+          data['id'] as String? ??
+          'cash_${DateTime.now().microsecondsSinceEpoch}',
+      timestamp:
+          DateTime.tryParse(data['createdAt'] as String? ?? '') ??
+          DateTime.now(),
+      type: movementType,
+      amount: Money.fromDouble(amount < 0 ? 0 : amount),
+      reason: reason,
+      cashier: data['cashier'] as String? ?? '',
+    );
+  }
 }
 
-/// A till shift with cash drawer management and reconciliation.
+/// A server-backed till shift. Empty is represented explicitly and never
+/// fabricated with demo balances.
 class CashShift {
   CashShift({
     required this.shiftId,
     required this.openedAt,
     required this.openingFloat,
     required this.cashier,
-  }) : cashSales = const Money(0),
-       cashPaidIn = const Money(0),
-       cashPaidOut = const Money(0),
-       movements = [
-         CashMovement(
-           id: 'mov_init',
-           timestamp: openedAt,
-           type: CashMovementType.floatIn,
-           amount: openingFloat,
-           reason: 'Opening till float',
-           cashier: cashier,
-         ),
-       ];
+    this.cashSales = const Money(0),
+    this.cashPaidIn = const Money(0),
+    this.cashPaidOut = const Money(0),
+    this.cashRefunds = const Money(0),
+    this.dropsToBank = const Money(0),
+    List<CashMovement>? movements,
+    this.isClosed = false,
+    this.closingCounted,
+    this.varianceMinorUnits,
+  }) : movements = movements ?? <CashMovement>[];
+
+  CashShift.empty({required this.cashier})
+    : shiftId = '',
+      openedAt = DateTime.now(),
+      openingFloat = const Money(0),
+      cashSales = const Money(0),
+      cashPaidIn = const Money(0),
+      cashPaidOut = const Money(0),
+      cashRefunds = const Money(0),
+      dropsToBank = const Money(0),
+      movements = <CashMovement>[],
+      isClosed = true;
+
+  factory CashShift.fromApi(Map<String, dynamic> data) {
+    Money money(Object? value) {
+      final amount = value is num
+          ? value.toDouble()
+          : double.tryParse(value?.toString() ?? '') ?? 0;
+      return Money.fromDouble(amount < 0 ? 0 : amount);
+    }
+
+    final status = data['status'] as String? ?? 'CLOSED';
+    final rawMovements = data['movements'] as List<dynamic>? ?? const [];
+    final debtPayments = (data['debtPayments'] as num?)?.toDouble() ?? 0;
+    final otherIn = (data['otherIn'] as num?)?.toDouble() ?? 0;
+    final cashExpenses = (data['cashExpenses'] as num?)?.toDouble() ?? 0;
+    final otherOut = (data['otherOut'] as num?)?.toDouble() ?? 0;
+    return CashShift(
+      shiftId: data['id'] as String? ?? '',
+      openedAt:
+          DateTime.tryParse(data['openedAt'] as String? ?? '') ??
+          DateTime.now(),
+      openingFloat: money(data['openingCash']),
+      cashier: data['cashier'] as String? ?? '',
+      cashSales: money(data['cashSales']),
+      cashPaidIn: money(debtPayments + otherIn),
+      cashPaidOut: money(cashExpenses + otherOut),
+      cashRefunds: money(data['cashRefunds']),
+      dropsToBank: money(data['dropsToBank']),
+      movements: rawMovements
+          .whereType<Map>()
+          .map((item) => CashMovement.fromApi(Map<String, dynamic>.from(item)))
+          .toList(),
+      isClosed: status != 'OPEN',
+      closingCounted: data['countedCash'] == null
+          ? null
+          : money(data['countedCash']),
+      varianceMinorUnits: data['variance'] == null
+          ? null
+          : (((data['variance'] as num?)?.toDouble() ?? 0) * 100).round(),
+    );
+  }
 
   final String shiftId;
   final DateTime openedAt;
@@ -690,16 +782,22 @@ class CashShift {
   Money cashSales;
   Money cashPaidIn;
   Money cashPaidOut;
+  Money cashRefunds;
+  Money dropsToBank;
   final List<CashMovement> movements;
-  bool isClosed = false;
+  bool isClosed;
   Money? closingCounted;
-  Money? variance;
+  int? varianceMinorUnits;
+
+  bool get isOpen => shiftId.isNotEmpty && !isClosed;
 
   Money get expectedCash => Money(
     openingFloat.minorUnits +
         cashSales.minorUnits +
         cashPaidIn.minorUnits -
-        cashPaidOut.minorUnits,
+        cashPaidOut.minorUnits -
+        cashRefunds.minorUnits -
+        dropsToBank.minorUnits,
   );
 }
 
@@ -1041,6 +1139,7 @@ class PosState extends ChangeNotifier {
     } catch (e) {
       debugPrint('Could not load customers from API: $e');
     }
+    await refreshCashSession();
     if (user.role == PosUserRole.owner || user.role == PosUserRole.superAdmin) {
       final remoteUsers = await ApiService.instance.getStaffUsers();
       if (remoteUsers != null) {
@@ -1108,6 +1207,7 @@ class PosState extends ChangeNotifier {
   late List<SaleRecord> sales;
   List<SaleRecord> get salesLedger => sales;
   late CashShift shift;
+  String? cashSessionError;
   Money get expectedDrawerCash => shift.expectedCash;
   PosCustomer? selectedCustomer;
 
@@ -2793,12 +2893,7 @@ class PosState extends ChangeNotifier {
 
     sales = [];
 
-    shift = CashShift(
-      shiftId: 'SHIFT-20261006-01',
-      openedAt: DateTime.now().subtract(const Duration(hours: 4)),
-      openingFloat: const Money.shillings(5000),
-      cashier: activeCashier,
-    );
+    shift = CashShift.empty(cashier: activeCashier);
   }
 
   // --- Cart Actions ---
@@ -2879,6 +2974,12 @@ class PosState extends ChangeNotifier {
     if (method == SalePaymentMethod.credit && !ApiService.instance.hasToken) {
       throw PosException(
         'Reconnect to the shop before recording a credit sale. The sale was not saved locally.',
+      );
+    }
+    if (method == SalePaymentMethod.cash &&
+        (!ApiService.instance.hasToken || !shift.isOpen)) {
+      throw PosException(
+        'Open a till shift while connected before recording a cash sale.',
       );
     }
     if (cart.hasStockShortage && !ApiService.instance.hasToken) {
@@ -3030,20 +3131,10 @@ class PosState extends ChangeNotifier {
       }
     }
 
-    // 3. If Cash, append to Shift Cash movements
+    // The API owns the cash-session totals and sale linkage. Reload its
+    // authoritative session instead of incrementing a browser-only balance.
     if (method == SalePaymentMethod.cash) {
-      shift.cashSales = shift.cashSales + saleSubtotal;
-      shift.movements.insert(
-        0,
-        CashMovement(
-          id: 'mov_$receiptNum',
-          timestamp: now,
-          type: CashMovementType.saleCash,
-          amount: saleSubtotal,
-          reason: 'Sale $receiptNum',
-          cashier: activeCashier,
-        ),
-      );
+      await refreshCashSession();
     }
 
     // 4. Create Immutable Sale Record
@@ -3365,25 +3456,12 @@ class PosState extends ChangeNotifier {
     cust.ledger.insert(0, paymentEntry);
     updateCustomerSnapshot(cust);
 
-    // Cash debt payments are part of drawer inflow as well as the customer ledger.
-    if (method.toUpperCase() == 'CASH') {
-      shift.cashPaidIn = shift.cashPaidIn + amount;
-      shift.movements.insert(
-        0,
-        CashMovement(
-          id: 'mov_debt_${DateTime.now().millisecondsSinceEpoch}',
-          timestamp: DateTime.now(),
-          type: CashMovementType.floatIn,
-          amount: amount,
-          reason: 'Debt payment from ${cust.name}',
-          cashier: activeCashier,
-        ),
-      );
-    }
+    // Cash debt payments are recorded by the API in the active till session.
 
     if (ApiService.instance.hasToken && isRemoteCustomer) {
       await refreshCustomerAccounts();
       await refreshCustomerSnapshot(customerId);
+      if (method.toUpperCase() == 'CASH') await refreshCashSession();
     }
 
     notifyListeners();
@@ -3392,45 +3470,87 @@ class PosState extends ChangeNotifier {
 
   // --- Cash Drawer Drops & Expenses ---
 
-  void recordCashDrop(Money amount, String reason, bool isCashIn) {
-    if (isCashIn) {
-      shift.cashPaidIn = shift.cashPaidIn + amount;
-      shift.movements.insert(
-        0,
-        CashMovement(
-          id: 'drop_${DateTime.now().millisecondsSinceEpoch}',
-          timestamp: DateTime.now(),
-          type: CashMovementType.floatIn,
-          amount: amount,
-          reason: reason,
-          cashier: activeCashier,
-        ),
-      );
-    } else {
-      shift.cashPaidOut = shift.cashPaidOut + amount;
-      shift.movements.insert(
-        0,
-        CashMovement(
-          id: 'exp_${DateTime.now().millisecondsSinceEpoch}',
-          timestamp: DateTime.now(),
-          type: CashMovementType.expenseOut,
-          amount: amount,
-          reason: reason,
-          cashier: activeCashier,
-        ),
-      );
+  Future<bool> refreshCashSession() async {
+    if (!ApiService.instance.hasToken) return false;
+    final data = await ApiService.instance.getCurrentCashSession();
+    if (data == null && ApiService.instance.lastError != null) {
+      cashSessionError = ApiService.instance.lastError;
+      notifyListeners();
+      return false;
     }
+    cashSessionError = null;
+    shift = data == null
+        ? CashShift.empty(cashier: activeCashier)
+        : CashShift.fromApi(data);
     notifyListeners();
+    return true;
+  }
+
+  Future<bool> openCashShift(Money openingFloat) async {
+    if (!ApiService.instance.hasToken) {
+      cashSessionError = 'Reconnect to the shop before opening a till shift.';
+      notifyListeners();
+      return false;
+    }
+    final data = await ApiService.instance.openCashSession(
+      openingFloat.minorUnits / 100,
+    );
+    if (data == null) {
+      cashSessionError =
+          ApiService.instance.lastError ?? 'Could not open till shift.';
+      notifyListeners();
+      return false;
+    }
+    shift = CashShift.fromApi(data);
+    cashSessionError = null;
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> recordCashDrop(
+    Money amount,
+    String reason,
+    bool isCashIn,
+  ) async {
+    if (!shift.isOpen) {
+      cashSessionError = 'Open a till shift before recording cash movements.';
+      notifyListeners();
+      return false;
+    }
+    final data = await ApiService.instance.createCashMovement(
+      sessionId: shift.shiftId,
+      type: isCashIn ? 'PAID_IN' : 'EXPENSE',
+      amount: amount.minorUnits / 100,
+      reason: reason,
+      idempotencyKey: 'cash-${DateTime.now().microsecondsSinceEpoch}',
+    );
+    if (data == null) {
+      cashSessionError =
+          ApiService.instance.lastError ?? 'Could not record movement.';
+      notifyListeners();
+      return false;
+    }
+    return refreshCashSession();
   }
 
   // --- Shift Close ---
 
-  void closeShift(Money countedCash) {
-    shift.isClosed = true;
-    shift.closingCounted = countedCash;
-    shift.variance = Money(
-      countedCash.minorUnits - shift.expectedCash.minorUnits,
+  Future<bool> closeShift(Money countedCash, {String? varianceReason}) async {
+    if (!shift.isOpen) return false;
+    final data = await ApiService.instance.closeCashSession(
+      sessionId: shift.shiftId,
+      countedCash: countedCash.minorUnits / 100,
+      varianceReason: varianceReason,
     );
+    if (data == null) {
+      cashSessionError =
+          ApiService.instance.lastError ?? 'Could not close till shift.';
+      notifyListeners();
+      return false;
+    }
+    shift = CashShift.fromApi(data);
+    cashSessionError = null;
     notifyListeners();
+    return true;
   }
 }

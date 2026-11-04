@@ -59,6 +59,16 @@ class _CheckoutModalState extends State<CheckoutModal> {
     _selectedCreditCustomer = widget.state.selectedCustomer;
     _cashTenderedMinor = widget.state.cart.subtotal.minorUnits;
     _cashController.text = _cashInput(widget.state.cart.subtotal.minorUnits);
+    _loadSavedTillNumber();
+  }
+
+  Future<void> _loadSavedTillNumber() async {
+    if (!ApiService.instance.hasToken) return;
+    final value = await ApiService.instance.getMpesaTillNumber();
+    if (!mounted || value == null || _tillNumberController.text.isNotEmpty) {
+      return;
+    }
+    setState(() => _tillNumberController.text = value);
   }
 
   String _cashInput(int minorUnits) =>
@@ -90,9 +100,9 @@ class _CheckoutModalState extends State<CheckoutModal> {
       );
       return;
     }
-    if (!RegExp(r'^\d{3,15}$').hasMatch(tillNumber)) {
+    if (!RegExp(r'^\d{5,10}$').hasMatch(tillNumber)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid numeric Till number.')),
+        const SnackBar(content: Text('Enter a valid 5 to 10 digit Till number.')),
       );
       return;
     }
@@ -636,6 +646,13 @@ class _CheckoutModalState extends State<CheckoutModal> {
                 borderRadius: BorderRadius.circular(8),
                 borderSide: const BorderSide(color: Color(0xFF86EFAC)),
               ),
+            ),
+          ),
+          const Padding(
+            padding: EdgeInsets.only(left: 4, top: 5),
+            child: Text(
+              'Prefilled from shop settings; update it there when the Till changes.',
+              style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
             ),
           ),
           const SizedBox(height: 12),
