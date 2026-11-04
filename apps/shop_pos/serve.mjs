@@ -47,6 +47,12 @@ const server = http.createServer((req, res) => {
 
   const ext = path.extname(filePath).toLowerCase();
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+  const appShellFiles = new Set([
+    'index.html',
+    'flutter_bootstrap.js',
+    'flutter_service_worker.js',
+    'version.json',
+  ]);
 
   fs.readFile(filePath, (err, content) => {
     if (err) {
@@ -54,7 +60,12 @@ const server = http.createServer((req, res) => {
       res.end('500 Internal Server Error');
       return;
     }
-    res.writeHead(200, { 'Content-Type': contentType });
+    res.writeHead(200, {
+      'Content-Type': contentType,
+      ...(appShellFiles.has(path.basename(filePath))
+        ? { 'Cache-Control': 'no-store, no-cache, must-revalidate' }
+        : {}),
+    });
     res.end(content);
   });
 });

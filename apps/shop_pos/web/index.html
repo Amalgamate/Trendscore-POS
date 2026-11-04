@@ -105,6 +105,15 @@
       }).catch(() => {});
     })();
   </script>
-  <script src="flutter_bootstrap.js" async></script>
+  <script>
+    // Do not let an older Flutter service worker keep serving a bootstrap
+    // script with an old serviceWorkerVersion after a deployment. A unique
+    // query bypasses the Flutter worker's static-resource cache for this tiny
+    // app-shell loader; the worker can then install the matching asset bundle.
+    const flutterBootstrap = document.createElement('script');
+    flutterBootstrap.src = `flutter_bootstrap.js?release=${Date.now()}`;
+    flutterBootstrap.async = true;
+    document.body.appendChild(flutterBootstrap);
+  </script>
 </body>
 </html>

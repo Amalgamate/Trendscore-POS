@@ -1103,6 +1103,7 @@ class PosState extends ChangeNotifier {
   late List<PosCustomer> customers;
   List<PosCustomer> archivedCustomers = [];
   bool customerAccountsLoading = false;
+  String? customerAccountsError;
   final Map<String, int> customerLedgerTotals = {};
   late List<SaleRecord> sales;
   List<SaleRecord> get salesLedger => sales;
@@ -2074,20 +2075,31 @@ class PosState extends ChangeNotifier {
   }
 
   Future<bool> refreshCustomerAccounts() async {
-    if (!ApiService.instance.hasToken) return false;
+    if (!ApiService.instance.hasToken) {
+      customerAccountsError = 'Sign in to load customer accounts.';
+      notifyListeners();
+      return false;
+    }
     if (customerAccountsLoading) return false;
     customerAccountsLoading = true;
+    customerAccountsError = null;
     notifyListeners();
     try {
       final responses = await Future.wait([
         ApiService.instance.getCustomers(status: 'ACTIVE'),
         ApiService.instance.getCustomers(status: 'ARCHIVED'),
       ]);
-      if (responses[0] == null || responses[1] == null) return false;
+      if (responses[0] == null || responses[1] == null) {
+        customerAccountsError =
+            ApiService.instance.lastError ??
+            'Could not load customer accounts.';
+        return false;
+      }
       replaceCustomerAccounts(
         active: responses[0]!.map(PosCustomer.fromApi).toList(),
         archived: responses[1]!.map(PosCustomer.fromApi).toList(),
       );
+      customerAccountsError = null;
       return true;
     } finally {
       customerAccountsLoading = false;

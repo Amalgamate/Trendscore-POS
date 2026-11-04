@@ -1240,6 +1240,40 @@ class _CustomersViewState extends State<CustomersView> {
                               Text('Loading customer accounts…'),
                             ],
                           )
+                        : widget.state.customerAccountsError != null
+                        ? Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Could not sync customer accounts',
+                                style: TextStyle(
+                                  color: AppColors.text_secondary,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                ),
+                                child: Text(
+                                  widget.state.customerAccountsError!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: AppColors.text_tertiary,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ),
+                              TextButton.icon(
+                                onPressed: widget.state.customerAccountsLoading
+                                    ? null
+                                    : widget.state.refreshCustomerAccounts,
+                                icon: const Icon(Icons.refresh, size: 16),
+                                label: const Text('Retry'),
+                              ),
+                            ],
+                          )
                         : const Text(
                             'No customers found',
                             style: TextStyle(color: AppColors.text_tertiary),
