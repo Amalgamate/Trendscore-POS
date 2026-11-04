@@ -1,0 +1,7 @@
+.git
+.agents
+**/node_modules
+**/build
+**/.dart_tool
+tools/flutter
+*.log

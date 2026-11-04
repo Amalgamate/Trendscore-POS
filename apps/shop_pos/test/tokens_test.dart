@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shop_pos/theme/app_theme.dart';
 import 'package:shop_pos/theme/tokens.dart';
 
 void main() {

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'cart.dart';
+import 'units.dart' hide ProductUnitCatalogue;
 import 'pos_state.dart';
 import 'services/api_service.dart';
 import 'theme/app_theme.dart';
@@ -1153,6 +1154,108 @@ class _NavIcon extends StatelessWidget {
   }
 }
 
+class _MeasuredQuantityDialog extends StatefulWidget {
+  const _MeasuredQuantityDialog({required this.product});
+
+  final PosProduct product;
+
+  @override
+  State<_MeasuredQuantityDialog> createState() =>
+      _MeasuredQuantityDialogState();
+}
+
+class _MeasuredQuantityDialogState extends State<_MeasuredQuantityDialog> {
+  late final TextEditingController _quantityController;
+  late final bool _isVolume;
+  late final List<String> _availableUnits;
+  late String _selectedUnit;
+
+  @override
+  void initState() {
+    super.initState();
+    _quantityController = TextEditingController(text: '250');
+    _isVolume = const ['ml', 'l'].contains(widget.product.unit);
+    _selectedUnit = _isVolume ? 'ml' : 'g';
+    _availableUnits = _isVolume ? const ['ml', 'l'] : const ['g', 'kg'];
+  }
+
+  @override
+  void dispose() {
+    _quantityController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final presets = widget.product.quickQuantityPresets.isEmpty
+        ? (_isVolume
+              ? const ['100 ml', '250 ml', '500 ml', '1 L']
+              : const ['100 g', '250 g', '500 g', '1 kg'])
+        : widget.product.quickQuantityPresets;
+
+    return AlertDialog(
+      title: Text('Sell ${widget.product.displayName}'),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Wrap(
+            spacing: 8,
+            children: presets.map((preset) {
+              return ActionChip(
+                label: Text(preset),
+                onPressed: () {
+                  final match = RegExp(
+                    r'^(\d+(?:\.\d+)?)\s*(\w+)$',
+                  ).firstMatch(preset);
+                  if (match == null) return;
+                  final unit = match.group(2)!.toLowerCase();
+                  if (!_availableUnits.contains(unit)) return;
+                  _quantityController.text = match.group(1)!;
+                  setState(() => _selectedUnit = unit);
+                },
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _quantityController,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: const InputDecoration(labelText: 'Quantity'),
+          ),
+          DropdownButton<String>(
+            value: _selectedUnit,
+            items: _availableUnits
+                .map(
+                  (unit) => DropdownMenuItem(
+                    value: unit,
+                    child: Text(ProductUnitCatalogue.symbols[unit] ?? unit),
+                  ),
+                )
+                .toList(),
+            onChanged: (unit) => setState(
+              () => _selectedUnit = unit ?? _selectedUnit,
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () {
+            final quantity = num.tryParse(_quantityController.text.trim());
+            if (quantity == null || quantity <= 0) return;
+            Navigator.pop(context, (quantity, _selectedUnit));
+          },
+          child: const Text('Add'),
+        ),
+      ],
+    );
+  }
+}
+
 class _PosTerminalView extends StatefulWidget {
   const _PosTerminalView({required this.state, required this.onOpenSync});
 
@@ -1191,12 +1294,28 @@ class _PosTerminalViewState extends State<_PosTerminalView> {
 
   int _qtyInCart(String productId) {
     for (final line in widget.state.cart.lines) {
-      if (line.productId == productId) return line.quantity;
+      if (line.productId == productId) return line.quantity.ceil();
     }
     return 0;
   }
 
-  void _onProductTap(PosProduct product) {
+  Future<void> _onProductTap(PosProduct product) async {
+    if (const ['ml', 'l', 'g', 'kg'].contains(product.unit)) {
+      final result = await showDialog<(num, String)>(
+        context: context,
+        builder: (_) => _MeasuredQuantityDialog(product: product),
+      );
+      if (result == null || !mounted) return;
+      widget.state.addMeasuredToCart(
+        product,
+        result.$1,
+        result.$2,
+        onRefused: (reason) => ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('${product.name}: $reason'))),
+      );
+      return;
+    }
     widget.state.addToCart(
       product,
       onRefused: (reason) {
@@ -2167,7 +2286,7 @@ class _ProductTileState extends State<_ProductTile> {
         : (p.isLowStock ? const Color(0xFFFCD34D) : const Color(0xFF86EFAC));
     final stockText = p.isOutOfStock
         ? 'Out of stock'
-        : '${p.stock} units${p.isLowStock ? ' (low)' : ''}';
+        : '${StockUnitFormatter.format((p.stock * 1000).round(), p.unit)}${p.isLowStock ? ' (low)' : ''}';
 
     return Container(
       decoration: const BoxDecoration(
@@ -2376,7 +2495,9 @@ class _ProductTileState extends State<_ProductTile> {
                               ),
                               const SizedBox(width: 5),
                               Text(
-                                out ? '0 left' : '${p.stock} left',
+                                out
+                                    ? '0 left'
+                                    : '${StockUnitFormatter.format((p.stock * 1000).round(), p.unit)} left',
                                 style: TextStyle(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.w700,
@@ -2539,7 +2660,7 @@ class _ProductCardState extends State<_ProductCard> {
         onTapDown: (_) => setState(() => _pressed = true),
         onTapUp: (_) => setState(() => _pressed = false),
         onTapCancel: () => setState(() => _pressed = false),
-        onTap: product.isOutOfStock ? null : widget.onTap,
+        onTap: widget.onTap,
         child: AnimatedScale(
           scale: _pressed
               ? 0.95
@@ -2625,7 +2746,7 @@ class _ProductCardState extends State<_ProductCard> {
                       child: Text(
                         product.isOutOfStock
                             ? '0 LEFT'
-                            : '${product.stock} left',
+                            : '${StockUnitFormatter.format((product.stock * 1000).round(), product.unit)} left',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
@@ -2915,7 +3036,7 @@ class _CartPanel extends StatelessWidget {
                               ),
                             ),
                             subtitle: Text(
-                              '${line.quantity} × KES ${line.unitPrice.formatted}',
+                              '${line.quantity} ${line.unit} × KES ${line.unitPrice.formatted}/${line.baseUnit}',
                               style: const TextStyle(
                                 fontSize: 11,
                                 color: AppColors.text_tertiary,
@@ -2933,8 +3054,8 @@ class _CartPanel extends StatelessWidget {
                                 ),
                                 const SizedBox(width: 8),
                                 _QtyStepper(
-                                  quantity: line.quantity,
-                                  stock: line.stock,
+                                  quantity: line.quantity.ceil(),
+                                  stock: line.stock.ceil(),
                                   onMinus: () =>
                                       state.changeQuantity(line.productId, -1),
                                   onPlus: () {
@@ -2989,11 +3110,16 @@ class _CartPanel extends StatelessWidget {
                         color: AppColors.text_tertiary,
                       ),
                     ),
-                    Text(
-                      'KES ${Money(cart.subtotal.minorUnits - cart.vatAmount.minorUnits).formatted}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.text_secondary,
+                    Flexible(
+                      child: Text(
+                        'KES ${Money(cart.subtotal.minorUnits - cart.vatAmount.minorUnits).formatted}',
+                        textAlign: TextAlign.end,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.text_secondary,
+                        ),
                       ),
                     ),
                   ],
@@ -3009,16 +3135,42 @@ class _CartPanel extends StatelessWidget {
                         color: AppColors.text_tertiary,
                       ),
                     ),
-                    Text(
-                      'KES ${cart.vatAmount.formatted}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: AppColors.text_secondary,
+                    Flexible(
+                      child: Text(
+                        'KES ${cart.vatAmount.formatted}',
+                        textAlign: TextAlign.end,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 12,
+                          color: AppColors.text_secondary,
+                        ),
                       ),
                     ),
                   ],
                 ),
                 const Divider(height: 16),
+                if (cart.hasStockShortage) ...[
+                  Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.only(bottom: 12),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: AppColors.status_warning.withAlpha(20),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(
+                        color: AppColors.status_warning.withAlpha(90),
+                      ),
+                    ),
+                    child: const Text(
+                      'Requested quantity exceeds recorded stock. An Owner or Manager PIN is required to complete this sale.',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -3029,12 +3181,17 @@ class _CartPanel extends StatelessWidget {
                         fontSize: 14,
                       ),
                     ),
-                    Text(
-                      'KES ${cart.subtotal.formatted}',
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w900,
-                        color: AppColors.accent_primary,
+                    Flexible(
+                      child: Text(
+                        'KES ${cart.subtotal.formatted}',
+                        textAlign: TextAlign.end,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          color: AppColors.accent_primary,
+                        ),
                       ),
                     ),
                   ],

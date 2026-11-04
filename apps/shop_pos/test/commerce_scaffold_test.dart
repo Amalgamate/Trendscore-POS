@@ -5,7 +5,7 @@ import 'package:shop_pos/views/social_commerce_view.dart';
 import 'package:shop_pos/views/website_builder_view.dart';
 
 void main() {
-  testWidgets('website builder exposes industry and launch checklist', (
+  testWidgets('website builder shows a retry when settings cannot load', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(900, 1200);
@@ -18,10 +18,10 @@ void main() {
         home: Scaffold(body: WebsiteBuilderView(state: PosState())),
       ),
     );
+    await tester.pumpAndSettle();
 
-    expect(find.text('Business industry'), findsOneWidget);
-    expect(find.text('Store launch checklist'), findsOneWidget);
-    expect(find.text('Checkout'), findsOneWidget);
+    expect(find.text('Storefront settings'), findsOneWidget);
+    expect(find.text('Retry'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

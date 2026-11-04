@@ -4,6 +4,7 @@ import '../cart.dart';
 import '../pos_state.dart';
 import '../services/api_service.dart';
 import '../theme/tokens.dart';
+import '../units.dart' hide ProductUnitCatalogue;
 import 'receipt_dialog.dart';
 
 /// Modal bottom sheet or dialog for payment execution.
@@ -43,6 +44,7 @@ class _CheckoutModalState extends State<CheckoutModal> {
 
   // Cash State
   final _cashController = TextEditingController();
+  String _customerName = '';
   int _cashTenderedMinor = 0;
 
   // Credit State
@@ -174,11 +176,123 @@ class _CheckoutModalState extends State<CheckoutModal> {
     );
   }
 
-  void _finishSale({
+  Future<Map<String, String>?> _requestStockOverride(
+    StockOverrideRequiredException shortage,
+  ) async {
+    final approvers = widget.state.users
+        .where(
+          (user) =>
+              user.active &&
+              (user.role == PosUserRole.owner ||
+                  user.role == PosUserRole.manager),
+        )
+        .toList();
+    if (approvers.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'No active Owner or Manager account is available to approve this sale.',
+          ),
+        ),
+      );
+      return null;
+    }
+    var approverId = approvers.first.id;
+    final product = widget.state.products.firstWhere(
+      (product) => product.id == shortage.productId,
+      orElse: () => widget.state.products.first,
+    );
+    final shortageLines = widget.state.cart.lines
+        .where((line) => line.exceedsStock)
+        .map((line) {
+          return '${line.name}: ${StockUnitFormatter.format(line.requestedBaseMilli, line.baseUnit)} requested, ${StockUnitFormatter.format((line.stock * 1000).round(), line.baseUnit)} recorded';
+        })
+        .join('\n');
+    final pinController = TextEditingController();
+    final result = await showDialog<Map<String, String>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Manager approval required'),
+          content: SizedBox(
+            width: 420,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  shortageLines.isEmpty
+                      ? '${shortage.productName} has ${StockUnitFormatter.format(shortage.availableMilli, product.unit)} available; this sale requests ${StockUnitFormatter.format(shortage.requestedMilli, product.unit)}.'
+                      : 'Stock shortage(s):\n$shortageLines',
+                ),
+                const SizedBox(height: 12),
+                const Text(
+                  'Approving this checkout allows each listed shortage. Negative stock and each approval will be recorded in the audit history.',
+                ),
+                const SizedBox(height: 16),
+                DropdownButtonFormField<String>(
+                  initialValue: approverId,
+                  decoration: const InputDecoration(
+                    labelText: 'Owner or Manager',
+                  ),
+                  items: approvers
+                      .map(
+                        (user) => DropdownMenuItem(
+                          value: user.id,
+                          child: Text(
+                            '${user.fullName} · ${user.role.roleLabel}',
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) =>
+                      setDialogState(() => approverId = value ?? approverId),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: pinController,
+                  autofocus: true,
+                  obscureText: true,
+                  keyboardType: TextInputType.number,
+                  maxLength: 6,
+                  onChanged: (_) => setDialogState(() {}),
+                  decoration: const InputDecoration(
+                    labelText: 'Approver PIN',
+                    counterText: '',
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancel sale'),
+            ),
+            FilledButton(
+              onPressed: pinController.text.length < 4
+                  ? null
+                  : () => Navigator.pop(dialogContext, {
+                      'approverId': approverId,
+                      'pin': pinController.text,
+                    }),
+              child: const Text('Approve and retry'),
+            ),
+          ],
+        ),
+      ),
+    );
+    pinController.dispose();
+    return result;
+  }
+
+  Future<void> _finishSale({
     required SalePaymentMethod method,
     required String reference,
     Money? cashTendered,
     Money? changeDue,
+    Map<String, String>? stockOverride,
   }) async {
     if (_saleSubmitting) return;
     final customer = method == SalePaymentMethod.credit
@@ -204,8 +318,10 @@ class _CheckoutModalState extends State<CheckoutModal> {
         paymentReference: reference,
         idempotencyKey: idempotencyKey,
         customer: customer,
+        customerName: _customerName.trim(),
         cashTendered: cashTendered,
         changeDue: changeDue,
+        stockOverride: stockOverride,
       );
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -215,11 +331,42 @@ class _CheckoutModalState extends State<CheckoutModal> {
         onNewSale: widget.onSaleCompleted,
         state: widget.state,
       );
+    } on StockOverrideRequiredException catch (error) {
+      if (!mounted) return;
+      setState(() => _saleSubmitting = false);
+      final approval = await _requestStockOverride(error);
+      if (!mounted) return;
+      if (approval != null) {
+        await _finishSale(
+          method: method,
+          reference: reference,
+          cashTendered: cashTendered,
+          changeDue: changeDue,
+          stockOverride: approval,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Sale was not saved. Stock is unchanged.'),
+          ),
+        );
+      }
     } on PosException catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.message),
+          action: SnackBarAction(
+            label: 'Retry',
+            onPressed: () => _finishSale(
+              method: method,
+              reference: reference,
+              cashTendered: cashTendered,
+              changeDue: changeDue,
+            ),
+          ),
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(
@@ -244,8 +391,9 @@ class _CheckoutModalState extends State<CheckoutModal> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Header
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              runSpacing: 8,
               children: [
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -335,6 +483,70 @@ class _CheckoutModalState extends State<CheckoutModal> {
             if (_method == SalePaymentMethod.mpesa) _buildMpesaTab(subtotal),
             if (_method == SalePaymentMethod.cash) _buildCashTab(subtotal),
             if (_method == SalePaymentMethod.credit) _buildCreditTab(subtotal),
+
+            const SizedBox(height: 12),
+            Autocomplete<String>(
+              initialValue: TextEditingValue(text: _customerName),
+              optionsBuilder: (value) {
+                final query = value.text.trim().toLowerCase();
+                return widget.state.customers
+                    .map((customer) => customer.name.trim())
+                    .where((name) => name.isNotEmpty)
+                    .toSet()
+                    .where((name) => name.toLowerCase().contains(query))
+                    .take(8);
+              },
+              onSelected: (name) => setState(() => _customerName = name),
+              fieldViewBuilder:
+                  (context, textController, focusNode, onFieldSubmitted) =>
+                      TextField(
+                        controller: textController,
+                        focusNode: focusNode,
+                        enabled: !_saleSubmitting,
+                        textCapitalization: TextCapitalization.words,
+                        onChanged: (value) => _customerName = value,
+                        onSubmitted: (_) => onFieldSubmitted(),
+                        decoration: InputDecoration(
+                          labelText: 'Customer name on receipt (optional)',
+                          helperText: 'Select a saved customer or type a name.',
+                          prefixIcon: const Icon(Icons.person_outline),
+                          suffixIcon: textController.text.isEmpty
+                              ? null
+                              : IconButton(
+                                  tooltip: 'Clear customer name',
+                                  onPressed: () {
+                                    textController.clear();
+                                    setState(() => _customerName = '');
+                                  },
+                                  icon: const Icon(Icons.clear),
+                                ),
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+              optionsViewBuilder: (context, onSelected, options) => Align(
+                alignment: Alignment.topLeft,
+                child: Material(
+                  elevation: 4,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    child: ListView.builder(
+                      padding: EdgeInsets.zero,
+                      shrinkWrap: true,
+                      itemCount: options.length,
+                      itemBuilder: (context, index) {
+                        final option = options.elementAt(index);
+                        return ListTile(
+                          dense: true,
+                          leading: const Icon(Icons.person_outline),
+                          title: Text(option),
+                          onTap: () => onSelected(option),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ),
 
             const SizedBox(height: 20),
 
@@ -484,8 +696,9 @@ class _CheckoutModalState extends State<CheckoutModal> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            runSpacing: 4,
             children: [
               const Text(
                 'Tendered Cash (KES):',
@@ -659,6 +872,14 @@ class _CheckoutModalState extends State<CheckoutModal> {
             }).toList(),
             onChanged: (val) => setState(() => _selectedCreditCustomer = val),
           ),
+          if (_selectedCreditCustomer == null &&
+              _customerName.trim().isNotEmpty) ...[
+            const SizedBox(height: 8),
+            const Text(
+              'A receipt name alone cannot be charged to credit. Select an existing customer account above.',
+              style: TextStyle(color: AppColors.status_danger, fontSize: 12),
+            ),
+          ],
           if (_selectedCreditCustomer != null) ...[
             const SizedBox(height: 14),
             Container(

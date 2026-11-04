@@ -65,6 +65,20 @@ done
 [[ "$ready" == true ]] || { echo "Shop database did not become ready" >&2; exit 1; }
 
 "${DOCKER[@]}" pull "$API_IMAGE"
+# Keep a verified pre-migration backup on the host. The deployment workflow
+# must never mutate the shop schema without a recoverable snapshot.
+BACKUP_DIR="$BASE_DIR/backups"
+BACKUP_FILE="$BACKUP_DIR/shop-$DEPLOY_ID.dump"
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+"${DOCKER[@]}" exec "$POSTGRES" pg_dump -U shop -d shop -Fc > "$BACKUP_FILE"
+chmod 600 "$BACKUP_FILE"
+test -s "$BACKUP_FILE" || { echo "Pre-deploy database backup is empty" >&2; exit 1; }
+"${DOCKER[@]}" exec -i "$POSTGRES" pg_restore --list < "$BACKUP_FILE" >/dev/null || {
+  echo "Pre-deploy database backup failed verification" >&2
+  exit 1
+}
+sha256sum "$BACKUP_FILE"
 "${DOCKER[@]}" run --rm --network "$NETWORK" -e "DATABASE_URL=$DATABASE_URL" -e "DIRECT_URL=$DATABASE_URL" \
   --entrypoint npx "$API_IMAGE" prisma migrate deploy
 

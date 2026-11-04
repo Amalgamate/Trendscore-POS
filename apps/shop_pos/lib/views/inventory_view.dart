@@ -9,6 +9,12 @@ import '../theme/tokens.dart';
 import 'widgets/product_editor_dialog.dart';
 import 'widgets/image_upload_widget.dart';
 import '../shared/icons.dart';
+import '../services/xlsx_exporter.dart';
+import '../services/api_service.dart';
+import '../services/day_end_slip.dart';
+import '../services/stock_audit_print.dart';
+import '../services/stock_audit_export.dart';
+import '../units.dart' hide ProductUnitCatalogue;
 
 const _categoryMeta = {
   'Dairy': {'color': Color(0xFFEFF6FF), 'icon': AppIcons.egg},
@@ -41,6 +47,28 @@ class _InventoryViewState extends State<InventoryView> {
   String _stockFilter = 'All';
   bool _showInactive = false;
   final _search = TextEditingController();
+
+  bool get _canManageStock {
+    final role = widget.state.currentLoggedInUser?.role;
+    return role == null ||
+        role == PosUserRole.owner ||
+        role == PosUserRole.manager ||
+        role == PosUserRole.stockClerk ||
+        role == PosUserRole.superAdmin;
+  }
+
+  bool _requireStockManager() {
+    if (_canManageStock) return true;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Stock receiving, adjustments, counts and movement history require an Owner, Manager or Stock Clerk.',
+        ),
+      ),
+    );
+    return false;
+  }
+
   PosProduct? _selectedProduct;
 
   static const _allCategories = [
@@ -659,6 +687,354 @@ class _InventoryViewState extends State<InventoryView> {
     );
   }
 
+  Future<void> _exportInventory({required bool excel}) async {
+    final inventory = await ApiService.instance.getStockAuditList();
+    if (inventory == null) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              ApiService.instance.lastError ?? 'Could not load stock list.',
+            ),
+          ),
+        );
+      return;
+    }
+    final rows = buildStockAuditExportRows(inventory);
+    final date = DateTime.now().toIso8601String().substring(0, 10);
+    try {
+      final bytes = excel
+          ? encodeXlsx([XlsxSheet('Stock Audit', rows)])
+          : buildStockAuditCsvBytes(rows);
+      await FilePicker.saveFile(
+        dialogTitle: 'Save inventory stock audit',
+        fileName: 'guta_gala_stock_$date.${excel ? 'xlsx' : 'csv'}',
+        type: FileType.custom,
+        allowedExtensions: [excel ? 'xlsx' : 'csv'],
+        bytes: bytes,
+      );
+    } catch (error) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not export stock list: $error')),
+        );
+    }
+  }
+
+  Future<void> _printStockAudit() async {
+    final inventory = await ApiService.instance.getStockAuditList();
+    if (inventory == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              ApiService.instance.lastError ?? 'Could not load stock list.',
+            ),
+          ),
+        );
+      }
+      return;
+    }
+    final html = buildStockAuditHtml(
+      shopName: widget.state.shopName,
+      printedAt: DateTime.now(),
+      products: inventory,
+    );
+    final opened = await printDayEndSlip(html);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          opened
+              ? 'Stock audit opened in the print dialog.'
+              : 'Printing is available in the web POS; this device has no print service.',
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showStockAuditList() async {
+    final inventory = await ApiService.instance.getStockAuditList();
+    if (!mounted) return;
+    if (inventory == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            ApiService.instance.lastError ?? 'Could not load stock list.',
+          ),
+        ),
+      );
+      return;
+    }
+    var search = '';
+    var selectedCategory = 'All';
+    var sortColumn = 'name';
+    var ascending = true;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) {
+          final categories =
+              inventory
+                  .map((item) => item['category'] as String? ?? 'Other')
+                  .toSet()
+                  .toList()
+                ..sort();
+          final query = search.trim().toLowerCase();
+          final visible = inventory.where((item) {
+            final name = '${item['name'] ?? ''} ${item['sku'] ?? ''}'
+                .toLowerCase();
+            final category = item['category'] as String? ?? 'Other';
+            return (selectedCategory == 'All' ||
+                    category == selectedCategory) &&
+                (query.isEmpty || name.contains(query));
+          }).toList();
+          visible.sort((a, b) {
+            final left = a[sortColumn];
+            final right = b[sortColumn];
+            final comparison = left is num && right is num
+                ? left.compareTo(right)
+                : '${left ?? ''}'.toLowerCase().compareTo(
+                    '${right ?? ''}'.toLowerCase(),
+                  );
+            return ascending ? comparison : -comparison;
+          });
+          final costTotal = visible.fold<double>(
+            0,
+            (sum, row) => sum + ((row['valueAtCost'] as num?)?.toDouble() ?? 0),
+          );
+          final retailTotal = visible.fold<double>(
+            0,
+            (sum, row) =>
+                sum + ((row['valueAtSellingPrice'] as num?)?.toDouble() ?? 0),
+          );
+          return Dialog(
+            insetPadding: const EdgeInsets.all(24),
+            child: SizedBox(
+              width: 1180,
+              height: 720,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Stock audit · ${widget.state.shopName}',
+                                style: const TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Cost price and stock valuation are visible to all shop roles.',
+                              ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.pop(dialogContext),
+                          child: const Text('Close'),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            decoration: const InputDecoration(
+                              prefixIcon: Icon(Icons.search),
+                              hintText: 'Search name or SKU',
+                            ),
+                            onChanged: (value) =>
+                                setDialogState(() => search = value),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        SizedBox(
+                          width: 220,
+                          child: DropdownButtonFormField<String>(
+                            initialValue: selectedCategory,
+                            decoration: const InputDecoration(
+                              labelText: 'Category',
+                            ),
+                            items: [
+                              const DropdownMenuItem(
+                                value: 'All',
+                                child: Text('All categories'),
+                              ),
+                              ...categories.map(
+                                (value) => DropdownMenuItem(
+                                  value: value,
+                                  child: Text(value),
+                                ),
+                              ),
+                            ],
+                            onChanged: (value) => setDialogState(
+                              () => selectedCategory = value ?? 'All',
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Text('${visible.length} products'),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    Expanded(
+                      child: Scrollbar(
+                        child: SingleChildScrollView(
+                          child: SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: DataTable(
+                              sortAscending: ascending,
+                              sortColumnIndex: switch (sortColumn) {
+                                'name' => 0,
+                                'category' => 1,
+                                'quantity' => 2,
+                                'costPrice' => 3,
+                                'valueAtCost' => 4,
+                                'valueAtSellingPrice' => 5,
+                                _ => null,
+                              },
+                              columns: [
+                                DataColumn(
+                                  label: const Text('Product'),
+                                  onSort: (_, __) => setDialogState(() {
+                                    if (sortColumn == 'name')
+                                      ascending = !ascending;
+                                    sortColumn = 'name';
+                                  }),
+                                ),
+                                DataColumn(
+                                  label: const Text('Category'),
+                                  onSort: (_, __) => setDialogState(() {
+                                    if (sortColumn == 'category')
+                                      ascending = !ascending;
+                                    sortColumn = 'category';
+                                  }),
+                                ),
+                                DataColumn(
+                                  numeric: true,
+                                  label: const Text('Available stock'),
+                                  onSort: (_, __) => setDialogState(() {
+                                    if (sortColumn == 'quantity')
+                                      ascending = !ascending;
+                                    sortColumn = 'quantity';
+                                  }),
+                                ),
+                                DataColumn(
+                                  numeric: true,
+                                  label: const Text('Cost / unit'),
+                                  onSort: (_, __) => setDialogState(() {
+                                    if (sortColumn == 'costPrice')
+                                      ascending = !ascending;
+                                    sortColumn = 'costPrice';
+                                  }),
+                                ),
+                                DataColumn(
+                                  numeric: true,
+                                  label: const Text('Value at cost'),
+                                  onSort: (_, __) => setDialogState(() {
+                                    if (sortColumn == 'valueAtCost')
+                                      ascending = !ascending;
+                                    sortColumn = 'valueAtCost';
+                                  }),
+                                ),
+                                DataColumn(
+                                  numeric: true,
+                                  label: const Text('Value at selling price'),
+                                  onSort: (_, __) => setDialogState(() {
+                                    if (sortColumn == 'valueAtSellingPrice')
+                                      ascending = !ascending;
+                                    sortColumn = 'valueAtSellingPrice';
+                                  }),
+                                ),
+                                const DataColumn(label: Text('Flags')),
+                              ],
+                              rows: [
+                                for (final row in visible)
+                                  DataRow(
+                                    color:
+                                        ((row['isNegative'] == true) ||
+                                            (row['varianceFlag'] == true))
+                                        ? WidgetStatePropertyAll(
+                                            AppColors.status_danger.withAlpha(
+                                              18,
+                                            ),
+                                          )
+                                        : null,
+                                    cells: [
+                                      DataCell(
+                                        Text(
+                                          '${row['name'] ?? ''}\n${row['sku'] ?? ''}',
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text('${row['category'] ?? 'Other'}'),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          '${StockUnitFormatter.format((((row['quantity'] as num?) ?? 0) * 1000).round(), row['unit'] as String? ?? 'pc')}',
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          'KES ${((row['costPrice'] as num?) ?? 0).toStringAsFixed(2)}',
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          'KES ${((row['valueAtCost'] as num?) ?? 0).toStringAsFixed(2)}',
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          'KES ${((row['valueAtSellingPrice'] as num?) ?? 0).toStringAsFixed(2)}',
+                                        ),
+                                      ),
+                                      DataCell(
+                                        Text(
+                                          [
+                                            if (row['isNegative'] == true)
+                                              'NEGATIVE',
+                                            if (row['varianceFlag'] == true)
+                                              'VARIANCE',
+                                          ].join(' · '),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Divider(),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Text(
+                        'Totals for visible rows · Value at cost KES ${costTotal.toStringAsFixed(2)} · Value at selling price KES ${retailTotal.toStringAsFixed(2)}',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _importProductsCsv() async {
     try {
       final file = await FilePicker.pickFile(
@@ -771,7 +1147,7 @@ class _InventoryViewState extends State<InventoryView> {
                         dense: true,
                         title: Text(product.name),
                         subtitle: Text(
-                          '${product.sku} · ${product.category} · ${product.stock} units',
+                          '${product.sku} · ${product.category} · ${StockUnitFormatter.format((product.stock * 1000).round(), product.unit)}',
                         ),
                         trailing: Text('KES ${product.unitPrice.formatted}'),
                       );
@@ -857,11 +1233,30 @@ class _InventoryViewState extends State<InventoryView> {
   }
 
   void _showStockAdjustDialog(PosProduct product) {
-    int delta = 5;
-    String reason = 'Stock delivery / Purchase';
-    final qtyCtrl = TextEditingController(text: '5');
+    if (!_requireStockManager()) return;
+    String reasonCode = 'SPILLAGE';
+    String unit = product.unit;
+    String reason = 'Spillage / leakage';
+    final qtyCtrl = TextEditingController(text: '0.5');
+    final costCtrl = TextEditingController(
+      text: product.costPrice == null
+          ? ''
+          : (product.costPrice!.minorUnits / 100).toStringAsFixed(2),
+    );
+    final referenceCtrl = TextEditingController();
     bool isAddition = true;
     bool isSaving = false;
+    final unitOptions = switch (product.unit) {
+      'l' || 'ml' => const ['ml', 'l'],
+      'kg' || 'g' => const ['g', 'kg'],
+      _ => const ['pc', 'dozen'],
+    };
+    final selectableUnits = [
+      ...unitOptions,
+      if (product.purchaseContainerSize != null &&
+          product.purchaseContainerSize! > 0)
+        'container',
+    ];
 
     showDialog<void>(
       context: context,
@@ -927,7 +1322,10 @@ class _InventoryViewState extends State<InventoryView> {
                         ),
                       ),
                       Text(
-                        '${product.stock} units',
+                        StockUnitFormatter.format(
+                          (product.stock * 1000).round(),
+                          product.unit,
+                        ),
                         style: const TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -947,7 +1345,7 @@ class _InventoryViewState extends State<InventoryView> {
                         color: AppColors.status_success,
                         onTap: () => setModal(() {
                           isAddition = true;
-                          reason = 'Stock delivery / Purchase';
+                          reason = 'Stock received';
                         }),
                       ),
                     ),
@@ -960,7 +1358,8 @@ class _InventoryViewState extends State<InventoryView> {
                         color: AppColors.status_danger,
                         onTap: () => setModal(() {
                           isAddition = false;
-                          reason = 'Damaged / Expired stock write-off';
+                          reasonCode = 'SPILLAGE';
+                          reason = 'Spillage / leakage';
                         }),
                       ),
                     ),
@@ -970,13 +1369,84 @@ class _InventoryViewState extends State<InventoryView> {
                 TextField(
                   controller: qtyCtrl,
                   keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  decoration: _inputDeco('Quantity to adjust'),
-                  onChanged: (v) => delta = int.tryParse(v) ?? 0,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d{0,3}')),
+                  ],
+                  decoration: _inputDeco('Quantity'),
                 ),
                 const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: selectableUnits.contains(unit) ? unit : product.unit,
+                  decoration: _inputDeco('Unit'),
+                  items: unitOptions
+                      .map(
+                        (value) => DropdownMenuItem(
+                          value: value,
+                          child: Text(
+                            value == 'container'
+                                ? (product.purchaseContainerName ??
+                                      '${product.purchaseContainerSize} ${product.unit} container')
+                                : (ProductUnitCatalogue.symbols[value] ??
+                                      value),
+                          ),
+                        ),
+                      )
+                      .toList(),
+                  onChanged: (value) =>
+                      setModal(() => unit = value ?? product.unit),
+                ),
+                if (isAddition) ...[
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: costCtrl,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'\d*\.?\d{0,2}'),
+                      ),
+                    ],
+                    decoration: _inputDeco('Cost per ${product.unit} (KES)'),
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: referenceCtrl,
+                    decoration: _inputDeco(
+                      'Supplier / invoice reference (optional)',
+                    ),
+                  ),
+                ],
+                if (!isAddition) ...[
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String>(
+                    value: reasonCode,
+                    decoration: _inputDeco('Adjustment reason'),
+                    items: const [
+                      DropdownMenuItem(
+                        value: 'SPILLAGE',
+                        child: Text('Spillage'),
+                      ),
+                      DropdownMenuItem(
+                        value: 'WASTAGE',
+                        child: Text('Wastage'),
+                      ),
+                      DropdownMenuItem(value: 'DAMAGE', child: Text('Damage')),
+                      DropdownMenuItem(value: 'EXPIRY', child: Text('Expiry')),
+                      DropdownMenuItem(
+                        value: 'CORRECTION',
+                        child: Text('Correction'),
+                      ),
+                    ],
+                    onChanged: (value) => setModal(() {
+                      reasonCode = value ?? 'CORRECTION';
+                      reason =
+                          reasonCode[0] + reasonCode.substring(1).toLowerCase();
+                    }),
+                  ),
+                ],
                 Text(
-                  'Result: ${isAddition ? product.stock + delta : (product.stock - delta < 0 ? 0 : product.stock - delta)} units',
+                  'Stock is stored in ${product.unit}; quantities convert automatically.',
                   style: const TextStyle(
                     fontSize: 12,
                     color: AppColors.text_tertiary,
@@ -986,13 +1456,33 @@ class _InventoryViewState extends State<InventoryView> {
                 const SizedBox(height: 14),
                 TextField(
                   controller: TextEditingController(text: reason),
-                  decoration: _inputDeco('Reason / Reference'),
+                  decoration: _inputDeco('Note (optional)'),
                   onChanged: (v) => reason = v,
                 ),
               ],
             ),
           ),
           actions: [
+            TextButton.icon(
+              onPressed: isSaving
+                  ? null
+                  : () {
+                      Navigator.pop(ctx);
+                      _showStockHistoryDialog(product);
+                    },
+              icon: const Icon(Icons.history_rounded, size: 16),
+              label: const Text('History'),
+            ),
+            TextButton.icon(
+              onPressed: isSaving
+                  ? null
+                  : () {
+                      Navigator.pop(ctx);
+                      _showStockCountDialog(product);
+                    },
+              icon: const Icon(AppIcons.inventory, size: 16),
+              label: const Text('Physical count'),
+            ),
             TextButton(
               onPressed: isSaving ? null : () => Navigator.pop(ctx),
               child: const Text('Cancel'),
@@ -1006,7 +1496,7 @@ class _InventoryViewState extends State<InventoryView> {
               onPressed: isSaving
                   ? null
                   : () async {
-                      final amount = int.tryParse(qtyCtrl.text) ?? 0;
+                      final amount = num.tryParse(qtyCtrl.text) ?? 0;
                       if (amount <= 0) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
@@ -1017,11 +1507,12 @@ class _InventoryViewState extends State<InventoryView> {
                         );
                         return;
                       }
-                      if (reason.trim().isEmpty) {
+                      final unitCost = num.tryParse(costCtrl.text);
+                      if (isAddition && (unitCost == null || unitCost < 0)) {
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
                             content: Text(
-                              'Enter a reason for this adjustment.',
+                              'Enter a valid unit cost to receive a delivery.',
                             ),
                           ),
                         );
@@ -1030,11 +1521,27 @@ class _InventoryViewState extends State<InventoryView> {
 
                       setModal(() => isSaving = true);
                       try {
-                        await widget.state.adjustStock(
-                          product.id,
-                          isAddition ? amount : -amount,
-                          reason.trim(),
-                        );
+                        if (isAddition) {
+                          await widget.state.receiveStock(
+                            productId: product.id,
+                            quantity: unit == 'container'
+                                ? amount * product.purchaseContainerSize!
+                                : amount,
+                            unit: unit == 'container' ? product.unit : unit,
+                            unitCost: unitCost!,
+                            reference: referenceCtrl.text.trim(),
+                          );
+                        } else {
+                          await widget.state.adjustStock(
+                            product.id,
+                            -(unit == 'container'
+                                ? amount * product.purchaseContainerSize!
+                                : amount),
+                            reason.trim(),
+                            reasonCode: reasonCode,
+                            unit: unit == 'container' ? product.unit : unit,
+                          );
+                        }
                         if (!mounted || !ctx.mounted) return;
                         Navigator.pop(ctx);
                         ScaffoldMessenger.of(context).showSnackBar(
@@ -1073,6 +1580,365 @@ class _InventoryViewState extends State<InventoryView> {
     );
   }
 
+  void _showStockCountDialog(PosProduct product) {
+    final quantityController = TextEditingController(
+      text: product.stock.toString(),
+    );
+    final noteController = TextEditingController();
+    var saving = false;
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: Text('Count stock: ${product.name}'),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Current system balance: ${StockUnitFormatter.format((product.stock * 1000).round(), product.unit)}',
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: quantityController,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'\d*\.?\d{0,3}')),
+                  ],
+                  decoration: _inputDeco(
+                    'Physical quantity counted (${product.unit})',
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: noteController,
+                  decoration: _inputDeco('Count note (optional)'),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(dialogContext),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final counted = num.tryParse(quantityController.text);
+                      if (counted == null || counted < 0) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Enter a valid counted quantity.'),
+                          ),
+                        );
+                        return;
+                      }
+                      setDialogState(() => saving = true);
+                      try {
+                        await widget.state.countStock(
+                          productId: product.id,
+                          countedQuantity: counted,
+                          note: noteController.text.trim(),
+                        );
+                        if (!mounted || !dialogContext.mounted) return;
+                        Navigator.pop(dialogContext);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'Physical count recorded in stock history.',
+                            ),
+                          ),
+                        );
+                      } catch (error) {
+                        if (!mounted || !dialogContext.mounted) return;
+                        setDialogState(() => saving = false);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Count was not saved: $error'),
+                          ),
+                        );
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('Save count'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showStockHistoryDialog(PosProduct product) {
+    if (!_requireStockManager()) return;
+    final future = ApiService.instance.getStockMovements(
+      productId: product.id,
+      limit: 100,
+    );
+    showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Stock history: ${product.name}'),
+        content: SizedBox(
+          width: 560,
+          height: 440,
+          child: FutureBuilder<List<Map<String, dynamic>>?>(
+            future: future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              final rows = snapshot.data;
+              if (rows == null) {
+                return Center(
+                  child: Text(
+                    ApiService.instance.lastError ??
+                        'Could not load stock history.',
+                  ),
+                );
+              }
+              if (rows.isEmpty) {
+                return const Center(
+                  child: Text('No stock movements recorded yet.'),
+                );
+              }
+              return ListView.separated(
+                itemCount: rows.length,
+                separatorBuilder: (_, _) => const Divider(height: 1),
+                itemBuilder: (context, index) {
+                  final row = rows[index];
+                  final quantity = (row['quantity'] as num? ?? 0).toDouble();
+                  final balance = (row['balanceAfter'] as num? ?? 0).toDouble();
+                  final unit = row['unit'] as String? ?? product.unit;
+                  final date = DateTime.tryParse(
+                    row['createdAt'] as String? ?? '',
+                  );
+                  return ListTile(
+                    dense: true,
+                    title: Text(
+                      '${row['type'] ?? 'Movement'} · ${StockUnitFormatter.format((quantity * 1000).round(), unit)}',
+                    ),
+                    subtitle: Text(
+                      [
+                        'Balance ${StockUnitFormatter.format((balance * 1000).round(), unit)}',
+                        if (row['reason'] != null) '${row['reason']}',
+                        if (row['reference'] != null) 'Ref ${row['reference']}',
+                        if (date != null)
+                          date.toLocal().toString().substring(0, 16),
+                        if (row['createdBy'] != null) 'By ${row['createdBy']}',
+                      ].join(' · '),
+                    ),
+                  );
+                },
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showGlobalStockHistory() async {
+    if (!_requireStockManager()) return;
+    String? type;
+    DateTime? from;
+    DateTime? to;
+    Future<List<Map<String, dynamic>>?> load() => ApiService.instance
+        .getStockMovements(type: type, from: from, to: to, limit: 100);
+    var future = load();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogContext, setDialogState) => AlertDialog(
+          title: const Text('Stock movement history'),
+          content: SizedBox(
+            width: 700,
+            height: 540,
+            child: Column(
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    SizedBox(
+                      width: 220,
+                      child: DropdownButtonFormField<String?>(
+                        initialValue: type,
+                        decoration: const InputDecoration(
+                          labelText: 'Movement type',
+                        ),
+                        items: const [
+                          DropdownMenuItem<String?>(
+                            value: null,
+                            child: Text('All types'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'PURCHASE',
+                            child: Text('Purchase'),
+                          ),
+                          DropdownMenuItem(value: 'SALE', child: Text('Sale')),
+                          DropdownMenuItem(
+                            value: 'ADJUSTMENT_IN',
+                            child: Text('Adjustment in'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'ADJUSTMENT_OUT',
+                            child: Text('Adjustment out'),
+                          ),
+                          DropdownMenuItem(
+                            value: 'VARIANCE',
+                            child: Text('Variance'),
+                          ),
+                        ],
+                        onChanged: (value) => setDialogState(() {
+                          type = value;
+                          future = load();
+                        }),
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final selected = await showDatePicker(
+                          context: dialogContext,
+                          initialDate: from ?? DateTime.now(),
+                          firstDate: DateTime(2020),
+                          lastDate: DateTime.now(),
+                        );
+                        if (selected != null) {
+                          setDialogState(() {
+                            from = DateTime(
+                              selected.year,
+                              selected.month,
+                              selected.day,
+                            );
+                            future = load();
+                          });
+                        }
+                      },
+                      icon: const Icon(Icons.calendar_today, size: 16),
+                      label: Text(
+                        from == null
+                            ? 'From date'
+                            : '${from!.year}-${from!.month.toString().padLeft(2, '0')}-${from!.day.toString().padLeft(2, '0')}',
+                      ),
+                    ),
+                    OutlinedButton.icon(
+                      onPressed: () async {
+                        final selected = await showDatePicker(
+                          context: dialogContext,
+                          initialDate: to ?? DateTime.now(),
+                          firstDate: from ?? DateTime(2020),
+                          lastDate: DateTime.now(),
+                        );
+                        if (selected != null) {
+                          setDialogState(() {
+                            to = DateTime(
+                              selected.year,
+                              selected.month,
+                              selected.day + 1,
+                            );
+                            future = load();
+                          });
+                        }
+                      },
+                      icon: const Icon(Icons.event, size: 16),
+                      label: Text(
+                        to == null
+                            ? 'To date'
+                            : '${to!.subtract(const Duration(days: 1)).year}-${to!.subtract(const Duration(days: 1)).month.toString().padLeft(2, '0')}-${to!.subtract(const Duration(days: 1)).day.toString().padLeft(2, '0')}',
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Expanded(
+                  child: FutureBuilder<List<Map<String, dynamic>>?>(
+                    future: future,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState != ConnectionState.done) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      final rows = snapshot.data;
+                      if (rows == null) {
+                        return Center(
+                          child: Text(
+                            ApiService.instance.lastError ??
+                                'Could not load movement history.',
+                          ),
+                        );
+                      }
+                      if (rows.isEmpty)
+                        return const Center(
+                          child: Text(
+                            'No stock movements match these filters.',
+                          ),
+                        );
+                      return ListView.separated(
+                        itemCount: rows.length,
+                        separatorBuilder: (_, _) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final row = rows[index];
+                          final quantity = (row['quantity'] as num? ?? 0)
+                              .toDouble();
+                          final balance = (row['balanceAfter'] as num? ?? 0)
+                              .toDouble();
+                          final unit = row['unit'] as String? ?? 'pc';
+                          final date = DateTime.tryParse(
+                            row['createdAt'] as String? ?? '',
+                          );
+                          return ListTile(
+                            dense: true,
+                            title: Text(
+                              '${row['productName'] ?? 'Product'} · ${row['type'] ?? 'Movement'} · ${StockUnitFormatter.format((quantity * 1000).round(), unit)}',
+                            ),
+                            subtitle: Text(
+                              [
+                                'Balance ${StockUnitFormatter.format((balance * 1000).round(), unit)}',
+                                if (row['reference'] != null)
+                                  'Ref ${row['reference']}',
+                                if (date != null)
+                                  date.toLocal().toString().substring(0, 16),
+                                if (row['createdBy'] != null)
+                                  'By ${row['createdBy']}',
+                              ].join(' · '),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Close'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _confirmDelete(PosProduct product) async {
     // Stage 1: confirm dialog with optional discard-stock checkbox.
     bool discardStock = false;
@@ -1082,7 +1948,9 @@ class _InventoryViewState extends State<InventoryView> {
       barrierDismissible: false,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setModal) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(14),
+          ),
           title: const Row(
             children: [
               Icon(AppIcons.deleteForever, color: AppColors.status_danger),
@@ -1101,7 +1969,9 @@ class _InventoryViewState extends State<InventoryView> {
                     color: AppColors.text_secondary,
                   ),
                   children: [
-                    const TextSpan(text: 'You are about to permanently delete '),
+                    const TextSpan(
+                      text: 'You are about to permanently delete ',
+                    ),
                     TextSpan(
                       text: product.name,
                       style: const TextStyle(
@@ -1116,7 +1986,10 @@ class _InventoryViewState extends State<InventoryView> {
               const SizedBox(height: 8),
               Text(
                 'Current stock: ${product.stock} units',
-                style: const TextStyle(fontSize: 13, color: AppColors.text_secondary),
+                style: const TextStyle(
+                  fontSize: 13,
+                  color: AppColors.text_secondary,
+                ),
               ),
               const SizedBox(height: 10),
               Container(
@@ -1124,11 +1997,16 @@ class _InventoryViewState extends State<InventoryView> {
                 decoration: BoxDecoration(
                   color: AppColors.status_danger.withAlpha(15),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: AppColors.status_danger.withAlpha(60)),
+                  border: Border.all(
+                    color: AppColors.status_danger.withAlpha(60),
+                  ),
                 ),
                 child: const Text(
                   'This cannot be undone. Only products with no sales history can be permanently deleted.',
-                  style: TextStyle(fontSize: 12, color: AppColors.status_danger),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: AppColors.status_danger,
+                  ),
                 ),
               ),
               // Require explicit acknowledgement for positive or negative stock.
@@ -1137,7 +2015,9 @@ class _InventoryViewState extends State<InventoryView> {
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   title: Text(
-                    'Discard current stock (${product.stock} units)',
+                    product.stock < 0
+                        ? 'Clear stock discrepancy (${product.stock.abs()} units below zero)'
+                        : 'Discard current stock (${product.stock} units)',
                     style: const TextStyle(fontSize: 13),
                   ),
                   value: discardStock,
@@ -1173,8 +2053,10 @@ class _InventoryViewState extends State<InventoryView> {
     try {
       await widget.state.deleteProduct(product.id, discardStock: discardStock);
       if (!mounted) return;
-      if (_selectedProduct?.id == product.id) setState(() => _selectedProduct = null);
-      else setState(() {});
+      if (_selectedProduct?.id == product.id)
+        setState(() => _selectedProduct = null);
+      else
+        setState(() {});
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('"${product.name}" permanently deleted.')),
       );
@@ -1221,7 +2103,9 @@ class _InventoryViewState extends State<InventoryView> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Tick "Discard current stock" to delete a product with stock.'),
+          content: Text(
+            'Tick "Discard current stock" to delete a product with stock.',
+          ),
         ),
       );
     } catch (error) {
@@ -1285,7 +2169,7 @@ class _InventoryViewState extends State<InventoryView> {
     final outCount = products.where((p) => p.isActive && p.isOutOfStock).length;
     final valuation = products
         .where((p) => p.isActive)
-        .fold(0, (sum, p) => sum + (p.unitPrice.minorUnits * p.stock));
+        .fold<num>(0, (sum, p) => sum + (p.unitPrice.minorUnits * p.stock));
     final filtered = _filtered;
     if (MediaQuery.sizeOf(context).width < 768) {
       return _buildCompactInventory(
@@ -1294,7 +2178,7 @@ class _InventoryViewState extends State<InventoryView> {
         totalSkus: totalSkus,
         lowCount: lowCount,
         outCount: outCount,
-        valuation: valuation,
+        valuation: valuation.round(),
       );
     }
 
@@ -1336,7 +2220,63 @@ class _InventoryViewState extends State<InventoryView> {
                       OutlinedButton.icon(
                         icon: const Icon(AppIcons.download, size: 17),
                         label: const Text('Export'),
-                        onPressed: () {},
+                        onPressed: () => showModalBottomSheet<void>(
+                          context: context,
+                          builder: (sheetContext) => SafeArea(
+                            child: Wrap(
+                              children: [
+                                ListTile(
+                                  leading: const Icon(
+                                    Icons.fact_check_outlined,
+                                  ),
+                                  title: const Text('View stock audit list'),
+                                  onTap: () {
+                                    Navigator.pop(sheetContext);
+                                    _showStockAuditList();
+                                  },
+                                ),
+                                ListTile(
+                                  leading: const Icon(Icons.history_rounded),
+                                  title: const Text('View all stock movements'),
+                                  onTap: () {
+                                    Navigator.pop(sheetContext);
+                                    _showGlobalStockHistory();
+                                  },
+                                ),
+                                ListTile(
+                                  leading: const Icon(Icons.print_outlined),
+                                  title: const Text(
+                                    'Print A4 stock count sheet',
+                                  ),
+                                  onTap: () {
+                                    Navigator.pop(sheetContext);
+                                    _printStockAudit();
+                                  },
+                                ),
+                                ListTile(
+                                  leading: const Icon(Icons.table_chart),
+                                  title: const Text(
+                                    'Download Excel stock list',
+                                  ),
+                                  onTap: () {
+                                    Navigator.pop(sheetContext);
+                                    _exportInventory(excel: true);
+                                  },
+                                ),
+                                ListTile(
+                                  leading: const Icon(
+                                    Icons.text_snippet_outlined,
+                                  ),
+                                  title: const Text('Download CSV stock list'),
+                                  onTap: () {
+                                    Navigator.pop(sheetContext);
+                                    _exportInventory(excel: false);
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
                         style: OutlinedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 14,
@@ -1447,7 +2387,7 @@ class _InventoryViewState extends State<InventoryView> {
                       const SizedBox(width: 10),
                       _StatCard(
                         'Stock Valuation',
-                        'KES ${Money(valuation).formatted}',
+                        'KES ${Money(valuation.round()).formatted}',
                         AppIcons.wallet,
                         const Color(0xFF16A34A),
                       ),
@@ -2485,7 +3425,7 @@ class _ProductDetailPanel extends StatelessWidget {
                     ),
                   _DetailRow(
                     'Current Stock',
-                    '${p.stock} units',
+                    StockUnitFormatter.format((p.stock * 1000).round(), p.unit),
                     valueColor: p.isOutOfStock
                         ? AppColors.status_danger
                         : (p.isLowStock

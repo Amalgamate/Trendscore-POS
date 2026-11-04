@@ -18,6 +18,10 @@
 ///    later, by someone who cannot explain it.
 library;
 
+import 'units.dart';
+
+export 'units.dart' show ProductUnitCatalogue;
+
 /// Kenyan VAT rate. Stored per-business and per-product in the schema; this is
 /// the default a shop starts with.
 const int defaultVatRateBasisPoints = 1600; // 16.00%, in basis points
@@ -27,10 +31,13 @@ const int defaultVatRateBasisPoints = 1600; // 16.00%, in basis points
 /// Integer-only by construction: there is no way to hold a fractional cent,
 /// so rounding happens once, explicitly, at the points where it is defined.
 class Money {
-  const Money(this.minorUnits) : assert(minorUnits >= 0, 'a negative amount needs a sign');
+  const Money(this.minorUnits)
+    : assert(minorUnits >= 0, 'a negative amount needs a sign');
 
   /// Builds an amount from a whole-shilling count, e.g. `Money.shillings(65)`.
-  const Money.shillings(int whole) : minorUnits = whole * 100, assert(whole >= 0);
+  const Money.shillings(int whole)
+    : minorUnits = whole * 100,
+      assert(whole >= 0);
 
   final int minorUnits;
 
@@ -67,9 +74,12 @@ class Money {
   Money operator +(Money other) => Money(minorUnits + other.minorUnits);
 
   Money operator *(int quantity) {
-    if (quantity < 0) throw ArgumentError.value(quantity, 'quantity', 'must not be negative');
+    if (quantity < 0) throw ArgumentError.value(quantity, 'quantity');
     return Money(minorUnits * quantity);
   }
+
+  Money timesMilli(int quantityMilli) =>
+      Money((minorUnits * quantityMilli + 500) ~/ 1000);
 
   bool operator >(Money other) => minorUnits > other.minorUnits;
 
@@ -112,7 +122,8 @@ class Money {
   }
 
   @override
-  bool operator ==(Object other) => other is Money && other.minorUnits == minorUnits;
+  bool operator ==(Object other) =>
+      other is Money && other.minorUnits == minorUnits;
 
   @override
   int get hashCode => minorUnits.hashCode;
@@ -146,7 +157,10 @@ class CartLine {
     required this.unitPrice,
     required this.stock,
     this.quantity = 1,
-  }) : assert(quantity > 0, 'a line must request at least one unit');
+    this.unit = 'pc',
+    String? baseUnit,
+  }) : baseUnit = baseUnit ?? unit,
+       assert(quantity > 0, 'a line must request at least one unit');
 
   final String productId;
   final String name;
@@ -155,38 +169,48 @@ class CartLine {
   final Money unitPrice;
 
   /// Units the shop actually has on the shelf.
-  final int stock;
+  final num stock;
 
-  int quantity;
+  num quantity;
+  String unit;
+  final String baseUnit;
+  int get quantityMilli => (quantity * 1000).round();
+  int get requestedBaseMilli =>
+      ProductUnitCatalogue.toBaseMilli(quantity, unit, baseUnit) ??
+      quantityMilli;
+  bool get exceedsStock => requestedBaseMilli > (stock * 1000).round();
 
-  Money get lineTotal => unitPrice * quantity;
+  Money get lineTotal => unitPrice.timesMilli(
+    ProductUnitCatalogue.toBaseMilli(quantity, unit, baseUnit) ?? quantityMilli,
+  );
 
   /// Units still available before hitting the shelf count.
-  int get remaining => stock - quantity;
+  num get remaining => stock - requestedBaseMilli / 1000;
 
-  bool get isAtStockLimit => quantity >= stock;
+  bool get isAtStockLimit => requestedBaseMilli >= (stock * 1000).round();
 }
 
-/// A sale being assembled. Owns the rules the grid of buttons must obey.
-///
-/// Deliberately holds no widget references, so the logic that decides whether a
-/// till can oversell is testable directly rather than only through taps.
+/// A sale being assembled. Stock shortages stay visible for server approval;
+/// an Owner or Manager must authorize an over-stock sale with a PIN.
 class Cart {
   final Map<String, CartLine> _lines = {};
 
   /// Why the UI shows a refusal. Named so tests assert on intent, not prose.
   static const String outOfStock = 'No stock left for this item.';
-  static const String alreadyComplete = 'Only part of this quantity is in stock.';
+  static const String alreadyComplete =
+      'Only part of this quantity is in stock.';
 
   Iterable<CartLine> get lines => _lines.values;
   bool get isEmpty => _lines.isEmpty;
   bool get isNotEmpty => _lines.isNotEmpty;
 
   /// Units the customer walks away with — not the number of distinct lines.
-  int get itemCount => _lines.values.fold(0, (sum, line) => sum + line.quantity);
+  int get itemCount =>
+      _lines.values.fold(0, (sum, line) => sum + line.quantity.ceil());
 
   /// VAT-exclusive value of the basket.
-  Money get subtotal => _lines.values.fold(const Money(0), (sum, line) => sum + line.lineTotal);
+  Money get subtotal =>
+      _lines.values.fold(const Money(0), (sum, line) => sum + line.lineTotal);
 
   /// The Kenyan VAT already inside that shelf price.
   Money get vatAmount => subtotal.vatIncludedAt(defaultVatRateBasisPoints);
@@ -213,6 +237,8 @@ class Cart {
           unitPrice: product.unitPrice,
           stock: product.stock,
           quantity: line.quantity,
+          unit: line.unit,
+          baseUnit: product.baseUnit,
         );
       } else {
         existing.quantity += line.quantity;
@@ -224,28 +250,25 @@ class Cart {
       ..addAll(remapped);
   }
 
-  /// True when there is something to charge and every line is within stock.
-  ///
-  /// Checked before the payment prompt rather than after, so an oversell is
-  /// caught at the button instead of at the ledger.
+  bool get hasStockShortage => _lines.values.any((line) => line.exceedsStock);
+
+  /// Cart shape is valid; the API checks stock and validates any manager PIN.
   bool get canCheckout =>
-      isNotEmpty && _lines.values.every((line) => line.quantity <= line.stock && line.quantity > 0);
+      isNotEmpty && _lines.values.every((line) => line.quantity > 0);
+
   /// Changes a line's quantity by [delta]. Negative deltas remove units.
   ///
-  /// Clamped rather than trusted: a held-down `+`, a double-tap, or a stale
-  /// widget can all request more than exists. Going to zero or below drops the
+  /// The server requires a manager approval if this crosses stock. Going to
+  /// zero or below drops the
   /// line entirely — a zero-quantity line would render as "0 × item" and leave
   /// checkout believing the basket had content.
-  void changeQuantity(String productId, int delta, {void Function(String reason)? onRefused}) {
+  void changeQuantity(
+    String productId,
+    num delta, {
+    void Function(String reason)? onRefused,
+  }) {
     final line = _lines[productId];
     if (line == null) return;
-
-    if (delta > 0 && line.quantity + delta > line.stock) {
-      // Refuse the whole jump instead of silently topping up to stock: a
-      // cashier who pressed + three times should not get two of them.
-      onRefused?.call(alreadyComplete);
-      return;
-    }
 
     final next = line.quantity + delta;
     if (next <= 0) {
@@ -255,28 +278,61 @@ class Cart {
     }
   }
 
+  bool setMeasuredQuantity(
+    String productId,
+    num quantity,
+    String unit, {
+    void Function(String reason)? onRefused,
+  }) {
+    final line = _lines[productId];
+    if (line == null || quantity <= 0) return false;
+    final baseMilli = ProductUnitCatalogue.toBaseMilli(
+      quantity,
+      unit,
+      line.baseUnit,
+    );
+    if (baseMilli == null) {
+      onRefused?.call('Choose a unit compatible with this product.');
+      return false;
+    }
+    line.quantity = quantity;
+    line.unit = unit;
+    return true;
+  }
 
-  /// Adds one unit, refusing to exceed what is on the shelf.
-  ///
-  /// Returns `true` if the basket changed. Returns `false` — changing nothing —
-  /// when the cashier already has every unit in stock. That guard is what keeps
-  /// a label reading "24 left" from ever going negative underneath it.
-  ///
-  /// [onRefused] tells the caller *why*. Without it a guard is
-  /// indistinguishable from a button that stopped working.
+  bool addMeasured(
+    CartLine incoming,
+    num quantity,
+    String soldUnit, {
+    void Function(String reason)? onRefused,
+  }) {
+    final baseMilli = ProductUnitCatalogue.toBaseMilli(
+      quantity,
+      soldUnit,
+      incoming.unit,
+    );
+    if (baseMilli == null) {
+      onRefused?.call('Choose a unit compatible with this product.');
+      return false;
+    }
+    _lines[incoming.productId] = CartLine(
+      productId: incoming.productId,
+      name: incoming.name,
+      unitPrice: incoming.unitPrice,
+      stock: incoming.stock,
+      quantity: quantity,
+      unit: soldUnit,
+      baseUnit: incoming.unit,
+    );
+    return true;
+  }
+
+  /// Adds one unit. Over-stock requests are only committed with API approval.
   bool add(CartLine incoming, {void Function(String reason)? onRefused}) {
     final existing = _lines[incoming.productId];
     if (existing != null) {
-      if (existing.isAtStockLimit) {
-        onRefused?.call(existing.stock <= 0 ? outOfStock : alreadyComplete);
-        return false;
-      }
       existing.quantity++;
       return true;
-    }
-    if (incoming.stock <= 0) {
-      onRefused?.call(outOfStock);
-      return false;
     }
     _lines[incoming.productId] = CartLine(
       productId: incoming.productId,

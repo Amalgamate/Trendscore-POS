@@ -9,6 +9,9 @@ import { productsRouter } from '../src/modules/products/products.router';
 interface MockTx {
   $queryRaw: ReturnType<typeof vi.fn>;
   stockMovement: { deleteMany: ReturnType<typeof vi.fn> };
+  saleItem: { count: ReturnType<typeof vi.fn> };
+  purchaseItem: { count: ReturnType<typeof vi.fn> };
+  refundItem: { count: ReturnType<typeof vi.fn> };
   product: { delete: ReturnType<typeof vi.fn>; update: ReturnType<typeof vi.fn> };
   auditLog: { create: ReturnType<typeof vi.fn> };
 }
@@ -19,6 +22,9 @@ const mocks = vi.hoisted(() => {
     stockMovement: {
       deleteMany: vi.fn().mockResolvedValue({ count: 0 }),
     },
+    saleItem: { count: vi.fn() },
+    purchaseItem: { count: vi.fn() },
+    refundItem: { count: vi.fn() },
     product: {
       delete: vi.fn().mockResolvedValue({}),
       update: vi.fn().mockResolvedValue({}),
@@ -107,6 +113,9 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
     // Reset tx mocks
     mocks.tx.$queryRaw.mockResolvedValue([]);
     mocks.tx.stockMovement.deleteMany.mockResolvedValue({ count: 0 });
+    mocks.tx.saleItem.count.mockResolvedValue(0);
+    mocks.tx.purchaseItem.count.mockResolvedValue(0);
+    mocks.tx.refundItem.count.mockResolvedValue(0);
     mocks.tx.product.delete.mockResolvedValue({});
     mocks.tx.product.update.mockResolvedValue({});
     mocks.tx.auditLog.create.mockResolvedValue({});
@@ -173,6 +182,36 @@ describe('DELETE /products/:id and POST /products/:id/archive', () => {
     expect(body.error.details.counts.refundItems).toBe(0);
     // No delete attempted
     expect(mocks.prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('rechecks history under the product lock and returns 409 on a concurrent sale', async () => {
+    mocks.prisma.saleItem.count.mockResolvedValueOnce(0).mockResolvedValueOnce(0);
+    mocks.tx.saleItem.count.mockResolvedValue(1);
+
+    const res = await fetch(`${baseUrl}/products/${productId}`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+    const body = (await res.json()) as { error: { code: string; details: { counts: { saleItems: number } } } };
+
+    expect(res.status).toBe(409);
+    expect(body.error.code).toBe('PRODUCT_HAS_HISTORY');
+    expect(body.error.details.counts.saleItems).toBe(1);
+    expect(mocks.tx.stockMovement.deleteMany).not.toHaveBeenCalled();
+    expect(mocks.tx.product.delete).not.toHaveBeenCalled();
+  });
+
+  it('accepts discardStock as a query parameter for proxy compatibility', async () => {
+    mocks.prisma.product.findFirst.mockResolvedValue(
+      makeProduct({ stock: { toString: () => '3' } }),
+    );
+
+    const res = await fetch(`${baseUrl}/products/${productId}?discardStock=true`, {
+      method: 'DELETE',
+      headers: authHeaders(),
+    });
+
+    expect(res.status).toBe(200);
   });
 
   // ── 3. Wrong businessId → 404 ─────────────────────────────────────────────

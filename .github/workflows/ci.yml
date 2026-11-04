@@ -67,6 +67,9 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
+      - name: Unit catalogue drift check
+        run: npm run units:check
+
       - name: Unit tests
         run: npm test
 
@@ -108,7 +111,7 @@ jobs:
       matrix:
         include:
           - name: shop-api
-            context: ./apps/shop-api
+            context: .
             dockerfile: ./apps/shop-api/Dockerfile
           - name: shop-pos
             context: ./apps/shop_pos

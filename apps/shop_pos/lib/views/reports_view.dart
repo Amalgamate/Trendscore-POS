@@ -5,6 +5,8 @@ import 'package:flutter/material.dart';
 
 import '../cart.dart';
 import '../pos_state.dart';
+import '../services/api_service.dart';
+import '../services/day_end_slip.dart';
 import '../services/xlsx_exporter.dart';
 import '../theme/tokens.dart';
 
@@ -23,13 +25,44 @@ class _ReportsViewState extends State<ReportsView>
   static const _reportNames = ['Overview', 'Products', 'Cash Flow'];
 
   String _selectedPeriod = 'Today';
+  DateTime _selectedBusinessDate = DateTime.now();
   late final TabController _tabController;
   bool _exporting = false;
+  bool _loadingSummary = false;
+  Map<String, dynamic>? _serverSummary;
+
+  String get _businessDate =>
+      '${_selectedBusinessDate.year.toString().padLeft(4, '0')}-${_selectedBusinessDate.month.toString().padLeft(2, '0')}-${_selectedBusinessDate.day.toString().padLeft(2, '0')}';
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: _reportNames.length, vsync: this);
+    _loadDailySummary();
+  }
+
+  Future<void> _loadDailySummary() async {
+    if (!ApiService.instance.hasToken) return;
+    setState(() => _loadingSummary = true);
+    final summary = await ApiService.instance.getSalesSummary(
+      date: _businessDate,
+    );
+    if (!mounted) return;
+    setState(() {
+      _serverSummary = summary?['today'] is Map<String, dynamic>
+          ? Map<String, dynamic>.from(summary!['today'] as Map)
+          : null;
+      _loadingSummary = false;
+    });
+  }
+
+  void _changeBusinessDate(int days) {
+    setState(() {
+      _selectedBusinessDate = _selectedBusinessDate.add(Duration(days: days));
+      _selectedPeriod = 'Today';
+      _serverSummary = null;
+    });
+    _loadDailySummary();
   }
 
   @override
@@ -55,7 +88,10 @@ class _ReportsViewState extends State<ReportsView>
         .toList();
   }
 
-  _ReportData _buildReportData(List<SaleRecord> sales) {
+  _ReportData _buildReportData(
+    List<SaleRecord> sales, {
+    Map<String, dynamic>? serverSummary,
+  }) {
     final completed = sales
         .where((sale) => sale.status == SaleStatus.completed)
         .toList();
@@ -102,6 +138,18 @@ class _ReportsViewState extends State<ReportsView>
       );
     final rankedCategories = categories.entries.toList()
       ..sort((left, right) => right.value.compareTo(left.value));
+    final byMethod = serverSummary?['byMethod'] as Map<String, dynamic>?;
+    if (byMethod != null) {
+      cashCents = ((byMethod['CASH'] as num? ?? 0) * 100).round();
+      mpesaCents = ((byMethod['MPESA'] as num? ?? 0) * 100).round();
+      creditCents = ((byMethod['CREDIT'] as num? ?? 0) * 100).round();
+    }
+    final serverTotal = serverSummary?['total'];
+    if (serverTotal is num) grossCents = (serverTotal * 100).round();
+    final serverRefund = serverSummary?['refunds'] as Map<String, dynamic>?;
+    if (serverRefund?['total'] is num) {
+      vatCents = (((serverSummary?['vatTotal'] as num?) ?? 0) * 100).round();
+    }
     return _ReportData(
       sales: sales,
       completedSales: completed,
@@ -110,9 +158,24 @@ class _ReportsViewState extends State<ReportsView>
       mpesaCents: mpesaCents,
       cashCents: cashCents,
       creditCents: creditCents,
-      reversedCount: sales
-          .where((sale) => sale.status == SaleStatus.reversed)
-          .length,
+      reversedCount:
+          (serverSummary?['voidedCount'] as num?)?.toInt() ??
+          sales.where((sale) => sale.status == SaleStatus.reversed).length,
+      refundsCents: (((serverRefund?['total'] as num?) ?? 0) * 100).round(),
+      averageCents:
+          (((serverSummary?['average'] as num?) ??
+                      (completed.isEmpty
+                          ? 0
+                          : grossCents / 100 / completed.length)) *
+                  100)
+              .round(),
+      transactionCount:
+          (serverSummary?['count'] as num?)?.toInt() ?? completed.length,
+      creditGivenCents: (((serverSummary?['creditGiven'] as num?) ?? 0) * 100)
+          .round(),
+      debtPayments: Map<String, dynamic>.from(
+        serverSummary?['debtPayments'] as Map? ?? const {},
+      ),
       products: rankedProducts,
       categories: rankedCategories,
     );
@@ -198,7 +261,7 @@ class _ReportsViewState extends State<ReportsView>
           sale.paymentMethod.label,
           sale.cashier,
           sale.customer?.name ?? '',
-          sale.items.fold<int>(0, (sum, item) => sum + item.quantity),
+          sale.items.fold<num>(0, (sum, item) => sum + item.quantity),
           (sale.subtotal.minorUnits + sale.vatAmount.minorUnits) / 100,
           sale.status.name,
         ],
@@ -218,7 +281,12 @@ class _ReportsViewState extends State<ReportsView>
 
   @override
   Widget build(BuildContext context) {
-    final report = _buildReportData(_periodSales);
+    final report = _buildReportData(
+      _periodSales,
+      serverSummary: _selectedPeriod == 'Today' ? _serverSummary : null,
+    );
+    final grossCents = report.grossCents;
+    final salesCount = report.transactionCount;
     final isMobile = MediaQuery.sizeOf(context).width < 768;
     final lowStockProducts = widget.state.products
         .where((product) => product.isLowStock || product.isOutOfStock)
@@ -244,8 +312,10 @@ class _ReportsViewState extends State<ReportsView>
                         selected: _selectedPeriod,
                         periods: _periods,
                         isMobile: isMobile,
-                        onChanged: (period) =>
-                            setState(() => _selectedPeriod = period),
+                        onChanged: (period) {
+                          setState(() => _selectedPeriod = period);
+                          if (period == 'Today') _loadDailySummary();
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -286,6 +356,26 @@ class _ReportsViewState extends State<ReportsView>
                   ],
                 ),
                 const SizedBox(height: 12),
+                if (_selectedPeriod == 'Today')
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: 'Previous business day',
+                        onPressed: () => _changeBusinessDate(-1),
+                        icon: const Icon(Icons.chevron_left),
+                      ),
+                      Text(
+                        _businessDate,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      IconButton(
+                        tooltip: 'Next business day',
+                        onPressed: () => _changeBusinessDate(1),
+                        icon: const Icon(Icons.chevron_right),
+                      ),
+                    ],
+                  ),
                 LayoutBuilder(
                   builder: (context, constraints) {
                     final columns = constraints.maxWidth >= 900 ? 4 : 2;
@@ -299,13 +389,16 @@ class _ReportsViewState extends State<ReportsView>
                       children: [
                         _MetricCard(
                           title: 'Gross sales',
-                          value: _kes(report.grossCents),
-                          detail: '${report.completedSales.length} sales',
+                          value: _kes(grossCents),
+                          detail: _loadingSummary
+                              ? 'Loading server total…'
+                              : '$salesCount sales',
                         ),
                         _MetricCard(
                           title: 'Net sales',
-                          value: _kes(report.grossCents - report.vatCents),
-                          detail: 'Excluding VAT',
+                          value: _kes(report.grossCents - report.refundsCents),
+                          detail:
+                              '${report.refundsCents == 0 ? 'No' : _kes(report.refundsCents)} refunded',
                         ),
                         _MetricCard(
                           title: 'VAT collected',
@@ -314,19 +407,18 @@ class _ReportsViewState extends State<ReportsView>
                         ),
                         _MetricCard(
                           title: 'Average sale',
-                          value: _kes(
-                            report.completedSales.isEmpty
-                                ? 0
-                                : report.grossCents ~/
-                                      report.completedSales.length,
-                          ),
-                          detail: '${report.reversedCount} reversed',
+                          value: _kes(report.averageCents),
+                          detail: '${report.reversedCount} voided',
                         ),
                       ],
                     );
                   },
                 ),
                 const SizedBox(height: 8),
+                if (_selectedPeriod == 'Today' && _serverSummary != null)
+                  _DailySummaryDetails(summary: report, date: _businessDate),
+                if (_selectedPeriod == 'Today' && _loadingSummary)
+                  const LinearProgressIndicator(),
                 TabBar(
                   controller: _tabController,
                   labelColor: AppColors.accent_primary,
@@ -386,11 +478,24 @@ class _ReportsViewState extends State<ReportsView>
               ),
               _SummaryLine(
                 label: 'Net sales',
-                value: _kes(report.grossCents - report.vatCents),
+                value: _kes(report.grossCents - report.refundsCents),
               ),
+              _SummaryLine(label: 'Refunds', value: _kes(report.refundsCents)),
               _SummaryLine(label: 'M-Pesa', value: _kes(report.mpesaCents)),
               _SummaryLine(label: 'Cash', value: _kes(report.cashCents)),
               _SummaryLine(label: 'Credit', value: _kes(report.creditCents)),
+              _SummaryLine(
+                label: 'Credit given',
+                value: _kes(report.creditGivenCents),
+              ),
+              for (final entry in report.debtPayments.entries)
+                _SummaryLine(
+                  label: 'Debt receipt · ${entry.key}',
+                  value: _kes(
+                    (((entry.value as Map)['amount'] as num? ?? 0) * 100)
+                        .round(),
+                  ),
+                ),
               _SummaryLine(
                 label: 'Expected drawer',
                 value: widget.state.expectedDrawerCash.toString(),
@@ -404,10 +509,52 @@ class _ReportsViewState extends State<ReportsView>
             child: const Text('Close'),
           ),
           FilledButton.icon(
-            onPressed: () {
+            onPressed: () async {
+              final rows = <({String label, String value})>[
+                (label: 'Gross sales', value: _kes(report.grossCents)),
+                (label: 'VAT collected', value: _kes(report.vatCents)),
+                (
+                  label: 'Net sales',
+                  value: _kes(report.grossCents - report.refundsCents),
+                ),
+                (label: 'Refunds', value: _kes(report.refundsCents)),
+                (label: 'M-Pesa', value: _kes(report.mpesaCents)),
+                (label: 'Cash', value: _kes(report.cashCents)),
+                (label: 'Credit', value: _kes(report.creditCents)),
+                (label: 'Credit given', value: _kes(report.creditGivenCents)),
+                (
+                  label: 'Expected drawer',
+                  value: widget.state.expectedDrawerCash.toString(),
+                ),
+              ];
+              for (final entry in report.debtPayments.entries) {
+                final payment = Map<String, dynamic>.from(entry.value as Map);
+                rows.add((
+                  label: 'Debt receipt · ${entry.key}',
+                  value: _kes(
+                    (((payment['amount'] as num?) ?? 0) * 100).round(),
+                  ),
+                ));
+              }
+              final slip = buildDayEndSlipHtml(
+                shopName: widget.state.shopName,
+                branch: widget.state.storeBranch,
+                date: _businessDate,
+                till: widget.state.tillId,
+                cashier: widget.state.activeCashierName,
+                rows: rows,
+              );
               Navigator.pop(dialogContext);
+              final opened = await printDayEndSlip(slip);
+              if (!mounted) return;
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Z-Report sent to printer.')),
+                SnackBar(
+                  content: Text(
+                    opened
+                        ? 'Day-end report opened in the print dialog.'
+                        : 'Printing is available in the web POS; this device has no print service.',
+                  ),
+                ),
               );
             },
             icon: const Icon(Icons.print_outlined),
@@ -429,6 +576,11 @@ class _ReportData {
     required this.cashCents,
     required this.creditCents,
     required this.reversedCount,
+    required this.refundsCents,
+    required this.averageCents,
+    required this.transactionCount,
+    required this.creditGivenCents,
+    required this.debtPayments,
     required this.products,
     required this.categories,
   });
@@ -441,12 +593,56 @@ class _ReportData {
   final int cashCents;
   final int creditCents;
   final int reversedCount;
+  final int refundsCents;
+  final int averageCents;
+  final int transactionCount;
+  final int creditGivenCents;
+  final Map<String, dynamic> debtPayments;
   final List<MapEntry<String, _ProductMetric>> products;
   final List<MapEntry<String, int>> categories;
 }
 
+class _DailySummaryDetails extends StatelessWidget {
+  const _DailySummaryDetails({required this.summary, required this.date});
+
+  final _ReportData summary;
+  final String date;
+
+  @override
+  Widget build(BuildContext context) {
+    String money(int cents) => 'KES ${Money(cents).formatted}';
+    final methods = <String, int>{
+      'Cash': summary.cashCents,
+      'M-Pesa': summary.mpesaCents,
+      'Credit': summary.creditCents,
+    };
+    final debt = summary.debtPayments.entries
+        .map((entry) {
+          final data = Map<String, dynamic>.from(entry.value as Map);
+          return '${entry.key}: ${money(((data['amount'] as num? ?? 0) * 100).round())} (${data['count'] ?? 0})';
+        })
+        .join(' · ');
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Wrap(
+          spacing: 18,
+          runSpacing: 8,
+          children: [
+            Text('Business day $date'),
+            for (final entry in methods.entries)
+              Text('${entry.key}: ${money(entry.value)}'),
+            Text('Credit given: ${money(summary.creditGivenCents)}'),
+            Text('Debt receipts: ${debt.isEmpty ? 'None' : debt}'),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _ProductMetric {
-  int quantity = 0;
+  num quantity = 0;
   int revenueCents = 0;
 }
 

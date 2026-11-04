@@ -8,11 +8,13 @@
  */
 import { Prisma, PrismaClient, type PaymentMethod, type SaleStatus } from '@prisma/client';
 import { ulid } from 'ulid';
+import argon2 from 'argon2';
 import {
   SaleValidationError,
   toCents,
   toMilli,
 } from './pricing';
+import { toBaseQuantity, UnitConversionError } from './measured-units';
 
 /** Thrown when an idempotency key replays. Carries the original receipt. */
 export class DuplicateSaleError extends Error {
@@ -34,13 +36,16 @@ export interface CreateSaleInput {
   idempotencyKey: string;
   clientRef?: string;
   customerId?: string;
+  customerName?: string;
+  /** Owner/manager authorization for a sale that leaves stock negative. */
+  stockOverride?: { approverId: string; pin: string };
   /** Method of primary payment. */
   method: PaymentMethod;
   paymentReference?: string;
   cashTendered?: number;
   offline?: boolean;
   status?: SaleStatus;
-  lines: Array<{ productId: string; quantity: number }>;
+  lines: Array<{ productId: string; quantity: number; unit?: string }>;
 }
 
 export interface CreateSaleResult {
@@ -53,6 +58,8 @@ export interface CreateSaleResult {
   items: number;
   paymentStatus: 'PENDING' | 'SUCCESS';
   paymentReference: string;
+  /** Authoritative server balance after a credit sale. */
+  customerBalance?: number;
 }
 
 export async function createSale(
@@ -64,6 +71,8 @@ export async function createSale(
     cashierId,
     idempotencyKey,
     customerId,
+    customerName,
+    stockOverride,
     method,
     paymentReference,
     cashTendered,
@@ -116,6 +125,25 @@ export async function createSale(
 
     const productMap = new Map(products.map((p) => [p.id, p]));
 
+    let stockApprover: { id: string; fullName: string } | null = null;
+    if (stockOverride) {
+      const candidate = await tx.user.findFirst({
+        where: {
+          id: stockOverride.approverId,
+          active: true,
+          role: { in: ['OWNER', 'MANAGER'] },
+        },
+        select: { id: true, fullName: true, pinHash: true },
+      });
+      if (!candidate || !(await argon2.verify(candidate.pinHash, stockOverride.pin))) {
+        throw new SaleValidationError(
+          { kind: 'STOCK_OVERRIDE_DENIED' },
+          'A valid Owner or Manager PIN is required to approve this stock override.',
+        );
+      }
+      stockApprover = { id: candidate.id, fullName: candidate.fullName };
+    }
+
     let subtotalCents = 0;
     let vatAmountCents = 0;
     let costTotalCents = 0;
@@ -126,20 +154,41 @@ export async function createSale(
         throw new SaleValidationError({ kind: 'PRODUCT_INACTIVE', productId: p.id, name: p.name }, `Product '${p.name}' is inactive.`);
       }
 
-      const requestedQty = line.quantity;
-      const currentStock = Number(p.stock);
+      let requestedMilli: number;
+      try {
+        requestedMilli = line.unit
+          ? toBaseQuantity(line.quantity, line.unit, p.unit)
+          : toMilli(line.quantity);
+      } catch (error) {
+        if (error instanceof UnitConversionError) {
+          throw new SaleValidationError(
+            { kind: 'QUANTITY_NOT_POSITIVE', productId: p.id, requested: line.quantity },
+            error.message,
+          );
+        }
+        throw error;
+      }
+      const requestedQty = requestedMilli / 1000;
+      const currentMilli = toMilli(p.stock.toString());
+      const currentStock = currentMilli / 1000;
 
-      if (!offline && currentStock < requestedQty) {
+      if (!offline && currentStock < requestedQty && !stockApprover) {
         throw new SaleValidationError(
           { kind: 'INSUFFICIENT_STOCK', productId: p.id, name: p.name, available: toMilli(currentStock), requested: toMilli(requestedQty) },
           `Insufficient stock for '${p.name}'. Requested ${requestedQty}, available ${currentStock}.`,
         );
       }
 
-      const unitPriceCents = toCents(Number(p.salePrice));
-      const unitCostCents = toCents(Number(p.costPrice));
-      const lineTotalCents = Math.round(unitPriceCents * requestedQty);
-      const lineCostCents = Math.round(unitCostCents * requestedQty);
+      const unitPriceCents = toCents(p.salePrice.toString());
+      const unitCostCents = toCents(p.costPrice.toString());
+      // Price and quantity are integer cents and milli-units. Round half-up
+      // once at the line boundary, without binary floating point.
+      const lineTotalCents = Math.floor(
+        (unitPriceCents * requestedMilli + 500) / 1000,
+      );
+      const lineCostCents = Math.floor(
+        (unitCostCents * requestedMilli + 500) / 1000,
+      );
       const vatRate = Number(p.vatRate);
       const lineVatCents = Math.round((lineTotalCents * vatRate) / (1 + vatRate));
 
@@ -150,11 +199,13 @@ export async function createSale(
       return {
         product: p,
         quantity: requestedQty,
+        soldQuantity: line.quantity,
+        soldUnit: line.unit ?? p.unit,
         unitPrice: Number(p.salePrice),
         unitCost: Number(p.costPrice),
         vatRate,
         lineTotal: lineTotalCents / 100,
-        newStock: currentStock - requestedQty,
+        newStock: new Prisma.Decimal(p.stock.toString()).minus(new Prisma.Decimal(requestedMilli).div(1000)),
       };
     });
 
@@ -171,6 +222,8 @@ export async function createSale(
       );
     }
 
+    let customerBalance: number | undefined;
+    let receiptCustomerName = customerName?.trim() || undefined;
     if (method === 'CREDIT') {
       if (!customerId) {
         throw new SaleValidationError(
@@ -192,18 +245,21 @@ export async function createSale(
           'This customer credit account is unavailable. Refresh the account list and try again.',
         );
       }
+      receiptCustomerName ??= customer.fullName;
       if (customer.creditFrozen) {
         throw new SaleValidationError(
           { kind: 'CREDIT_FROZEN', customerId },
           `Credit is frozen for ${customer.fullName}. Record the sale using another payment method.`,
         );
       }
-      if (Number(customer.balance) + total > Number(customer.creditLimit)) {
+      const balanceCents = toCents(customer.balance.toString());
+      const creditLimitCents = toCents(customer.creditLimit.toString());
+      if (balanceCents + totalCents > creditLimitCents) {
         throw new SaleValidationError(
           {
             kind: 'CREDIT_LIMIT_EXCEEDED',
             customerId,
-            available: Math.max(0, Math.round((Number(customer.creditLimit) - Number(customer.balance)) * 100)),
+            available: Math.max(0, creditLimitCents - balanceCents),
             requested: totalCents,
           },
           `${customer.fullName} does not have enough available credit for this sale.`,
@@ -217,11 +273,20 @@ export async function createSale(
     const clientRef = input.clientRef && input.clientRef.length > 0 ? input.clientRef : ulid();
 
     // 4. Create Sale
+    if (!receiptCustomerName && customerId) {
+      const customer = await tx.customer.findFirst({
+        where: { id: customerId, businessId },
+        select: { fullName: true },
+      });
+      receiptCustomerName = customer?.fullName;
+    }
+
     const sale = await tx.sale.create({
       data: {
         businessId,
         cashierId,
         customerId,
+        customerName: receiptCustomerName,
         receiptNumber,
         clientRef,
         idempotencyKey,
@@ -241,6 +306,8 @@ export async function createSale(
           saleId: sale.id,
           productId: item.product.id,
           quantity: item.quantity,
+          soldQuantity: item.soldQuantity,
+          soldUnit: item.soldUnit,
           unitPrice: item.unitPrice,
           unitCost: item.unitCost,
           vatRate: item.vatRate,
@@ -249,10 +316,60 @@ export async function createSale(
       });
 
       // Update product stock cache
-      await tx.product.update({
-        where: { id: item.product.id },
-        data: { stock: item.newStock },
+      const changed = await tx.product.updateMany({
+        where: {
+          id: item.product.id,
+          businessId,
+          stock: { gte: item.quantity },
+        },
+        data: {
+          stock: { decrement: item.quantity },
+          varianceFlag: item.newStock.isNegative() || item.product.varianceFlag,
+        },
       });
+      if (changed.count !== 1) {
+        if (stockApprover) {
+          const forced = await tx.product.updateMany({
+            where: { id: item.product.id, businessId },
+            data: { stock: { decrement: item.quantity }, varianceFlag: true },
+          });
+          if (forced.count !== 1) {
+            throw new SaleValidationError(
+              { kind: 'INSUFFICIENT_STOCK', productId: item.product.id, name: item.product.name, available: toMilli(item.product.stock.toString()), requested: toMilli(item.quantity.toString()) },
+              `Insufficient stock for '${item.product.name}'. Refresh stock and try again.`,
+            );
+          }
+          const shortfall = new Prisma.Decimal(item.quantity.toString()).minus(item.product.stock);
+          await tx.approval.create({
+            data: {
+              entityType: 'ADJUSTMENT',
+              entityId: item.product.id,
+              reason: `Negative-stock sale ${receiptNumber}: ${item.product.name}; shortfall ${shortfall.toString()} ${item.product.unit}`,
+              status: 'APPROVED',
+              requestedById: cashierId,
+              approvedById: stockApprover.id,
+              decidedAt: new Date(),
+              decisionNote: `Approved by ${stockApprover.fullName} at checkout.`,
+            },
+          });
+          await tx.auditLog.create({
+            data: {
+              businessId,
+              userId: cashierId,
+              action: 'STOCK_OVERRIDE_APPROVED',
+              entityType: 'PRODUCT',
+              entityId: item.product.id,
+              beforeJson: { stock: item.product.stock.toString() },
+              afterJson: { stock: item.newStock.toString(), saleId: sale.id, approvedById: stockApprover.id },
+            },
+          });
+        } else {
+          throw new SaleValidationError(
+            { kind: 'INSUFFICIENT_STOCK', productId: item.product.id, name: item.product.name, available: toMilli(item.product.stock.toString()), requested: toMilli(item.quantity.toString()) },
+            `Insufficient stock for '${item.product.name}'. Refresh stock and try again.`,
+          );
+        }
+      }
 
       // Append-only stock movement
       await tx.stockMovement.create({
@@ -290,7 +407,8 @@ export async function createSale(
     // 7. If Credit method, update Customer balance & append to CustomerLedger
     if (method === 'CREDIT' && customerId) {
       const customer = await tx.customer.findUniqueOrThrow({ where: { id: customerId } });
-      const newBalance = Number(customer.balance) + total;
+      const amountDecimal = new Prisma.Decimal(totalCents).div(100);
+      const newBalance = new Prisma.Decimal(customer.balance.toString()).plus(amountDecimal);
 
       await tx.customer.update({
         where: { id: customerId },
@@ -302,7 +420,7 @@ export async function createSale(
           customerId,
           businessId,
           entryType: 'DEBIT',
-          amount: total,
+          amount: amountDecimal,
           balance: newBalance,
           entityType: 'SALE',
           entityId: sale.id,
@@ -311,6 +429,7 @@ export async function createSale(
           createdById: cashierId,
         },
       });
+      customerBalance = Number(newBalance.toString());
     }
 
     return {
@@ -323,6 +442,7 @@ export async function createSale(
       items: lines.length,
       paymentStatus: method === 'MPESA' ? 'PENDING' : 'SUCCESS',
       paymentReference: paymentReference?.trim() ?? '',
+      ...(customerBalance !== undefined ? { customerBalance } : {}),
     };
   });
 }

@@ -42,6 +42,15 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
   String get _shopName => widget.state?.shopName ?? 'SHOPSMART RETAIL POS';
   String get _branch => widget.state?.storeBranch ?? 'Main Branch';
   String get _tillId => widget.state?.tillId ?? 'Counter 01';
+  bool get _showCustomerName => widget.state?.showCustomerNameOnReceipt ?? true;
+
+  String? _customerName(SaleRecord sale) {
+    if (!_showCustomerName) return null;
+    final name = sale.customerName?.trim().isNotEmpty == true
+        ? sale.customerName!.trim()
+        : sale.customer?.name.trim();
+    return name?.isNotEmpty == true ? name : null;
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -290,45 +299,52 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
             ),
           ),
           const SizedBox(height: 8),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text(
-                'Cashier: ${sale.cashier}',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.text_tertiary,
-                ),
-              ),
-              Text(
-                '${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, '0')}-${sale.timestamp.day.toString().padLeft(2, '0')} ${sale.timestamp.hour.toString().padLeft(2, '0')}:${sale.timestamp.minute.toString().padLeft(2, '0')}',
-                style: const TextStyle(
-                  fontSize: 11,
-                  color: AppColors.text_tertiary,
-                ),
-              ),
-            ],
+          Text(
+            'Cashier: ${sale.cashier}',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.text_tertiary,
+            ),
           ),
-          if (sale.customer != null) ...[
+          Align(
+            alignment: Alignment.centerRight,
+            child: Text(
+              '${sale.timestamp.year}-${sale.timestamp.month.toString().padLeft(2, '0')}-${sale.timestamp.day.toString().padLeft(2, '0')} ${sale.timestamp.hour.toString().padLeft(2, '0')}:${sale.timestamp.minute.toString().padLeft(2, '0')}',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 11,
+                color: AppColors.text_tertiary,
+              ),
+            ),
+          ),
+          if (_customerName(sale) != null) ...[
             const SizedBox(height: 4),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text(
-                  'Customer: ${sale.customer!.name}',
-                  style: const TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.bold,
-                    color: AppColors.text_secondary,
+                Expanded(
+                  child: Text(
+                    'Customer: ${_customerName(sale)}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: AppColors.text_secondary,
+                    ),
                   ),
                 ),
-                Text(
-                  sale.customer!.phone,
-                  style: const TextStyle(
-                    fontSize: 11,
-                    color: AppColors.text_tertiary,
+                if (sale.customer?.phone.isNotEmpty ?? false)
+                  Text(
+                    sale.customer!.phone,
+                    style: const TextStyle(
+                      fontSize: 11,
+                      color: AppColors.text_tertiary,
+                    ),
                   ),
-                ),
               ],
             ),
           ],
@@ -352,7 +368,7 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                           ),
                         ),
                         Text(
-                          '${item.quantity} × KES ${item.unitPrice.formatted}',
+                          '${item.quantity} ${item.unit} × KES ${item.unitPrice.formatted}/${item.baseUnit}',
                           style: const TextStyle(
                             fontSize: 11,
                             color: AppColors.text_tertiary,
@@ -499,12 +515,13 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Corporate Tax Invoice Header
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.start,
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.start,
+            runSpacing: 12,
             children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              Wrap(
+                crossAxisAlignment: WrapCrossAlignment.start,
                 children: [
                   if (widget.state?.brandLogoBase64 != null &&
                       widget.state!.brandLogoBase64!.isNotEmpty) ...[
@@ -606,83 +623,89 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
           ),
           const Divider(height: 24),
 
-          // Bill To
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: AppColors.bg_canvas,
-              borderRadius: BorderRadius.circular(8),
+          // Bill To (only when customer display is enabled and a name exists)
+          if (_customerName(sale) != null)
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppColors.bg_canvas,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Billed To / Customer:',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.text_tertiary,
+                          ),
+                        ),
+                        Text(
+                          _customerName(sale)!,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
+                        if (sale.customer?.phone.isNotEmpty ?? false)
+                          Text(
+                            'Phone: ${sale.customer!.phone}',
+                            style: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.text_secondary,
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      const Text(
+                        'Payment Status:',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.text_tertiary,
+                        ),
+                      ),
+                      Text(
+                        sale.paymentPending
+                            ? 'PENDING RECONCILIATION'
+                            : sale.paymentMethod == SalePaymentMethod.credit
+                            ? 'CREDIT / PENDING'
+                            : 'PAID IN FULL',
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                          color:
+                              sale.paymentPending ||
+                                  sale.paymentMethod == SalePaymentMethod.credit
+                              ? const Color(0xFFD97706)
+                              : AppColors.status_success,
+                        ),
+                      ),
+                      Text(
+                        'Ref: ${sale.paymentReference}',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          fontFamily: 'monospace',
+                          color: AppColors.text_tertiary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Billed To / Debtor Account:',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.text_tertiary,
-                      ),
-                    ),
-                    Text(
-                      sale.customer?.name ?? 'Walk-In Retail Client',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 13,
-                      ),
-                    ),
-                    Text(
-                      'Phone: ${sale.customer?.phone ?? "N/A"}',
-                      style: const TextStyle(
-                        fontSize: 11,
-                        color: AppColors.text_secondary,
-                      ),
-                    ),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    const Text(
-                      'Payment Status:',
-                      style: TextStyle(
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        color: AppColors.text_tertiary,
-                      ),
-                    ),
-                    Text(
-                      sale.paymentPending
-                          ? 'PENDING RECONCILIATION'
-                          : sale.paymentMethod == SalePaymentMethod.credit
-                          ? 'CREDIT / PENDING'
-                          : 'PAID IN FULL',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 12,
-                        color:
-                            sale.paymentPending ||
-                                sale.paymentMethod == SalePaymentMethod.credit
-                            ? const Color(0xFFD97706)
-                            : AppColors.status_success,
-                      ),
-                    ),
-                    Text(
-                      'Ref: ${sale.paymentReference}',
-                      style: const TextStyle(
-                        fontSize: 10,
-                        fontFamily: 'monospace',
-                        color: AppColors.text_tertiary,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
           const SizedBox(height: 16),
 
           // Table of Items
@@ -756,7 +779,7 @@ class _ReceiptDialogState extends State<ReceiptDialog> {
                     Padding(
                       padding: const EdgeInsets.all(8),
                       child: Text(
-                        it.quantity.toString(),
+                        '${it.quantity} ${it.unit}',
                         textAlign: TextAlign.center,
                         style: const TextStyle(fontSize: 11),
                       ),
@@ -881,22 +904,31 @@ class _TotalRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: isSmall ? 10 : fontSize,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
-            color: isBold ? AppColors.text_primary : AppColors.text_tertiary,
+        Expanded(
+          child: Text(
+            label,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: isSmall ? 10 : fontSize,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+              color: isBold ? AppColors.text_primary : AppColors.text_tertiary,
+            ),
           ),
         ),
-        Text(
-          value,
-          style: TextStyle(
-            fontSize: isSmall ? 10 : fontSize,
-            fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
-            color: isBold ? AppColors.accent_primary : AppColors.text_primary,
+        const SizedBox(width: 8),
+        Flexible(
+          child: Text(
+            value,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.end,
+            style: TextStyle(
+              fontSize: isSmall ? 10 : fontSize,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.w600,
+              color: isBold ? AppColors.accent_primary : AppColors.text_primary,
+            ),
           ),
         ),
       ],

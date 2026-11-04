@@ -201,12 +201,12 @@ BEGIN
             'COMPLETED', 140.00, 140.00, now(), now());
 
     INSERT INTO sale_items
-      (id, "saleId", "productId", "productName", quantity, "unitPrice",
-       "costPrice", "lineTotal", "vatAmount", "createdAt")
+      (id, "saleId", "productId", quantity, "unitPrice", "unitCost", "lineTotal",
+       "soldQuantity", "soldUnit")
     VALUES ('eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee',
             'dddddddd-dddd-dddd-dddd-dddddddddddd',
             '55555555-5555-5555-5555-555555555555',
-            'Milk 1L', 1, 140.00, 120.00, 140.00, 0.00, now());
+            1, 140.00, 120.00, 140.00, 1, 'pc');
 
     PERFORM set_config('app.purge_product_id',
                        '55555555-5555-5555-5555-555555555555', true);

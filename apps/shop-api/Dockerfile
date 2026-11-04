@@ -4,8 +4,8 @@
 # environment variables injected by the provisioning engine. Instances pin
 # to an immutable tag so rollback is always possible.
 #
-# Build context is apps/shop-api, so this file must not reference anything
-# outside that directory. It depends on no workspace packages.
+# Build context is the repository root so the API image can include the
+# shared unit catalogue used by the measured-sale conversion module.
 
 FROM node:20-alpine AS builder
 WORKDIR /app
@@ -13,16 +13,17 @@ WORKDIR /app
 # Dependencies first, for layer caching. There is no lockfile in this
 # workspace yet, so `npm ci` is not usable here; `npm install` is used and
 # the resulting image is still pinned by tag, never by digest drift.
-COPY package.json ./
+COPY apps/shop-api/package.json ./package.json
 RUN npm install --omit=dev --ignore-scripts --no-audit --no-fund
 
 # Prisma client generation needs the CLI, which is a devDependency.
-COPY prisma ./prisma
+COPY apps/shop-api/prisma ./prisma
 RUN npm install --no-save --ignore-scripts --no-audit --no-fund prisma@6 @prisma/client@6 \
  && npx prisma generate
 
-COPY tsconfig.json tsconfig.build.json ./
-COPY src ./src
+COPY apps/shop-api/tsconfig.json apps/shop-api/tsconfig.build.json ./
+COPY apps/shop-api/src ./src
+COPY packages/units/units.json /packages/units/units.json
 RUN npm run build
 
 # Fail the build, not the deployment, if an entrypoint is missing.
@@ -41,6 +42,7 @@ RUN addgroup -S retail && adduser -S retail -G retail
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /packages/units /packages/units
 COPY --from=builder /app/package.json ./package.json
 
 USER retail

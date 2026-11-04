@@ -839,13 +839,18 @@ class _PurchaseOrdersViewState extends State<PurchaseOrdersView> {
                                 Object? failure;
                                 for (final line in receivedLines) {
                                   final qty =
-                                      int.tryParse(line.qtyCtrl.text) ?? 0;
+                                      num.tryParse(line.qtyCtrl.text) ?? 0;
                                   try {
-                                    await widget.state.adjustStock(
-                                      line.product.id,
-                                      qty,
-                                      'Purchase Order: $supplier',
-                                      type: 'PURCHASE',
+                                    await widget.state.receiveStock(
+                                      productId: line.product.id,
+                                      quantity: qty,
+                                      unit: line.product.unit,
+                                      unitCost:
+                                          (line.product.costPrice ??
+                                                  line.product.unitPrice)
+                                              .minorUnits /
+                                          100,
+                                      reference: 'Purchase Order: $supplier',
                                     );
                                     appliedLines.add(line);
                                   } catch (error) {

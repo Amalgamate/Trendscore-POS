@@ -3,12 +3,67 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:shop_pos/cart.dart';
 
 void main() {
-  CartLine milk({int stock = 3, String price = '65.00'}) => CartLine(
-        productId: 'milk',
-        name: 'Fresh milk 500ml',
-        unitPrice: Money.parse(price),
-        stock: stock,
+  group('Measured cart lines', () {
+    test('250 ml at KES 300/L costs KES 75 and consumes 0.25 L', () {
+      final cart = Cart();
+      final added = cart.addMeasured(
+        CartLine(
+          productId: 'oil',
+          name: 'Oil',
+          unitPrice: Money.parse('300'),
+          stock: 20,
+          unit: 'l',
+        ),
+        250,
+        'ml',
       );
+      expect(added, isTrue);
+      expect(cart.lines.single.lineTotal, Money.parse('75.00'));
+      expect(cart.lines.single.quantity, 250);
+      expect(cart.lines.single.unit, 'ml');
+      expect(cart.lines.single.baseUnit, 'l');
+    });
+
+    test('measured cart rejects cross-family units and marks overselling', () {
+      final cart = Cart();
+      expect(
+        cart.addMeasured(
+          CartLine(
+            productId: 'oil',
+            name: 'Oil',
+            unitPrice: Money.parse('300'),
+            stock: 1,
+            unit: 'l',
+          ),
+          1,
+          'kg',
+        ),
+        isFalse,
+      );
+      expect(
+        cart.addMeasured(
+          CartLine(
+            productId: 'oil',
+            name: 'Oil',
+            unitPrice: Money.parse('300'),
+            stock: 1,
+            unit: 'l',
+          ),
+          1500,
+          'ml',
+        ),
+        isTrue,
+      );
+      expect(cart.hasStockShortage, isTrue);
+    });
+  });
+
+  CartLine milk({int stock = 3, String price = '65.00'}) => CartLine(
+    productId: 'milk',
+    name: 'Fresh milk 500ml',
+    unitPrice: Money.parse(price),
+    stock: stock,
+  );
 
   group('Money', () {
     test('parses shillings and cents as exact integers', () {
@@ -76,7 +131,7 @@ void main() {
       expect(cart.lines.single.quantity, 1);
     });
 
-    test('refuses to sell stock the shop does not have', () {
+    test('allows requested quantity and flags the manager approval need', () {
       final cart = Cart();
       final shortStock = milk(stock: 2);
 
@@ -84,36 +139,28 @@ void main() {
       cart.add(shortStock);
       expect(cart.itemCount, 2);
 
-      // The third tap must change nothing. Before this guard the header badge
-      // kept counting past the shelf count and the oversell surfaced days
-      // later at stock-take, unexplained.
-      String? reason;
-      expect(cart.add(shortStock, onRefused: (r) => reason = r), isFalse);
-      expect(cart.itemCount, 2);
-      expect(reason, Cart.alreadyComplete);
+      expect(cart.add(shortStock), isTrue);
+      expect(cart.itemCount, 3);
+      expect(cart.hasStockShortage, isTrue);
+      expect(cart.canCheckout, isTrue); // API requires a manager PIN to commit.
     });
 
-    test('refuses a product with zero stock and explains why', () {
+    test('allows a zero-stock request only as a pending manager approval', () {
       final cart = Cart();
-      String? reason;
-      expect(cart.add(milk(stock: 0), onRefused: (r) => reason = r), isFalse);
-      expect(cart.isEmpty, isTrue);
-      expect(reason, Cart.outOfStock);
+      expect(cart.add(milk(stock: 0)), isTrue);
+      expect(cart.hasStockShortage, isTrue);
+      expect(cart.canCheckout, isTrue);
     });
 
-    test('clamps an increase that would exceed stock', () {
+    test('tracks an increase beyond stock for explicit checkout approval', () {
       final cart = Cart();
       final line = milk(stock: 2);
       cart.add(line);
       cart.add(line);
 
-      String? reason;
-      cart.changeQuantity('milk', 1, onRefused: (r) => reason = r);
-
-      // The whole jump is refused rather than silently topping up to stock:
-      // a cashier who pressed + twice should not end up with three of them.
-      expect(cart.lines.single.quantity, 2);
-      expect(reason, Cart.alreadyComplete);
+      cart.changeQuantity('milk', 1);
+      expect(cart.lines.single.quantity, 3);
+      expect(cart.hasStockShortage, isTrue);
     });
 
     test('drops the line entirely when quantity reaches zero', () {
@@ -131,7 +178,14 @@ void main() {
     test('clear empties the whole basket', () {
       final cart = Cart();
       cart.add(milk());
-      cart.add(CartLine(productId: 'bread', name: 'White bread', unitPrice: Money.parse('75.00'), stock: 18));
+      cart.add(
+        CartLine(
+          productId: 'bread',
+          name: 'White bread',
+          unitPrice: Money.parse('75.00'),
+          stock: 18,
+        ),
+      );
       expect(cart.itemCount, 2);
 
       cart.clear();
@@ -203,9 +257,16 @@ void main() {
     test('the payment methods offered are the ones the schema can store', () {
       // The schema enum is CASH | MPESA | CREDIT, with card deliberately
       // absent in v1. A Card button here would write a row Postgres rejects.
-      expect(SalePaymentMethod.values.map((m) => m.apiValue),
-          ['CASH', 'MPESA', 'CREDIT']);
-      expect(SalePaymentMethod.values.map((m) => m.label), ['Cash', 'M-Pesa', 'Credit']);
+      expect(SalePaymentMethod.values.map((m) => m.apiValue), [
+        'CASH',
+        'MPESA',
+        'CREDIT',
+      ]);
+      expect(SalePaymentMethod.values.map((m) => m.label), [
+        'Cash',
+        'M-Pesa',
+        'Credit',
+      ]);
     });
   });
 }

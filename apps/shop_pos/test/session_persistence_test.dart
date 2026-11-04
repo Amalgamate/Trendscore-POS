@@ -14,7 +14,7 @@ void main() {
   });
 
   test(
-    'an authenticated session survives app reload until its expiry',
+    'cached profile never restores authentication after an app restart',
     () async {
       final expiry = DateTime.now().toUtc().add(const Duration(hours: 8));
       const token = 'test.jwt.token';
@@ -28,20 +28,15 @@ void main() {
       );
 
       await state.persistSession(user, tabIndex: 3);
+      // A new app process has a fresh in-memory API service; cached user data
+      // must not act as an authentication credential.
+      ApiService.instance.setToken(null);
       final reloadedState = PosState(includeDemoProducts: false);
       await reloadedState.loadInitialState();
 
-      expect(reloadedState.currentLoggedInUser?.id, user.id);
+      expect(reloadedState.currentLoggedInUser, isNull);
       expect(reloadedState.savedTabIndex, 3);
-      expect(ApiService.instance.authToken, token);
-      expect(
-        reloadedState.sessionExpiresAt,
-        DateTime.fromMillisecondsSinceEpoch(
-          expiry.millisecondsSinceEpoch,
-          isUtc: true,
-        ),
-      );
-      expect(PosState.sessionDurationMinutes, 480);
+      expect(ApiService.instance.hasToken, isFalse);
 
       await reloadedState.logout();
       expect(ApiService.instance.hasToken, isFalse);
@@ -52,26 +47,23 @@ void main() {
     },
   );
 
-  test('an expired session is cleared when the app starts', () async {
-    final expiry = DateTime.now().toUtc().subtract(const Duration(minutes: 1));
-    const token = 'expired.jwt.token';
-    ApiService.instance.setToken(token, expiresAt: expiry);
-    final state = PosState(includeDemoProducts: false);
-    await state.persistSession(
-      PosUser(
-        id: 'user-1',
-        fullName: 'Shop Owner',
-        phone: '254700000001',
-        role: PosUserRole.owner,
-      ),
+  test('legacy cached user fields are cleared when the app starts', () async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('session_user_id', 'old-user');
+    await prefs.setString('session_user_json', '{"id":"old-user"}');
+    await prefs.setInt(
+      'session_last_active',
+      DateTime.now().subtract(const Duration(hours: 2)).millisecondsSinceEpoch,
     );
-
+    ApiService.instance.setToken(null);
     final reloadedState = PosState(includeDemoProducts: false);
     await reloadedState.loadInitialState();
 
     expect(reloadedState.currentLoggedInUser, isNull);
     expect(ApiService.instance.hasToken, isFalse);
-    expect(reloadedState.sessionExpiresAt, isNull);
+    expect(prefs.getString('session_user_id'), isNull);
+    expect(prefs.getString('session_user_json'), isNull);
+    expect(prefs.getInt('session_last_active'), isNull);
   });
 
   test('API token expiry is read from its JWT payload', () {

@@ -13,6 +13,8 @@ class ApiService {
   DateTime? _authTokenExpiresAt;
   bool isConnected = false;
   String? lastError;
+  String? lastSaleErrorCode;
+  Map<String, dynamic>? lastSaleErrorDetails;
   bool get hasToken => _authToken != null && _authToken!.isNotEmpty;
   String? get authToken => _authToken;
   DateTime? get authTokenExpiresAt => _authTokenExpiresAt;
@@ -273,6 +275,42 @@ class ApiService {
     return null;
   }
 
+  /// Fetch the active stock audit list from the server, including valuation.
+  Future<List<Map<String, dynamic>>?> getStockAuditList() async {
+    final all = <Map<String, dynamic>>[];
+    try {
+      var page = 1;
+      var pages = 1;
+      do {
+        final uri = Uri.parse(
+          '$baseUrl/products/stock/list',
+        ).replace(queryParameters: {'page': '$page', 'limit': '500'});
+        final response = await http
+            .get(uri, headers: _headers)
+            .timeout(const Duration(seconds: 10));
+        if (response.statusCode != 200) {
+          lastError =
+              _messageFromResponse(response.body) ??
+              'Could not fetch stock list (${response.statusCode}).';
+          return null;
+        }
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        all.addAll(
+          List<Map<String, dynamic>>.from(decoded['data'] as List? ?? const []),
+        );
+        final meta = decoded['meta'] as Map<String, dynamic>? ?? const {};
+        pages = (meta['pages'] as num?)?.toInt() ?? 1;
+        page++;
+      } while (page <= pages);
+      lastError = null;
+      return all;
+    } catch (error) {
+      lastError = 'Could not fetch the stock audit list from the shop API.';
+      debugPrint('API getStockAuditList error: $error');
+      return null;
+    }
+  }
+
   Future<List<Map<String, dynamic>>?> getCategories() async {
     try {
       final res = await http
@@ -369,25 +407,31 @@ class ApiService {
   }
 
   /// Adjust product stock
-  Future<int?> adjustStock(
+  Future<num?> adjustStock(
     String productId,
-    int delta,
-    String type,
-    String reason,
-  ) async {
+    num delta,
+    String reason, {
+    String? unit,
+    String? note,
+  }) async {
     lastError = null;
     try {
       final res = await http
           .post(
             Uri.parse('$baseUrl/products/$productId/adjust-stock'),
             headers: _headers,
-            body: jsonEncode({'delta': delta, 'type': type, 'reason': reason}),
+            body: jsonEncode({
+              'delta': delta,
+              if (unit != null) 'unit': unit,
+              'reason': reason,
+              if (note != null && note.trim().isNotEmpty) 'note': note.trim(),
+            }),
           )
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
         if (decoded is Map<String, dynamic> && decoded['newStock'] is num) {
-          return (decoded['newStock'] as num).toInt();
+          return decoded['newStock'] as num;
         }
         lastError = 'The shop API did not return the updated stock quantity.';
         return null;
@@ -401,6 +445,118 @@ class ApiService {
       debugPrint('API adjustStock error: $e');
       return null;
     }
+  }
+
+  /// Record a supplier delivery as a purchase, converting its unit to the
+  /// product's base unit and writing purchase and stock movement history.
+  Future<Map<String, dynamic>?> receiveStock({
+    required String productId,
+    required num quantity,
+    required String unit,
+    required num unitCost,
+    String? reference,
+  }) async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/stock/receive'),
+            headers: _headers,
+            body: jsonEncode({
+              if (reference != null && reference.trim().isNotEmpty)
+                'reference': reference.trim(),
+              'items': [
+                {
+                  'productId': productId,
+                  'quantity': quantity,
+                  'unit': unit,
+                  'unitCost': unitCost,
+                },
+              ],
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        return Map<String, dynamic>.from(decoded['data'] as Map? ?? decoded);
+      }
+      lastError =
+          _messageFromResponse(response.body) ??
+          'Stock receiving failed (${response.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not record received stock on the shop API.';
+      debugPrint('API receiveStock error: $error');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> countStock({
+    required String productId,
+    required num countedQuantity,
+    String? note,
+  }) async {
+    lastError = null;
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/stock/count'),
+            headers: _headers,
+            body: jsonEncode({
+              'productId': productId,
+              'countedQuantity': countedQuantity,
+              if (note != null && note.trim().isNotEmpty) 'reason': note.trim(),
+            }),
+          )
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        return Map<String, dynamic>.from(decoded['data'] as Map? ?? decoded);
+      }
+      lastError =
+          _messageFromResponse(response.body) ??
+          'Stock count failed (${response.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not record the physical stock count.';
+      debugPrint('API countStock error: $error');
+    }
+    return null;
+  }
+
+  Future<List<Map<String, dynamic>>?> getStockMovements({
+    String? productId,
+    String? type,
+    DateTime? from,
+    DateTime? to,
+    int limit = 50,
+  }) async {
+    lastError = null;
+    try {
+      final uri = Uri.parse('$baseUrl/stock/movements').replace(
+        queryParameters: {
+          if (productId != null) 'productId': productId,
+          if (type != null) 'type': type,
+          if (from != null) 'from': from.toUtc().toIso8601String(),
+          if (to != null) 'to': to.toUtc().toIso8601String(),
+          'limit': '$limit',
+        },
+      );
+      final response = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 10));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body) as Map<String, dynamic>;
+        return List<Map<String, dynamic>>.from(
+          decoded['items'] as List? ?? const [],
+        );
+      }
+      lastError =
+          _messageFromResponse(response.body) ??
+          'Could not load stock movement history (${response.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not load stock movement history.';
+      debugPrint('API getStockMovements error: $error');
+    }
+    return null;
   }
 
   String? _messageFromResponse(String body) {
@@ -443,6 +599,32 @@ class ApiService {
     } catch (e) {
       lastError = 'Could not fetch customer accounts from the shop API.';
       debugPrint('API getCustomers error: $e');
+    }
+    return null;
+  }
+
+  Future<Map<String, dynamic>?> getCustomerLedger(
+    String customerId, {
+    int page = 1,
+    int limit = 50,
+  }) async {
+    lastError = null;
+    try {
+      final uri = Uri.parse(
+        '$baseUrl/customers/$customerId/ledger',
+      ).replace(queryParameters: {'page': '$page', 'limit': '$limit'});
+      final res = await http
+          .get(uri, headers: _headers)
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        return Map<String, dynamic>.from(jsonDecode(res.body) as Map);
+      }
+      lastError =
+          _messageFromResponse(res.body) ??
+          'Could not fetch the customer statement (${res.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not fetch the customer statement from the shop API.';
+      debugPrint('API getCustomerLedger error: $error');
     }
     return null;
   }
@@ -543,8 +725,8 @@ class ApiService {
     lastError = null;
     try {
       final res = await http
-          .delete(
-            Uri.parse('$baseUrl/customers/$customerId'),
+          .post(
+            Uri.parse('$baseUrl/customers/$customerId/archive'),
             headers: _headers,
           )
           .timeout(const Duration(seconds: 5));
@@ -773,8 +955,8 @@ class ApiService {
   Future<Map<String, dynamic>?> recordCustomerPayment(
     String customerId,
     double amount,
-    String method,
-    String reference, {
+    String method, {
+    String? reference,
     String? note,
   }) async {
     lastError = null;
@@ -786,7 +968,8 @@ class ApiService {
             body: jsonEncode({
               'amount': amount,
               'method': method,
-              'reference': reference,
+              if (reference?.trim().isNotEmpty ?? false)
+                'reference': reference!.trim(),
               if (note != null && note.isNotEmpty) 'note': note,
             }),
           )
@@ -844,9 +1027,9 @@ class ApiService {
   Future<Map<String, dynamic>?> getSalesSummary({String? date}) async {
     lastError = null;
     try {
-      final uri = Uri.parse('$baseUrl/sales/summary').replace(
-        queryParameters: date == null ? null : {'date': date},
-      );
+      final uri = Uri.parse(
+        '$baseUrl/sales/summary',
+      ).replace(queryParameters: date == null ? null : {'date': date});
       final res = await http
           .get(uri, headers: _headers)
           .timeout(const Duration(seconds: 8));
@@ -868,6 +1051,8 @@ class ApiService {
     Map<String, dynamic> salePayload,
   ) async {
     lastError = null;
+    lastSaleErrorCode = null;
+    lastSaleErrorDetails = null;
     try {
       final res = await http
           .post(
@@ -901,6 +1086,17 @@ class ApiService {
           }
         }
       }
+      try {
+        final decoded = jsonDecode(res.body);
+        if (decoded is Map<String, dynamic> &&
+            decoded['error'] is Map<String, dynamic>) {
+          final error = decoded['error'] as Map<String, dynamic>;
+          lastSaleErrorCode = error['code'] as String?;
+          if (error['details'] is Map<String, dynamic>) {
+            lastSaleErrorDetails = Map<String, dynamic>.from(error['details']);
+          }
+        }
+      } catch (_) {}
       lastError =
           _saleErrorFromResponse(res.body) ??
           'Could not record the sale (${res.statusCode}).';
@@ -921,7 +1117,18 @@ class ApiService {
       }
 
       final message = error['message'] as String?;
+      final code = error['code'] as String?;
       final details = error['details'];
+      if (code == 'CREDIT_LIMIT_EXCEEDED' && details is Map) {
+        final available = details['available'];
+        if (available is num) {
+          final amount = (available / 100).toStringAsFixed(2);
+          return 'Credit limit exceeded. Available credit: KES $amount.';
+        }
+      }
+      if (code == 'CREDIT_FROZEN') {
+        return 'Credit is frozen for this customer. Use another payment method or contact management.';
+      }
       if (message == 'Request body is invalid' && details is List) {
         final issues = details
             .whereType<Map>()
@@ -993,7 +1200,10 @@ class ApiService {
     lastError = null;
     try {
       final res = await http
-          .post(Uri.parse('$baseUrl/products/$productId/archive'), headers: _headers)
+          .post(
+            Uri.parse('$baseUrl/products/$productId/archive'),
+            headers: _headers,
+          )
           .timeout(const Duration(seconds: 5));
       if (res.statusCode == 200) return true;
       lastError =
@@ -1011,17 +1221,19 @@ class ApiService {
   /// Returns a record with ok, errorCode (e.g. 'PRODUCT_HAS_HISTORY' or
   /// 'NON_ZERO_STOCK'), and details map from the API error body.
   Future<({bool ok, String? errorCode, Map<String, dynamic>? details})>
-      deleteProduct(String productId, {bool discardStock = false}) async {
+  deleteProduct(String productId, {bool discardStock = false}) async {
     lastError = null;
     try {
       final res = await http
           .delete(
-            Uri.parse('$baseUrl/products/$productId'),
+            Uri.parse('$baseUrl/products/$productId').replace(
+              queryParameters: discardStock ? {'discardStock': 'true'} : null,
+            ),
             headers: _headers,
-            body: discardStock ? jsonEncode({'discardStock': true}) : null,
           )
           .timeout(const Duration(seconds: 10));
-      if (res.statusCode == 200) return (ok: true, errorCode: null, details: null);
+      if (res.statusCode == 200)
+        return (ok: true, errorCode: null, details: null);
       final decoded = _tryDecodeBody(res.body);
       final error = decoded?['error'] as Map<String, dynamic>?;
       final code = error?['code'] as String?;
@@ -1129,6 +1341,54 @@ class ApiService {
       debugPrint('API getDashboardReport error: $e');
     }
     return null;
+  }
+
+  Future<bool?> getReceiptCustomerNameSetting() async {
+    lastError = null;
+    try {
+      final response = await http
+          .get(
+            Uri.parse('$baseUrl/business/settings/receipt.showCustomerName'),
+            headers: _headers,
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic> && decoded['value'] is bool) {
+          return decoded['value'] as bool;
+        }
+        lastError = 'The shop API returned invalid business settings.';
+      } else {
+        lastError =
+            _messageFromResponse(response.body) ??
+            'Could not load business settings (${response.statusCode}).';
+      }
+    } catch (error) {
+      lastError = 'Could not load receipt settings from the shop API.';
+      debugPrint('API getReceiptCustomerNameSetting error: $error');
+    }
+    return null;
+  }
+
+  Future<bool> updateBusinessSetting(String key, Object value) async {
+    lastError = null;
+    try {
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/business/settings/${Uri.encodeComponent(key)}'),
+            headers: _headers,
+            body: jsonEncode({'value': value}),
+          )
+          .timeout(const Duration(seconds: 8));
+      if (response.statusCode == 200) return true;
+      lastError =
+          _messageFromResponse(response.body) ??
+          'Could not save business setting (${response.statusCode}).';
+    } catch (error) {
+      lastError = 'Could not save the business setting to the shop API.';
+      debugPrint('API updateBusinessSetting error: $error');
+    }
+    return false;
   }
 
   // ── Storefront profile ──────────────────────────────────────────────

@@ -22,6 +22,7 @@
     "lint": "npm run lint --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "plan:check": "node scripts/plan-progress.mjs",
-    "plan:check:pos": "node scripts/plan-progress.mjs POS_IMPROVEMENTS_PLAN.md"
+    "plan:check:pos": "node scripts/plan-progress.mjs POS_IMPROVEMENTS_PLAN.md",
+    "units:check": "node scripts/check-unit-catalogue.mjs"
   }
 }

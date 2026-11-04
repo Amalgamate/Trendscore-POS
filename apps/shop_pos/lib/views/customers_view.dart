@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../cart.dart';
 import '../pos_state.dart';
+import '../services/api_service.dart';
 import '../theme/tokens.dart';
 import '../shared/icons.dart';
 
@@ -17,14 +18,21 @@ class CustomersView extends StatefulWidget {
 class _CustomersViewState extends State<CustomersView> {
   final _search = TextEditingController();
   PosCustomer? _selectedCustomer;
-  String _ledgerFilter = 'All'; // 'All', 'Debits' (Purchases), 'Credits' (Payments)
+  String _ledgerFilter =
+      'All'; // 'All', 'Debits' (Purchases), 'Credits' (Payments)
   bool _mobileShowDetails = false;
+  bool _loadingLedger = false;
+  bool _ledgerHasMore = false;
+  int _ledgerPage = 1;
 
   @override
   void initState() {
     super.initState();
     if (widget.state.customers.isNotEmpty) {
       _selectedCustomer = widget.state.customers.first;
+    }
+    if (ApiService.instance.hasToken) {
+      widget.state.refreshCustomerAccounts();
     }
   }
 
@@ -53,12 +61,10 @@ class _CustomersViewState extends State<CustomersView> {
 
   void _showRecordPaymentModal(PosCustomer customer) {
     final amountController = TextEditingController(
-      text: (customer.currentBalance.minorUnits ~/ 100).toString(),
+      text: customer.currentBalance.formatted.replaceAll(',', ''),
     );
     String selectedMethod = 'M-Pesa';
-    final refController = TextEditingController(
-      text: 'MPESA-QCG${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}',
-    );
+    final refController = TextEditingController();
     final notesController = TextEditingController();
 
     showDialog<void>(
@@ -67,7 +73,9 @@ class _CustomersViewState extends State<CustomersView> {
         builder: (ctx, setDialogState) {
           return AlertDialog(
             backgroundColor: AppColors.bg_surface,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
             title: Row(
               children: [
                 Container(
@@ -76,7 +84,11 @@ class _CustomersViewState extends State<CustomersView> {
                     color: const Color(0xFFF0FDF4),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(AppIcons.payments, color: AppColors.status_success, size: 22),
+                  child: const Icon(
+                    AppIcons.payments,
+                    color: AppColors.status_success,
+                    size: 22,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -85,11 +97,18 @@ class _CustomersViewState extends State<CustomersView> {
                     children: [
                       const Text(
                         'Record Debt Settlement',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.text_primary),
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                          color: AppColors.text_primary,
+                        ),
                       ),
                       Text(
                         customer.name,
-                        style: const TextStyle(fontSize: 13, color: AppColors.text_secondary),
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: AppColors.text_secondary,
+                        ),
                       ),
                     ],
                   ),
@@ -117,22 +136,42 @@ class _CustomersViewState extends State<CustomersView> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Outstanding Debt', style: TextStyle(fontSize: 11, color: Color(0xFF92400E))),
+                              const Text(
+                                'Outstanding Debt',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF92400E),
+                                ),
+                              ),
                               const SizedBox(height: 2),
                               Text(
                                 'KES ${customer.currentBalance.formatted}',
-                                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: Color(0xFFB45309)),
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: Color(0xFFB45309),
+                                ),
                               ),
                             ],
                           ),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              const Text('Credit Limit', style: TextStyle(fontSize: 11, color: Color(0xFF92400E))),
+                              const Text(
+                                'Credit Limit',
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xFF92400E),
+                                ),
+                              ),
                               const SizedBox(height: 2),
                               Text(
                                 'KES ${customer.creditLimit.formatted}',
-                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: AppColors.text_primary),
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: AppColors.text_primary,
+                                ),
                               ),
                             ],
                           ),
@@ -142,20 +181,35 @@ class _CustomersViewState extends State<CustomersView> {
                     const SizedBox(height: 16),
 
                     // Quick settlement chips
-                    const Text('Quick Amount Settlement:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.text_secondary)),
+                    const Text(
+                      'Quick Amount Settlement:',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text_secondary,
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
                         ActionChip(
-                          label: Text('Full (${customer.currentBalance.formatted})'),
+                          label: Text(
+                            'Full (${customer.currentBalance.formatted})',
+                          ),
                           backgroundColor: AppColors.accent_light,
                           side: BorderSide.none,
-                          labelStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.accent_primary),
+                          labelStyle: const TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.accent_primary,
+                          ),
                           onPressed: () {
                             setDialogState(() {
-                              amountController.text = (customer.currentBalance.minorUnits ~/ 100).toString();
+                              amountController.text =
+                                  (customer.currentBalance.minorUnits ~/ 100)
+                                      .toString();
                             });
                           },
                         ),
@@ -163,11 +217,17 @@ class _CustomersViewState extends State<CustomersView> {
                           ActionChip(
                             label: const Text('50% Half'),
                             backgroundColor: AppColors.bg_canvas,
-                            side: const BorderSide(color: AppColors.border_subtle),
-                            labelStyle: const TextStyle(fontSize: 11, color: AppColors.text_primary),
+                            side: const BorderSide(
+                              color: AppColors.border_subtle,
+                            ),
+                            labelStyle: const TextStyle(
+                              fontSize: 11,
+                              color: AppColors.text_primary,
+                            ),
                             onPressed: () {
                               setDialogState(() {
-                                final half = (customer.currentBalance.minorUnits ~/ 200);
+                                final half =
+                                    (customer.currentBalance.minorUnits ~/ 200);
                                 amountController.text = half.toString();
                               });
                             },
@@ -175,16 +235,40 @@ class _CustomersViewState extends State<CustomersView> {
                         ActionChip(
                           label: const Text('KES 1,000'),
                           backgroundColor: AppColors.bg_canvas,
-                          side: const BorderSide(color: AppColors.border_subtle),
-                          labelStyle: const TextStyle(fontSize: 11, color: AppColors.text_primary),
-                          onPressed: () => setDialogState(() => amountController.text = '1000'),
+                          side: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                          labelStyle: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.text_primary,
+                          ),
+                          onPressed: () => setDialogState(() {
+                            amountController.text = math
+                                .min(
+                                  1000,
+                                  customer.currentBalance.minorUnits / 100,
+                                )
+                                .toStringAsFixed(2);
+                          }),
                         ),
                         ActionChip(
                           label: const Text('KES 500'),
                           backgroundColor: AppColors.bg_canvas,
-                          side: const BorderSide(color: AppColors.border_subtle),
-                          labelStyle: const TextStyle(fontSize: 11, color: AppColors.text_primary),
-                          onPressed: () => setDialogState(() => amountController.text = '500'),
+                          side: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                          labelStyle: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.text_primary,
+                          ),
+                          onPressed: () => setDialogState(() {
+                            amountController.text = math
+                                .min(
+                                  500,
+                                  customer.currentBalance.minorUnits / 100,
+                                )
+                                .toStringAsFixed(2);
+                          }),
                         ),
                       ],
                     ),
@@ -193,19 +277,46 @@ class _CustomersViewState extends State<CustomersView> {
                     // Amount input
                     TextField(
                       controller: amountController,
-                      keyboardType: TextInputType.number,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       decoration: InputDecoration(
                         labelText: 'Payment Amount (KES) *',
                         prefixIcon: const Icon(AppIcons.money, size: 20),
                         filled: true,
                         fillColor: AppColors.bg_canvas,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                        ),
                       ),
+                      onChanged: (_) => setDialogState(() {}),
                     ),
+                    if (amountController.text.isNotEmpty &&
+                        !_isValidPaymentAmount(
+                          amountController.text,
+                          customer.currentBalance,
+                        ))
+                      const Padding(
+                        padding: EdgeInsets.only(top: 8),
+                        child: Text(
+                          'Enter an amount greater than zero and no more than the current balance.',
+                          style: TextStyle(color: Colors.red),
+                        ),
+                      ),
                     const SizedBox(height: 14),
 
                     // Payment method chips
-                    const Text('Payment Method *', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.text_secondary)),
+                    const Text(
+                      'Payment Method *',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.text_secondary,
+                      ),
+                    ),
                     const SizedBox(height: 6),
                     Row(
                       children: ['M-Pesa', 'Cash', 'Bank Transfer'].map((m) {
@@ -214,21 +325,29 @@ class _CustomersViewState extends State<CustomersView> {
                           child: Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 4),
                             child: ChoiceChip(
-                              label: Center(child: Text(m, style: TextStyle(fontSize: 12, fontWeight: isSel ? FontWeight.bold : FontWeight.normal))),
+                              label: Center(
+                                child: Text(
+                                  m,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    fontWeight: isSel
+                                        ? FontWeight.bold
+                                        : FontWeight.normal,
+                                  ),
+                                ),
+                              ),
                               selected: isSel,
                               selectedColor: AppColors.accent_primary,
-                              labelStyle: TextStyle(color: isSel ? Colors.white : AppColors.text_primary),
+                              labelStyle: TextStyle(
+                                color: isSel
+                                    ? Colors.white
+                                    : AppColors.text_primary,
+                              ),
                               onSelected: (val) {
                                 if (val) {
                                   setDialogState(() {
                                     selectedMethod = m;
-                                    if (m == 'M-Pesa') {
-                                      refController.text = 'MPESA-QCG${DateTime.now().millisecondsSinceEpoch.toString().substring(7)}';
-                                    } else if (m == 'Cash') {
-                                      refController.text = 'CASH: TILL-COUNTER-01';
-                                    } else {
-                                      refController.text = 'BANK: EFT-${DateTime.now().millisecondsSinceEpoch.toString().substring(8)}';
-                                    }
+                                    refController.clear();
                                   });
                                 }
                               },
@@ -243,11 +362,16 @@ class _CustomersViewState extends State<CustomersView> {
                     TextField(
                       controller: refController,
                       decoration: InputDecoration(
-                        labelText: 'Transaction Reference *',
+                        labelText: 'Transaction Reference (optional)',
                         prefixIcon: const Icon(AppIcons.tag, size: 20),
                         filled: true,
                         fillColor: AppColors.bg_canvas,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -260,7 +384,12 @@ class _CustomersViewState extends State<CustomersView> {
                         prefixIcon: const Icon(AppIcons.notes, size: 20),
                         filled: true,
                         fillColor: AppColors.bg_canvas,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: AppColors.border_subtle)),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(
+                            color: AppColors.border_subtle,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -270,44 +399,139 @@ class _CustomersViewState extends State<CustomersView> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: const Text('Cancel', style: TextStyle(color: AppColors.text_secondary)),
+                child: const Text(
+                  'Cancel',
+                  style: TextStyle(color: AppColors.text_secondary),
+                ),
               ),
               FilledButton.icon(
                 icon: const Icon(AppIcons.checkCircle, size: 18),
                 label: const Text('Confirm Payment'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.status_success,
-                  padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
-                onPressed: () {
-                  final val = int.tryParse(amountController.text.trim()) ?? 0;
-                  if (val <= 0) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Please enter a valid amount greater than 0')),
-                    );
-                    return;
-                  }
+                onPressed:
+                    amountController.text.isEmpty ||
+                        !_isValidPaymentAmount(
+                          amountController.text,
+                          customer.currentBalance,
+                        )
+                    ? null
+                    : () async {
+                        Money amount;
+                        try {
+                          amount = Money.parse(amountController.text);
+                        } on FormatException {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Enter a valid payment amount greater than 0',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        if (amount.minorUnits <= 0 ||
+                            amount.minorUnits >
+                                customer.currentBalance.minorUnits) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Payment must be greater than 0 and no more than the current balance',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
 
-                  final ref = refController.text.trim().isEmpty ? '$selectedMethod: REF-${DateTime.now().millisecondsSinceEpoch}' : refController.text.trim();
-                  widget.state.recordCustomerPayment(customer.id, Money.shillings(val), ref);
+                        final ref = refController.text.trim();
+                        final method = switch (selectedMethod.toLowerCase()) {
+                          'm-pesa' || 'mpesa' => 'MPESA',
+                          'bank' => 'BANK',
+                          _ => 'CASH',
+                        };
+                        if (!ApiService.instance.hasToken) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Reconnect to the shop before recording a customer payment.',
+                              ),
+                            ),
+                          );
+                          return;
+                        }
+                        try {
+                          await widget.state.recordCustomerPayment(
+                            customer.id,
+                            amount,
+                            reference: ref,
+                            method: method,
+                          );
+                        } on PosException catch (error) {
+                          if (!mounted) return;
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(error.message)),
+                          );
+                          return;
+                        }
+                        if (!mounted || !ctx.mounted) return;
 
-                  setState(() {});
-                  Navigator.pop(ctx);
+                        setState(() {});
+                        Navigator.pop(ctx);
+                        if (_ledgerPage == 1 &&
+                            _selectedCustomer?.id == customer.id) {
+                          _loadLedger(customer, reset: true);
+                        }
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Payment of KES $val recorded for ${customer.name}. Account balance updated!'),
-                      backgroundColor: AppColors.status_success,
-                    ),
-                  );
-                },
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              'Payment recorded. New balance: KES ${customer.currentBalance.formatted}',
+                            ),
+                            backgroundColor: AppColors.status_success,
+                          ),
+                        );
+                      },
               ),
             ],
           );
         },
       ),
     );
+  }
+
+  bool _isValidPaymentAmount(String value, Money balance) {
+    try {
+      final amount = Money.parse(value);
+      return amount.minorUnits > 0 && amount.minorUnits <= balance.minorUnits;
+    } on FormatException {
+      return false;
+    }
+  }
+
+  Future<void> _loadLedger(PosCustomer customer, {bool reset = false}) async {
+    if (!ApiService.instance.hasToken || _loadingLedger) return;
+    setState(() => _loadingLedger = true);
+    final page = reset ? 1 : _ledgerPage;
+    final result = await widget.state.fetchCustomerLedger(
+      customer.id,
+      page: page,
+    );
+    if (!mounted) return;
+    setState(() {
+      _loadingLedger = false;
+      if (result != null) {
+        _ledgerPage = page + 1;
+        _ledgerHasMore = result.hasMore;
+      }
+    });
   }
 
   void _showNewCustomerModal() {
@@ -324,7 +548,10 @@ class _CustomersViewState extends State<CustomersView> {
           children: const [
             Icon(AppIcons.personAdd, color: AppColors.accent_primary),
             SizedBox(width: 10),
-            Text('Open Customer Credit Facility', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+            Text(
+              'Open Customer Credit Facility',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: SizedBox(
@@ -339,7 +566,9 @@ class _CustomersViewState extends State<CustomersView> {
                   prefixIcon: const Icon(AppIcons.person),
                   filled: true,
                   fillColor: AppColors.bg_canvas,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -351,7 +580,9 @@ class _CustomersViewState extends State<CustomersView> {
                   prefixIcon: const Icon(AppIcons.phone),
                   filled: true,
                   fillColor: AppColors.bg_canvas,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
               const SizedBox(height: 12),
@@ -363,41 +594,83 @@ class _CustomersViewState extends State<CustomersView> {
                   prefixIcon: const Icon(AppIcons.creditCard),
                   filled: true,
                   fillColor: AppColors.bg_canvas,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
                 ),
               ),
             ],
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
           FilledButton(
             style: FilledButton.styleFrom(
               backgroundColor: AppColors.accent_primary,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10),
+              ),
             ),
-            onPressed: () {
+            onPressed: () async {
               final name = nameCtrl.text.trim();
               final phone = phoneCtrl.text.trim();
               final limit = int.tryParse(limitCtrl.text.trim()) ?? 0;
 
               if (name.isNotEmpty && phone.isNotEmpty) {
-                final customer = PosCustomer(
-                  id: 'cust_${DateTime.now().millisecondsSinceEpoch}',
-                  name: name,
-                  phone: phone,
-                  creditLimit: Money.shillings(limit),
-                  currentBalance: const Money(0),
-                  history: [],
-                );
+                if (!ApiService.instance.hasToken) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text(
+                        'Could not create the customer account. Reconnect and retry.',
+                      ),
+                      action: SnackBarAction(
+                        label: 'Retry',
+                        onPressed: _showNewCustomerModal,
+                      ),
+                    ),
+                  );
+                  return;
+                }
+                final created = await ApiService.instance.createCustomer({
+                  'fullName': name,
+                  'phone': phone,
+                  'creditLimit': limit,
+                });
+                if (created == null) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        ApiService.instance.lastError ??
+                            'Could not create customer account.',
+                      ),
+                      action: SnackBarAction(
+                        label: 'Retry',
+                        onPressed: _showNewCustomerModal,
+                      ),
+                    ),
+                  );
+                  return;
+                }
+                final customer = PosCustomer.fromApi(created);
 
-                widget.state.addCustomer(customer);
+                await widget.state.addCustomer(customer);
+                await widget.state.refreshCustomerAccounts();
+                if (!mounted || !ctx.mounted) return;
                 setState(() {
                   _selectedCustomer = customer;
                 });
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Account opened for $name with KES $limit credit facility!')),
+                  SnackBar(
+                    content: Text(
+                      'Account opened for $name with KES $limit credit facility!',
+                    ),
+                  ),
                 );
               }
             },
@@ -419,7 +692,10 @@ class _CustomersViewState extends State<CustomersView> {
           children: [
             Icon(AppIcons.delete, color: AppColors.status_danger, size: 22),
             SizedBox(width: 10),
-            Text('Delete Customer', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+            Text(
+              'Delete Customer',
+              style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold),
+            ),
           ],
         ),
         content: hasBalance
@@ -444,7 +720,9 @@ class _CustomersViewState extends State<CustomersView> {
                   child: const Text('Cancel'),
                 ),
                 FilledButton(
-                  style: FilledButton.styleFrom(backgroundColor: AppColors.status_danger),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.status_danger,
+                  ),
                   onPressed: () => Navigator.pop(ctx, true),
                   child: const Text('Delete'),
                 ),
@@ -459,15 +737,23 @@ class _CustomersViewState extends State<CustomersView> {
 
     if (error != null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error), backgroundColor: AppColors.status_danger),
+        SnackBar(
+          content: Text(error),
+          backgroundColor: AppColors.status_danger,
+        ),
       );
     } else {
       setState(() {
-        _selectedCustomer = widget.state.customers.isNotEmpty ? widget.state.customers.first : null;
+        _selectedCustomer = widget.state.customers.isNotEmpty
+            ? widget.state.customers.first
+            : null;
         _mobileShowDetails = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('${customer.name} has been deleted.'), backgroundColor: AppColors.status_success),
+        SnackBar(
+          content: Text('${customer.name} has been deleted.'),
+          backgroundColor: AppColors.status_success,
+        ),
       );
     }
   }
@@ -481,8 +767,14 @@ class _CustomersViewState extends State<CustomersView> {
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text('Account Statement Preview', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-            IconButton(icon: const Icon(AppIcons.close, size: 20), onPressed: () => Navigator.pop(ctx)),
+            const Text(
+              'Account Statement Preview',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+            ),
+            IconButton(
+              icon: const Icon(AppIcons.close, size: 20),
+              onPressed: () => Navigator.pop(ctx),
+            ),
           ],
         ),
         content: SizedBox(
@@ -507,16 +799,39 @@ class _CustomersViewState extends State<CustomersView> {
                         children: [
                           Text(
                             widget.state.shopName.toUpperCase(),
-                            style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 16, color: AppColors.accent_primary),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w900,
+                              fontSize: 16,
+                              color: AppColors.accent_primary,
+                            ),
                           ),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(color: const Color(0xFFFEF3C7), borderRadius: BorderRadius.circular(6)),
-                            child: const Text('DEBTOR STATEMENT', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF92400E))),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 3,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFFEF3C7),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: const Text(
+                              'DEBTOR STATEMENT',
+                              style: TextStyle(
+                                fontSize: 10,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF92400E),
+                              ),
+                            ),
                           ),
                         ],
                       ),
-                      Text('Branch: ${widget.state.storeBranch} · Till: ${widget.state.tillId}', style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                      Text(
+                        'Branch: ${widget.state.storeBranch} · Till: ${widget.state.tillId}',
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: AppColors.text_tertiary,
+                        ),
+                      ),
                       const Divider(height: 16),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -524,15 +839,40 @@ class _CustomersViewState extends State<CustomersView> {
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Customer: ${customer.name}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              Text('Mobile: ${customer.phone}', style: const TextStyle(fontSize: 11, color: AppColors.text_secondary)),
+                              Text(
+                                'Customer: ${customer.name}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                ),
+                              ),
+                              Text(
+                                'Mobile: ${customer.phone}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.text_secondary,
+                                ),
+                              ),
                             ],
                           ),
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
-                              Text('Date: ${DateTime.now().toLocal().toString().split(" ")[0]}', style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
-                              Text('Account Ref: ${customer.id}', style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: AppColors.text_secondary)),
+                              Text(
+                                'Date: ${DateTime.now().toLocal().toString().split(" ")[0]}',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: AppColors.text_tertiary,
+                                ),
+                              ),
+                              Text(
+                                'Account Ref: ${customer.id}',
+                                style: const TextStyle(
+                                  fontSize: 10,
+                                  fontFamily: 'monospace',
+                                  color: AppColors.text_secondary,
+                                ),
+                              ),
                             ],
                           ),
                         ],
@@ -545,19 +885,56 @@ class _CustomersViewState extends State<CustomersView> {
                 // Statement Summary Table
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(8)),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
-                      _MiniMetric(label: 'Total Credit Limit', value: 'KES ${customer.creditLimit.formatted}', color: AppColors.text_primary),
-                      _MiniMetric(label: 'Current Balance Due', value: 'KES ${customer.currentBalance.formatted}', color: const Color(0xFFD97706)),
-                      _MiniMetric(label: 'Available Balance', value: 'KES ${customer.availableCredit.formatted}', color: const Color(0xFF16A34A)),
+                      _MiniMetric(
+                        label: 'Total Credit Limit',
+                        value: 'KES ${customer.creditLimit.formatted}',
+                        color: AppColors.text_primary,
+                      ),
+                      _MiniMetric(
+                        label: 'Current Balance Due',
+                        value: 'KES ${customer.currentBalance.formatted}',
+                        color: const Color(0xFFD97706),
+                      ),
+                      _MiniMetric(
+                        label: 'Available Balance',
+                        value: 'KES ${customer.availableCredit.formatted}',
+                        color: const Color(0xFF16A34A),
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 14),
 
-                const Text('Transaction Timeline:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Transaction Timeline:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 12,
+                      ),
+                    ),
+                    if (_loadingLedger)
+                      const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    else if (_ledgerHasMore)
+                      TextButton(
+                        onPressed: () => _loadLedger(customer),
+                        child: const Text('Load more'),
+                      ),
+                  ],
+                ),
                 const SizedBox(height: 6),
                 ConstrainedBox(
                   constraints: const BoxConstraints(maxHeight: 240),
@@ -573,15 +950,31 @@ class _CustomersViewState extends State<CustomersView> {
                           children: [
                             Text(
                               '${item.timestamp.month.toString().padLeft(2, '0')}/${item.timestamp.day.toString().padLeft(2, '0')}',
-                              style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.text_tertiary,
+                              ),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(item.type.label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                                  Text(item.reference, style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: AppColors.text_tertiary)),
+                                  Text(
+                                    item.type.label,
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    item.reference,
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      fontFamily: 'monospace',
+                                      color: AppColors.text_tertiary,
+                                    ),
+                                  ),
                                 ],
                               ),
                             ),
@@ -593,10 +986,18 @@ class _CustomersViewState extends State<CustomersView> {
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
-                                    color: item.type.isDebit ? AppColors.status_danger : AppColors.status_success,
+                                    color: item.type.isDebit
+                                        ? AppColors.status_danger
+                                        : AppColors.status_success,
                                   ),
                                 ),
-                                Text('Bal: ${item.runningBalance.formatted}', style: const TextStyle(fontSize: 10, color: AppColors.text_tertiary)),
+                                Text(
+                                  'Bal: ${item.runningBalance.formatted}',
+                                  style: const TextStyle(
+                                    fontSize: 10,
+                                    color: AppColors.text_tertiary,
+                                  ),
+                                ),
                               ],
                             ),
                           ],
@@ -616,18 +1017,26 @@ class _CustomersViewState extends State<CustomersView> {
             onPressed: () {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('Statement summary sent to ${customer.phone}!')),
+                SnackBar(
+                  content: Text('Statement summary sent to ${customer.phone}!'),
+                ),
               );
             },
           ),
           FilledButton.icon(
             icon: const Icon(AppIcons.print, size: 16),
             label: const Text('Print Statement'),
-            style: FilledButton.styleFrom(backgroundColor: AppColors.accent_primary),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.accent_primary,
+            ),
             onPressed: () {
               Navigator.pop(ctx);
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Sending statement to thermal receipt printer...')),
+                const SnackBar(
+                  content: Text(
+                    'Sending statement to thermal receipt printer...',
+                  ),
+                ),
               );
             },
           ),
@@ -639,8 +1048,14 @@ class _CustomersViewState extends State<CustomersView> {
   @override
   Widget build(BuildContext context) {
     final customers = widget.state.customers;
-    final totalOutstandingMinor = customers.fold(0, (sum, c) => sum + c.currentBalance.minorUnits);
-    final totalLimitMinor = customers.fold(0, (sum, c) => sum + c.creditLimit.minorUnits);
+    final totalOutstandingMinor = customers.fold(
+      0,
+      (sum, c) => sum + c.currentBalance.minorUnits,
+    );
+    final totalLimitMinor = customers.fold(
+      0,
+      (sum, c) => sum + c.creditLimit.minorUnits,
+    );
     final highRiskCount = customers.where((c) {
       if (c.creditLimit.minorUnits == 0) return false;
       return (c.currentBalance.minorUnits / c.creditLimit.minorUnits) > 0.8;
@@ -667,11 +1082,18 @@ class _CustomersViewState extends State<CustomersView> {
                         children: [
                           const Text(
                             'Customer Credit & Debt Ledger',
-                            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.text_primary),
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w800,
+                              color: AppColors.text_primary,
+                            ),
                           ),
                           Text(
                             'Append-only customer debt ledger · Real-time balances',
-                            style: TextStyle(fontSize: 12, color: AppColors.text_tertiary),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: AppColors.text_tertiary,
+                            ),
                           ),
                         ],
                       ),
@@ -682,7 +1104,9 @@ class _CustomersViewState extends State<CustomersView> {
                       onPressed: _showNewCustomerModal,
                       style: FilledButton.styleFrom(
                         backgroundColor: AppColors.accent_primary,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
                       ),
                     ),
                   ],
@@ -712,9 +1136,15 @@ class _CustomersViewState extends State<CustomersView> {
                       const SizedBox(width: 10),
                       _CustStatCard(
                         title: 'Credit Utilization',
-                        value: totalLimitMinor > 0 ? '${((totalOutstandingMinor / totalLimitMinor) * 100).toStringAsFixed(1)}%' : '0%',
-                        subtitle: highRiskCount > 0 ? '$highRiskCount accounts > 80% limit' : 'Portfolio risk healthy',
-                        color: highRiskCount > 0 ? AppColors.status_danger : const Color(0xFF16A34A),
+                        value: totalLimitMinor > 0
+                            ? '${((totalOutstandingMinor / totalLimitMinor) * 100).toStringAsFixed(1)}%'
+                            : '0%',
+                        subtitle: highRiskCount > 0
+                            ? '$highRiskCount accounts > 80% limit'
+                            : 'Portfolio risk healthy',
+                        color: highRiskCount > 0
+                            ? AppColors.status_danger
+                            : const Color(0xFF16A34A),
                         width: isMobile ? 160 : 210,
                       ),
                     ],
@@ -726,8 +1156,11 @@ class _CustomersViewState extends State<CustomersView> {
                 Expanded(
                   child: isMobile
                       ? (_mobileShowDetails && _selectedCustomer != null
-                          ? _buildCustomerDetailsPane(_selectedCustomer!, isMobile: true)
-                          : _buildCustomerListPane(isMobile: true))
+                            ? _buildCustomerDetailsPane(
+                                _selectedCustomer!,
+                                isMobile: true,
+                              )
+                            : _buildCustomerListPane(isMobile: true))
                       : Row(
                           children: [
                             SizedBox(
@@ -737,8 +1170,15 @@ class _CustomersViewState extends State<CustomersView> {
                             const SizedBox(width: 16),
                             Expanded(
                               child: _selectedCustomer == null
-                                  ? const Center(child: Text('Select an account to view credit statement'))
-                                  : _buildCustomerDetailsPane(_selectedCustomer!, isMobile: false),
+                                  ? const Center(
+                                      child: Text(
+                                        'Select an account to view credit statement',
+                                      ),
+                                    )
+                                  : _buildCustomerDetailsPane(
+                                      _selectedCustomer!,
+                                      isMobile: false,
+                                    ),
                             ),
                           ],
                         ),
@@ -770,49 +1210,86 @@ class _CustomersViewState extends State<CustomersView> {
                 prefixIcon: const Icon(AppIcons.search, size: 18),
                 filled: true,
                 fillColor: AppColors.bg_canvas,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide.none,
+                ),
               ),
             ),
           ),
           const Divider(height: 1),
           Expanded(
             child: _filteredCustomers.isEmpty
-                ? const Center(child: Text('No customers found', style: TextStyle(color: AppColors.text_tertiary)))
+                ? const Center(
+                    child: Text(
+                      'No customers found',
+                      style: TextStyle(color: AppColors.text_tertiary),
+                    ),
+                  )
                 : ListView.separated(
                     itemCount: _filteredCustomers.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (context, index) {
                       final c = _filteredCustomers[index];
                       final isSelected = c.id == _selectedCustomer?.id;
-                      final ratio = c.creditLimit.minorUnits > 0 ? (c.currentBalance.minorUnits / c.creditLimit.minorUnits) : 0.0;
+                      final ratio = c.creditLimit.minorUnits > 0
+                          ? (c.currentBalance.minorUnits /
+                                c.creditLimit.minorUnits)
+                          : 0.0;
                       final isHigh = ratio > 0.8;
 
                       return ListTile(
                         selected: isSelected,
-                        selectedTileColor: AppColors.accent_primary.withValues(alpha: 0.08),
+                        selectedTileColor: AppColors.accent_primary.withValues(
+                          alpha: 0.08,
+                        ),
                         onTap: () {
                           setState(() {
                             _selectedCustomer = c;
                             if (isMobile) _mobileShowDetails = true;
+                            _ledgerPage = 1;
+                            _ledgerHasMore = false;
                           });
+                          _loadLedger(c, reset: true);
                         },
                         leading: CircleAvatar(
-                          backgroundColor: isSelected ? AppColors.accent_primary : AppColors.bg_subtle,
+                          backgroundColor: isSelected
+                              ? AppColors.accent_primary
+                              : AppColors.bg_subtle,
                           child: Text(
-                            c.name.isNotEmpty ? c.name.substring(0, 1).toUpperCase() : 'C',
+                            c.name.isNotEmpty
+                                ? c.name.substring(0, 1).toUpperCase()
+                                : 'C',
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
-                              color: isSelected ? Colors.white : AppColors.text_primary,
+                              color: isSelected
+                                  ? Colors.white
+                                  : AppColors.text_primary,
                             ),
                           ),
                         ),
-                        title: Text(c.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        title: Text(
+                          c.name,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 13,
+                          ),
+                        ),
                         subtitle: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(c.phone, style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                            Text(
+                              c.phone,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.text_tertiary,
+                              ),
+                            ),
                             const SizedBox(height: 4),
                             ClipRRect(
                               borderRadius: BorderRadius.circular(2),
@@ -820,7 +1297,11 @@ class _CustomersViewState extends State<CustomersView> {
                                 value: ratio.clamp(0.0, 1.0),
                                 minHeight: 4,
                                 backgroundColor: AppColors.bg_subtle,
-                                valueColor: AlwaysStoppedAnimation(isHigh ? AppColors.status_danger : AppColors.accent_primary),
+                                valueColor: AlwaysStoppedAnimation(
+                                  isHigh
+                                      ? AppColors.status_danger
+                                      : AppColors.accent_primary,
+                                ),
                               ),
                             ),
                           ],
@@ -834,12 +1315,17 @@ class _CustomersViewState extends State<CustomersView> {
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
-                                color: c.currentBalance.minorUnits > 0 ? const Color(0xFFD97706) : AppColors.status_success,
+                                color: c.currentBalance.minorUnits > 0
+                                    ? const Color(0xFFD97706)
+                                    : AppColors.status_success,
                               ),
                             ),
                             Text(
                               'Limit: ${c.creditLimit.formatted}',
-                              style: const TextStyle(fontSize: 10, color: AppColors.text_tertiary),
+                              style: const TextStyle(
+                                fontSize: 10,
+                                color: AppColors.text_tertiary,
+                              ),
                             ),
                           ],
                         ),
@@ -852,7 +1338,10 @@ class _CustomersViewState extends State<CustomersView> {
     );
   }
 
-  Widget _buildCustomerDetailsPane(PosCustomer customer, {required bool isMobile}) {
+  Widget _buildCustomerDetailsPane(
+    PosCustomer customer, {
+    required bool isMobile,
+  }) {
     final filteredLedger = _getFilteredLedger(customer);
 
     return Container(
@@ -877,8 +1366,21 @@ class _CustomersViewState extends State<CustomersView> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(customer.name, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.text_primary)),
-                    Text('${customer.phone} · Ref: ${customer.id}', style: const TextStyle(fontSize: 12, color: AppColors.text_tertiary)),
+                    Text(
+                      customer.name,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.text_primary,
+                      ),
+                    ),
+                    Text(
+                      '${customer.phone} · Ref: ${customer.id}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: AppColors.text_tertiary,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -886,8 +1388,13 @@ class _CustomersViewState extends State<CustomersView> {
                 icon: const Icon(AppIcons.receiptLong, size: 16),
                 label: const Text('Statement'),
                 style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 8,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
                 onPressed: () => _showPrintStatementDialog(customer),
               ),
@@ -897,18 +1404,29 @@ class _CustomersViewState extends State<CustomersView> {
                 label: const Text('Pay Debt'),
                 style: FilledButton.styleFrom(
                   backgroundColor: AppColors.status_success,
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
                 onPressed: () => _showRecordPaymentModal(customer),
               ),
               const SizedBox(width: 8),
               IconButton(
                 tooltip: 'Delete customer',
-                icon: const Icon(AppIcons.delete, size: 20, color: AppColors.status_danger),
+                icon: const Icon(
+                  AppIcons.delete,
+                  size: 20,
+                  color: AppColors.status_danger,
+                ),
                 style: IconButton.styleFrom(
                   backgroundColor: const Color(0xFFFEF2F2),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                 ),
                 onPressed: () => _confirmDeleteCustomer(customer),
               ),
@@ -927,9 +1445,21 @@ class _CustomersViewState extends State<CustomersView> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: [
-                _MiniMetric(label: 'Current Debt Due', value: 'KES ${customer.currentBalance.formatted}', color: const Color(0xFFD97706)),
-                _MiniMetric(label: 'Approved Limit', value: 'KES ${customer.creditLimit.formatted}', color: AppColors.text_primary),
-                _MiniMetric(label: 'Available Credit', value: 'KES ${customer.availableCredit.formatted}', color: const Color(0xFF16A34A)),
+                _MiniMetric(
+                  label: 'Current Debt Due',
+                  value: 'KES ${customer.currentBalance.formatted}',
+                  color: const Color(0xFFD97706),
+                ),
+                _MiniMetric(
+                  label: 'Approved Limit',
+                  value: 'KES ${customer.creditLimit.formatted}',
+                  color: AppColors.text_primary,
+                ),
+                _MiniMetric(
+                  label: 'Available Credit',
+                  value: 'KES ${customer.availableCredit.formatted}',
+                  color: const Color(0xFF16A34A),
+                ),
               ],
             ),
           ),
@@ -938,7 +1468,14 @@ class _CustomersViewState extends State<CustomersView> {
           // Ledger Filter chips
           Row(
             children: [
-              const Text('Ledger History', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: AppColors.text_primary)),
+              const Text(
+                'Ledger History',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 13,
+                  color: AppColors.text_primary,
+                ),
+              ),
               const Spacer(),
               Row(
                 children: ['All', 'Debits', 'Credits'].map((f) {
@@ -946,10 +1483,22 @@ class _CustomersViewState extends State<CustomersView> {
                   return Padding(
                     padding: const EdgeInsets.only(left: 6),
                     child: ChoiceChip(
-                      label: Text(f, style: TextStyle(fontSize: 11, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                      label: Text(
+                        f,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: isSel
+                              ? FontWeight.bold
+                              : FontWeight.normal,
+                        ),
+                      ),
                       selected: isSel,
                       selectedColor: AppColors.accent_light,
-                      labelStyle: TextStyle(color: isSel ? AppColors.accent_primary : AppColors.text_secondary),
+                      labelStyle: TextStyle(
+                        color: isSel
+                            ? AppColors.accent_primary
+                            : AppColors.text_secondary,
+                      ),
                       onSelected: (val) {
                         if (val) setState(() => _ledgerFilter = f);
                       },
@@ -964,7 +1513,12 @@ class _CustomersViewState extends State<CustomersView> {
           // Ledger List
           Expanded(
             child: filteredLedger.isEmpty
-                ? const Center(child: Text('No ledger entries recorded yet', style: TextStyle(color: AppColors.text_tertiary)))
+                ? const Center(
+                    child: Text(
+                      'No ledger entries recorded yet',
+                      style: TextStyle(color: AppColors.text_tertiary),
+                    ),
+                  )
                 : ListView.separated(
                     itemCount: filteredLedger.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
@@ -973,30 +1527,53 @@ class _CustomersViewState extends State<CustomersView> {
                       final isDebit = entry.type.isDebit;
 
                       return ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 4,
+                          vertical: 2,
+                        ),
                         leading: Container(
                           width: 36,
                           height: 36,
                           decoration: BoxDecoration(
-                            color: isDebit ? const Color(0xFFFEF2F2) : const Color(0xFFF0FDF4),
+                            color: isDebit
+                                ? const Color(0xFFFEF2F2)
+                                : const Color(0xFFF0FDF4),
                             shape: BoxShape.circle,
                           ),
                           child: Icon(
                             isDebit ? AppIcons.arrowUp : AppIcons.arrowDown,
                             size: 18,
-                            color: isDebit ? AppColors.status_danger : AppColors.status_success,
+                            color: isDebit
+                                ? AppColors.status_danger
+                                : AppColors.status_success,
                           ),
                         ),
                         title: Row(
                           children: [
-                            Text(entry.type.label, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            Text(
+                              entry.type.label,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 13,
+                              ),
+                            ),
                             const SizedBox(width: 8),
-                            Text(entry.reference, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', color: AppColors.text_secondary)),
+                            Text(
+                              entry.reference,
+                              style: const TextStyle(
+                                fontSize: 11,
+                                fontFamily: 'monospace',
+                                color: AppColors.text_secondary,
+                              ),
+                            ),
                           ],
                         ),
                         subtitle: Text(
                           '${entry.timestamp.year}-${entry.timestamp.month.toString().padLeft(2, '0')}-${entry.timestamp.day.toString().padLeft(2, '0')} ${entry.timestamp.hour.toString().padLeft(2, '0')}:${entry.timestamp.minute.toString().padLeft(2, '0')}',
-                          style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary),
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.text_tertiary,
+                          ),
                         ),
                         trailing: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -1007,10 +1584,18 @@ class _CustomersViewState extends State<CustomersView> {
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
-                                color: isDebit ? AppColors.status_danger : AppColors.status_success,
+                                color: isDebit
+                                    ? AppColors.status_danger
+                                    : AppColors.status_success,
                               ),
                             ),
-                            Text('Bal: KES ${entry.runningBalance.formatted}', style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+                            Text(
+                              'Bal: KES ${entry.runningBalance.formatted}',
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: AppColors.text_tertiary,
+                              ),
+                            ),
                           ],
                         ),
                       );
@@ -1051,11 +1636,33 @@ class _CustStatCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary, fontWeight: FontWeight.w500)),
+          Text(
+            title,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.text_tertiary,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text(value, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: color)),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+              color: color,
+            ),
+          ),
           const SizedBox(height: 4),
-          Text(subtitle, style: const TextStyle(fontSize: 11, color: AppColors.text_secondary), maxLines: 1, overflow: TextOverflow.ellipsis),
+          Text(
+            subtitle,
+            style: const TextStyle(
+              fontSize: 11,
+              color: AppColors.text_secondary,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
         ],
       ),
     );
@@ -1063,7 +1670,11 @@ class _CustStatCard extends StatelessWidget {
 }
 
 class _MiniMetric extends StatelessWidget {
-  const _MiniMetric({required this.label, required this.value, required this.color});
+  const _MiniMetric({
+    required this.label,
+    required this.value,
+    required this.color,
+  });
   final String label;
   final String value;
   final Color color;
@@ -1072,9 +1683,19 @@ class _MiniMetric extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary)),
+        Text(
+          label,
+          style: const TextStyle(fontSize: 11, color: AppColors.text_tertiary),
+        ),
         const SizedBox(height: 4),
-        Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: color)),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 14,
+            fontWeight: FontWeight.bold,
+            color: color,
+          ),
+        ),
       ],
     );
   }

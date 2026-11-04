@@ -4,6 +4,8 @@
 import type { Router } from 'express';
 import { Router as ExpressRouter } from 'express';
 import { z } from 'zod';
+import { randomUUID } from 'node:crypto';
+import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { parseBody, parseQuery, send200, send201, sendError } from '../../lib/http';
 import { requireAuth, requireRole } from '../../lib/auth.middleware';
@@ -41,9 +43,14 @@ const CUSTOMER_DOCUMENT_MAX_BYTES = 8 * 1024 * 1024;
 
 const RecordPaymentSchema = z.object({
   amount: z.number().positive(),
-  reference: z.string().min(1),
+  reference: z.string().trim().max(200).optional(),
   method: z.enum(['CASH', 'MPESA', 'BANK']),
   note: z.string().optional(),
+});
+
+const LedgerQuerySchema = z.object({
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(200).default(50),
 });
 
 export function customersRouter(businessId: string): Router {
@@ -91,6 +98,37 @@ export function customersRouter(businessId: string): Router {
     }
   });
 
+  router.get('/reconcile', requireAuth, requireRole('OWNER', 'MANAGER'), async (_req, res) => {
+    try {
+      const rows = await prisma.$queryRaw<Array<{
+        id: string;
+        fullName: string;
+        balance: Prisma.Decimal;
+        ledgerSum: Prisma.Decimal;
+      }>>(Prisma.sql`
+        SELECT c."id", c."fullName", c."balance",
+          COALESCE(SUM(CASE WHEN l."entryType" = 'DEBIT' THEN l."amount"
+                            WHEN l."entryType" = 'CREDIT' THEN -l."amount" ELSE 0 END), 0)::numeric AS "ledgerSum"
+        FROM "customers" c
+        LEFT JOIN "customer_ledger" l ON l."customerId" = c."id" AND l."businessId" = c."businessId"
+        WHERE c."businessId" = ${businessId}::uuid
+        GROUP BY c."id", c."fullName", c."balance"
+        HAVING c."balance" <> COALESCE(SUM(CASE WHEN l."entryType" = 'DEBIT' THEN l."amount"
+                                                 WHEN l."entryType" = 'CREDIT' THEN -l."amount" ELSE 0 END), 0)::numeric
+        ORDER BY c."fullName" ASC
+      `);
+      const mismatches = rows.map((row) => {
+        const balance = Number(row.balance);
+        const ledgerSum = Number(row.ledgerSum);
+        return { id: row.id, fullName: row.fullName, balance, ledgerSum, drift: Number((balance - ledgerSum).toFixed(2)) };
+      });
+      return send200(res, { mismatches, count: mismatches.length });
+    } catch (err) {
+      console.error('customers/reconcile error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to reconcile customer balances.');
+    }
+  });
+
   // GET /customers/:id
   router.get('/:id', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK'), async (req, res) => {
     try {
@@ -128,24 +166,6 @@ export function customersRouter(businessId: string): Router {
     } catch (err: unknown) {
       console.error('customers/create error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Failed to create customer.');
-    }
-  });
-
-  // DELETE /customers/:id — only allowed when balance is zero
-  router.delete('/:id', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
-    try {
-      const customer = await prisma.customer.findFirst({
-        where: { id: req.params.id, businessId },
-      });
-      if (!customer) return sendError(res, 404, 'NOT_FOUND', 'Customer not found.');
-      if (Number(customer.balance) !== 0) {
-        return sendError(res, 409, 'BALANCE_NOT_ZERO', 'Cannot delete a customer with an outstanding balance. Clear the debt first.');
-      }
-      await prisma.customer.delete({ where: { id: req.params.id } });
-      return send200(res, { ok: true });
-    } catch (err: unknown) {
-      console.error('customers/delete error:', err);
-      return sendError(res, 500, 'SERVER_ERROR', 'Failed to delete customer.');
     }
   });
 
@@ -334,7 +354,7 @@ export function customersRouter(businessId: string): Router {
   });
 
   // Archive customer accounts without removing their append-only financial history.
-  router.delete('/:id', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
+  router.post('/:id/archive', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
     try {
       const customer = await prisma.customer.findFirst({
         where: { id: req.params.id, businessId },
@@ -396,6 +416,7 @@ export function customersRouter(businessId: string): Router {
     const auth = res.locals.auth;
     const customerId = req.params.id;
     if (!customerId) return sendError(res, 400, 'BAD_REQUEST', 'Missing customer ID.');
+    const reference = body.reference || generatedPaymentReference();
 
     try {
       const result = await prisma.$transaction(async (tx) => {
@@ -408,14 +429,27 @@ export function customersRouter(businessId: string): Router {
           where: { id: customerId, businessId },
         });
         if (!customer) throw new Error('CUSTOMER_NOT_FOUND');
-        if (body.amount > Number(customer.balance)) {
+        const paymentAmount = new Prisma.Decimal(String(body.amount));
+        const currentBalance = new Prisma.Decimal(customer.balance.toString());
+        if (paymentAmount.gt(currentBalance)) {
           throw new Error('PAYMENT_EXCEEDS_BALANCE');
         }
-        const newBalance = Math.max(0, Number(customer.balance) - body.amount);
+        const newBalance = currentBalance.minus(paymentAmount);
 
         await tx.customer.update({
           where: { id: customerId },
           data: { balance: newBalance },
+        });
+
+        const customerPayment = await tx.customerPayment.create({
+          data: {
+            customerId,
+            businessId,
+            amount: paymentAmount,
+            method: body.method,
+            reference,
+            receivedById: auth.userId,
+          },
         });
 
         const entry = await tx.customerLedger.create({
@@ -423,27 +457,38 @@ export function customersRouter(businessId: string): Router {
             customerId,
             businessId,
             entryType: 'CREDIT',
-            amount: body.amount,
+            amount: paymentAmount,
             balance: newBalance,
             entityType: 'CUSTOMER_PAYMENT',
-            reference: body.reference,
+            entityId: customerPayment.id,
+            reference,
             note: body.note ?? `Payment via ${body.method}`,
             createdById: auth.userId,
           },
         });
 
-        await tx.customerPayment.create({
-          data: {
-            customerId,
-            businessId,
-            amount: body.amount,
-            method: body.method,
-            reference: body.reference,
-            receivedById: auth.userId,
-          },
-        });
+        if (body.method === 'CASH') {
+          const openSession = await tx.cashSession.findFirst({
+            where: { businessId, cashierId: auth.userId, status: 'OPEN' },
+            orderBy: { openedAt: 'desc' },
+            select: { id: true },
+          });
+          if (openSession) {
+            await tx.cashSession.updateMany({
+              where: { id: openSession.id, status: 'OPEN' },
+              data: { debtPayments: { increment: paymentAmount } },
+            });
+          }
+        }
 
-        return { payment: entry, newBalance };
+        return {
+          payment: {
+            ...mapLedgerEntry(entry),
+            entityType: entry.entityType,
+            entityId: entry.entityId,
+          },
+          newBalance: Number(newBalance.toString()),
+        };
       });
 
       return send201(res, result);
@@ -461,13 +506,25 @@ export function customersRouter(businessId: string): Router {
 
   // GET /customers/:id/ledger
   router.get('/:id/ledger', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER', 'STOCK_CLERK'), async (req, res) => {
+    const query = parseQuery(LedgerQuerySchema, req, res);
+    if (!query) return;
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 50;
+    const where = { customerId: req.params.id, customer: { businessId } };
     try {
-      const entries = await prisma.customerLedger.findMany({
-        where: { customerId: req.params.id, customer: { businessId } },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
+      const [entries, total] = await Promise.all([
+        prisma.customerLedger.findMany({
+          where,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.customerLedger.count({ where }),
+      ]);
+      return send200(res, {
+        data: entries.map(mapLedgerEntry),
+        meta: { total, page, limit, hasMore: page * limit < total },
       });
-      return send200(res, entries.map(mapLedgerEntry));
     } catch (err) {
       console.error('customers/ledger error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch ledger.');
@@ -504,6 +561,20 @@ function mapLedgerEntry(e: any) {
     balance: Number(e.balance),
     reference: e.reference,
     note: e.note,
+    entityType: e.entityType,
+    entityId: e.entityId,
     createdAt: e.createdAt,
   };
+}
+
+function generatedPaymentReference(now = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Africa/Nairobi',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now);
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  const date = `${values.year}${values.month}${values.day}`;
+  return `PAY-${date}-${randomUUID().slice(0, 8).toUpperCase()}`;
 }

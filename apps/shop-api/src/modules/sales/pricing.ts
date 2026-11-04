@@ -71,6 +71,7 @@ export type SaleRejection =
   | { kind: 'PRODUCT_NOT_FOUND'; productId: string }
   | { kind: 'PRODUCT_INACTIVE'; productId: string; name: string }
   | { kind: 'INSUFFICIENT_STOCK'; productId: string; name: string; available: Milli; requested: Milli }
+  | { kind: 'STOCK_OVERRIDE_DENIED' }
   | { kind: 'QUANTITY_NOT_POSITIVE'; productId: string; requested: Milli }
   | { kind: 'DUPLICATE_PRODUCT'; productId: string }
   | { kind: 'EMPTY_SALE' }

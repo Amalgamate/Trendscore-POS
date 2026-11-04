@@ -28,6 +28,8 @@ class _SettingsViewState extends State<SettingsView> {
   late final TextEditingController _serverUrlController;
 
   late bool _autoPrintReceipt;
+  late bool _showCustomerNameOnReceipt;
+  late final bool _initialShowCustomerNameOnReceipt;
   late bool _cashDrawerKick;
   late bool _requirePinForReversal;
   late String _printerPaperSize;
@@ -61,6 +63,8 @@ class _SettingsViewState extends State<SettingsView> {
     _serverUrlController = TextEditingController(text: widget.state.serverUrl);
 
     _autoPrintReceipt = widget.state.autoPrintReceipt;
+    _showCustomerNameOnReceipt = widget.state.showCustomerNameOnReceipt;
+    _initialShowCustomerNameOnReceipt = widget.state.showCustomerNameOnReceipt;
     _cashDrawerKick = widget.state.cashDrawerKick;
     _requirePinForReversal = widget.state.requirePinForReversal;
     _printerPaperSize = widget.state.printerPaperSize;
@@ -82,6 +86,37 @@ class _SettingsViewState extends State<SettingsView> {
   Future<void> _saveAllSettings() async {
     setState(() => _isSaving = true);
 
+    if (_showCustomerNameOnReceipt != _initialShowCustomerNameOnReceipt) {
+      if (!ApiService.instance.hasToken || !widget.state.canCreateUsers) {
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Sign in online as an owner to update receipt display settings.',
+            ),
+          ),
+        );
+        return;
+      }
+      final saved = await ApiService.instance.updateBusinessSetting(
+        'receipt.showCustomerName',
+        _showCustomerNameOnReceipt,
+      );
+      if (!mounted) return;
+      if (!saved) {
+        setState(() => _isSaving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              ApiService.instance.lastError ??
+                  'Could not save receipt display settings.',
+            ),
+          ),
+        );
+        return;
+      }
+    }
+
     await widget.state.saveSettings(
       newShopName: _shopNameController.text.trim(),
       newStoreBranch: _storeBranchController.text.trim(),
@@ -93,10 +128,12 @@ class _SettingsViewState extends State<SettingsView> {
       newHeroImageUrl: _heroImageUrlController.text.trim(),
       newServerUrl: _serverUrlController.text.trim(),
       newAutoPrintReceipt: _autoPrintReceipt,
+      newShowCustomerNameOnReceipt: _showCustomerNameOnReceipt,
       newCashDrawerKick: _cashDrawerKick,
       newRequirePinForReversal: _requirePinForReversal,
       newPrinterPaperSize: _printerPaperSize,
     );
+    if (!mounted) return;
     _clearLogo = false;
     ApiService.instance.configure(_serverUrlController.text);
 
@@ -584,7 +621,7 @@ class _SettingsViewState extends State<SettingsView> {
                           _buildTextField(
                             'Branch / Counter Location',
                             _storeBranchController,
-                            hint: 'e.g. Kilimani Market · Counter 01',
+                            hint: 'e.g. Guta Gala · Counter 01',
                           ),
                           const SizedBox(height: 12),
                           _buildTextField(
@@ -611,7 +648,7 @@ class _SettingsViewState extends State<SettingsView> {
                           child: _buildTextField(
                             'Branch / Counter Location',
                             _storeBranchController,
-                            hint: 'e.g. Kilimani Market · Counter 01',
+                            hint: 'e.g. Guta Gala · Counter 01',
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -1153,6 +1190,32 @@ class _SettingsViewState extends State<SettingsView> {
                   ],
                 ),
                 const Divider(color: AppColors.border_subtle, height: 28),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text(
+                    'Show customer name on receipts',
+                    style: TextStyle(
+                      color: AppColors.text_primary,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  subtitle: const Text(
+                    'Print the customer name when one was selected or entered at checkout.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: AppColors.text_tertiary,
+                    ),
+                  ),
+                  value: _showCustomerNameOnReceipt,
+                  activeThumbColor: AppColors.accent_primary,
+                  onChanged:
+                      ApiService.instance.hasToken &&
+                          widget.state.canCreateUsers &&
+                          !_isSaving
+                      ? (value) =>
+                            setState(() => _showCustomerNameOnReceipt = value)
+                      : null,
+                ),
                 SwitchListTile(
                   contentPadding: EdgeInsets.zero,
                   title: const Text(

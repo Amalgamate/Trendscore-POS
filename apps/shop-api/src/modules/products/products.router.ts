@@ -4,11 +4,11 @@
 import type { Router } from 'express';
 import { Router as ExpressRouter } from 'express';
 import { z } from 'zod';
-import type { StockMovementType } from '@prisma/client';
 import { Prisma } from '@prisma/client';
 import { prisma } from '../../lib/prisma';
 import { parseBody, parseQuery, send200, send201, sendError } from '../../lib/http';
 import { requireAuth, requireRole } from '../../lib/auth.middleware';
+import { toBaseQuantity, UnitConversionError } from '../sales/measured-units';
 
 const ListProductsQuerySchema = z.object({
   category: z.string().optional(),
@@ -18,6 +18,22 @@ const ListProductsQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(100),
 });
+
+const StockListQuerySchema = z.object({
+  category: z.string().optional(),
+  search: z.string().optional(),
+  stock: z.enum(['all', 'low', 'out']).default('all'),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(500).default(200),
+});
+
+class ProductHasHistoryError extends Error {
+  constructor(
+    readonly counts: { saleItems: number; purchaseItems: number; refundItems: number },
+  ) {
+    super('Product has transaction history and cannot be permanently deleted. Archive it instead.');
+  }
+}
 
 const CreateProductSchema = z.object({
   name: z.string().min(1).max(200),
@@ -34,6 +50,9 @@ const CreateProductSchema = z.object({
   costPrice: z.number().nonnegative().default(0),
   vatRate: z.number().min(0).max(1).default(0.16),
   unit: z.string().default('pc'),
+  purchaseContainerName: z.string().max(100).nullable().optional(),
+  purchaseContainerSize: z.number().positive().nullable().optional(),
+  quickQuantityPresets: z.array(z.string().trim().min(1).max(32)).max(20).optional().default([]),
   initialStock: z.number().nonnegative().default(0),
   lowStockThreshold: z.number().nonnegative().default(5),
 });
@@ -66,13 +85,79 @@ const ImportProductsSchema = z.object({
 });
 
 const StockAdjustSchema = z.object({
-  delta: z.number().int(),
-  type: z.enum(['ADJUSTMENT_IN', 'ADJUSTMENT_OUT', 'DAMAGE', 'EXPIRY', 'PURCHASE']),
-  reason: z.string().min(1).max(500),
+  delta: z.number().finite().refine((value) => value !== 0),
+  unit: z.string().min(1).max(16).optional(),
+  reason: z.enum(['SPILLAGE', 'WASTAGE', 'DAMAGE', 'EXPIRY', 'CORRECTION']),
+  note: z.string().max(500).optional(),
 });
 
 export function productsRouter(businessId: string): Router {
   const router = ExpressRouter();
+
+  // GET /products/stock/list — complete paged inventory snapshot with valuation.
+  // Cost and retail values are included for all authenticated shop roles per D6.
+  router.get('/stock/list', requireAuth, async (req, res) => {
+    const query = parseQuery(StockListQuerySchema, req, res);
+    if (!query) return;
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 200;
+    const where: Prisma.ProductWhereInput = {
+      businessId,
+      active: true,
+      ...(query.category ? { category: { name: { equals: query.category, mode: 'insensitive' } } } : {}),
+      ...(query.search ? { OR: [
+        { name: { contains: query.search, mode: 'insensitive' } },
+        { sku: { contains: query.search, mode: 'insensitive' } },
+        { barcode: { contains: query.search, mode: 'insensitive' } },
+      ] } : {}),
+      ...(query.stock === 'low' ? { stock: { lte: prisma.product.fields.lowStockThreshold, gt: 0 } } : {}),
+      ...(query.stock === 'out' ? { stock: { lte: 0 } } : {}),
+    };
+    try {
+      const [products, total] = await Promise.all([
+        prisma.product.findMany({
+          where,
+          select: {
+            id: true, name: true, sku: true, barcode: true, category: { select: { name: true } },
+            stock: true, unit: true, salePrice: true, costPrice: true, lowStockThreshold: true, varianceFlag: true,
+          },
+          orderBy: [{ category: { sortOrder: 'asc' } }, { name: 'asc' }],
+          skip: (page - 1) * limit,
+          take: limit,
+        }),
+        prisma.product.count({ where }),
+      ]);
+      const data = products.map((product) => {
+        const quantity = new Prisma.Decimal(product.stock.toString());
+        const costPrice = new Prisma.Decimal(product.costPrice.toString());
+        const salePrice = new Prisma.Decimal(product.salePrice.toString());
+        return {
+          id: product.id, name: product.name, sku: product.sku, barcode: product.barcode,
+          category: product.category?.name ?? null,
+          quantity: quantity.toNumber(), unit: product.unit,
+          salePrice: salePrice.toNumber(), costPrice: costPrice.toNumber(),
+          valueAtCost: quantity.mul(costPrice).toDecimalPlaces(2).toNumber(),
+          valueAtSellingPrice: quantity.mul(salePrice).toDecimalPlaces(2).toNumber(),
+          lowStockThreshold: Number(product.lowStockThreshold.toString()),
+          isNegative: quantity.isNegative(), varianceFlag: product.varianceFlag,
+        };
+      });
+      const totals = data.reduce((sum, product) => ({
+        quantity: sum.quantity.plus(product.quantity),
+        valueAtCost: sum.valueAtCost.plus(product.valueAtCost),
+        valueAtSellingPrice: sum.valueAtSellingPrice.plus(product.valueAtSellingPrice),
+      }), { quantity: new Prisma.Decimal(0), valueAtCost: new Prisma.Decimal(0), valueAtSellingPrice: new Prisma.Decimal(0) });
+      return send200(res, {
+        data,
+        totals: { quantity: totals.quantity.toNumber(), valueAtCost: totals.valueAtCost.toNumber(), valueAtSellingPrice: totals.valueAtSellingPrice.toNumber() },
+        valuationBasis: { valueAtCost: 'quantity × costPrice; includes tax treatment as stored on product', valueAtSellingPrice: 'quantity × salePrice; indicative retail value, not realized revenue' },
+        meta: { total, page, limit, pages: Math.ceil(total / limit) },
+      });
+    } catch (err) {
+      console.error('products/stock/list error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch stock list.');
+    }
+  });
 
   // GET /products/storefront/:id/image — serve one published product image.
   router.get('/storefront/:id/image', async (req, res) => {
@@ -423,6 +508,13 @@ export function productsRouter(businessId: string): Router {
       return sendError(res, 422, 'VALIDATION_ERROR', 'Request body is invalid.');
     }
     const body = bodyResult.data;
+    const queryDiscardStock = z.enum(['true', 'false']).optional().safeParse(req.query.discardStock);
+    if (!queryDiscardStock.success) {
+      return sendError(res, 422, 'VALIDATION_ERROR', 'Query parameter discardStock must be true or false.');
+    }
+    const discardStock = queryDiscardStock.data === undefined
+      ? body.discardStock === true
+      : queryDiscardStock.data === 'true';
     const id = req.params.id;
     const auth = res.locals.auth as { userId: string; role: string };
 
@@ -451,7 +543,7 @@ export function productsRouter(businessId: string): Router {
       // (d) Stock guard — use Decimal-safe comparison.
       const stock = new Prisma.Decimal(existing.stock.toString());
       const hasStock = !stock.isZero();
-      if (hasStock && body.discardStock !== true) {
+      if (hasStock && !discardStock) {
         return sendError(
           res, 422, 'NON_ZERO_STOCK',
           'Product has stock on hand. Set discardStock:true to discard it and proceed.',
@@ -463,6 +555,21 @@ export function productsRouter(businessId: string): Router {
       await prisma.$transaction(async (tx) => {
         // Lock the row first.
         await tx.$queryRaw(Prisma.sql`SELECT id FROM products WHERE id = ${id}::uuid FOR UPDATE`);
+        // Recheck after acquiring the same product lock used by sale and
+        // receiving transactions so history cannot appear between the guard
+        // and the purge.
+        const [lockedSaleItems, lockedPurchaseItems, lockedRefundItems] = await Promise.all([
+          tx.saleItem.count({ where: { productId: id } }),
+          tx.purchaseItem.count({ where: { productId: id } }),
+          tx.refundItem.count({ where: { productId: id } }),
+        ]);
+        if (lockedSaleItems > 0 || lockedPurchaseItems > 0 || lockedRefundItems > 0) {
+          throw new ProductHasHistoryError({
+            saleItems: lockedSaleItems,
+            purchaseItems: lockedPurchaseItems,
+            refundItems: lockedRefundItems,
+          });
+        }
         // SET LOCAL scopes the purge permission to this transaction only.
         await tx.$queryRaw(Prisma.sql`SELECT set_config('app.purge_product_id', ${id}, true)`);
         // Delete stock movements (trigger now allows this for this transaction).
@@ -492,6 +599,12 @@ export function productsRouter(businessId: string): Router {
 
       return send200(res, { id, deleted: true });
     } catch (err) {
+      if (err instanceof ProductHasHistoryError) {
+        return sendError(
+          res, 409, 'PRODUCT_HAS_HISTORY', err.message,
+          { counts: err.counts },
+        );
+      }
       console.error('products/purge error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Failed to delete product.');
     }
@@ -529,7 +642,7 @@ export function productsRouter(businessId: string): Router {
   });
 
   // POST /products/:id/adjust-stock
-  router.post('/:id/adjust-stock', requireAuth, requireRole('OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
+  router.post('/:id/adjust-stock', requireAuth, requireRole('SUPER_ADMIN', 'OWNER', 'MANAGER', 'STOCK_CLERK'), async (req, res) => {
     const body = parseBody(StockAdjustSchema, req, res);
     if (!body) return;
     const auth = res.locals.auth;
@@ -545,9 +658,13 @@ export function productsRouter(businessId: string): Router {
             FOR UPDATE`,
         );
         const product = await tx.product.findFirstOrThrow({ where: { id: productId, businessId } });
-        const newStock = Number(product.stock) + body.delta;
+        const unit = body.unit ?? product.unit;
+        const milliDelta = toBaseQuantity(Math.abs(body.delta), unit, product.unit);
+        const delta = new Prisma.Decimal(milliDelta).dividedBy(1000).mul(Math.sign(body.delta));
+        const before = new Prisma.Decimal(product.stock.toString());
+        const newStock = before.plus(delta);
 
-        if (newStock < 0) {
+        if (newStock.isNegative()) {
           throw new Error('STOCK_NEGATIVE');
         }
 
@@ -556,25 +673,36 @@ export function productsRouter(businessId: string): Router {
           data: { stock: newStock },
         });
 
-        await tx.stockMovement.create({
+        const movement = await tx.stockMovement.create({
           data: {
             businessId,
             productId,
             createdById: auth.userId,
-            type: body.type as StockMovementType,
-            quantity: body.delta,
+            type: delta.isPositive() ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
+            quantity: delta,
             balanceAfter: newStock,
-            note: body.reason,
+            reason: body.reason,
+            note: body.note,
           },
         });
 
-        return { productId, newStock, delta: body.delta };
+        await tx.auditLog.create({ data: {
+          businessId, userId: auth.userId, action: 'STOCK_ADJUSTED',
+          entityType: 'PRODUCT', entityId: productId,
+          beforeJson: { stock: before.toString() },
+          afterJson: { stock: newStock.toString(), delta: delta.toString(), unit, reason: body.reason, movementId: movement.id },
+        } });
+
+        return { productId, newStock: newStock.toNumber(), delta: delta.toNumber(), unit: product.unit, movementId: movement.id };
       });
 
       return send200(res, result);
     } catch (err: unknown) {
       if (err instanceof Error && err.message === 'STOCK_NEGATIVE') {
         return sendError(res, 422, 'STOCK_NEGATIVE', 'Adjustment would drive stock below zero.');
+      }
+      if (err instanceof UnitConversionError) {
+        return sendError(res, 422, 'INVALID_STOCK_UNIT', err.message);
       }
       console.error('products/adjust-stock error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'Failed to adjust stock.');
@@ -601,6 +729,9 @@ function mapProduct(p: any) {
     costPrice: Number(p.costPrice),
     vatRate: Number(p.vatRate),
     unit: p.unit,
+    purchaseContainerName: p.purchaseContainerName,
+    purchaseContainerSize: p.purchaseContainerSize === null ? null : Number(p.purchaseContainerSize),
+    quickQuantityPresets: p.quickQuantityPresets,
     stock: Number(p.stock),
     lowStockThreshold: Number(p.lowStockThreshold),
     active: p.active,

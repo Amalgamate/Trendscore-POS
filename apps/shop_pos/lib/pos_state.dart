@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math' as math;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -16,6 +17,22 @@ class PosException implements Exception {
   String toString() => message;
 }
 
+class StockOverrideRequiredException extends PosException {
+  StockOverrideRequiredException({
+    required this.productId,
+    required this.productName,
+    required this.availableMilli,
+    required this.requestedMilli,
+  }) : super(
+         'This sale exceeds recorded stock and needs Owner or Manager approval.',
+       );
+
+  final String productId;
+  final String productName;
+  final int availableMilli;
+  final int requestedMilli;
+}
+
 /// Thrown when a permanent delete is blocked because the product has history.
 class ProductHasHistoryException implements Exception {
   ProductHasHistoryException({required this.counts});
@@ -31,7 +48,8 @@ class ProductHasStockException implements Exception {
   ProductHasStockException({required this.stock});
   final int stock;
   @override
-  String toString() => 'Product has $stock unit(s) in stock. Confirm discard to proceed.';
+  String toString() =>
+      'Product has $stock unit(s) in stock. Confirm discard to proceed.';
 }
 
 /// Icons a shop owner can pick for a category.
@@ -145,6 +163,10 @@ class PosProduct {
     this.imageBase64,
     this.groupId,
     this.variantLabel,
+    this.unit = 'pc',
+    this.purchaseContainerName,
+    this.purchaseContainerSize,
+    this.quickQuantityPresets = const [],
   });
 
   final String id;
@@ -154,8 +176,8 @@ class PosProduct {
   String category;
   Money unitPrice;
   Money? costPrice;
-  int stock;
-  int lowStockThreshold;
+  num stock;
+  num lowStockThreshold;
   String? description;
   final IconData icon;
   final Color tint;
@@ -173,6 +195,12 @@ class PosProduct {
 
   /// e.g. "500ml", "Strawberry", "6-pack". Null for a standalone product.
   String? variantLabel;
+
+  /// Base unit used for stock and per-unit pricing (catalogue ID).
+  String unit;
+  String? purchaseContainerName;
+  num? purchaseContainerSize;
+  List<String> quickQuantityPresets;
 
   /// Name shown on receipts and in the basket, e.g. "Fresh milk · 500ml".
   String get displayName => (variantLabel == null || variantLabel!.isEmpty)
@@ -197,8 +225,8 @@ class PosProduct {
     String? category,
     Money? unitPrice,
     Money? costPrice,
-    int? stock,
-    int? lowStockThreshold,
+    num? stock,
+    num? lowStockThreshold,
     Object? description = _sentinel,
     IconData? icon,
     Color? tint,
@@ -210,6 +238,10 @@ class PosProduct {
     Object? imageBase64 = _sentinel,
     Object? groupId = _sentinel,
     Object? variantLabel = _sentinel,
+    String? unit,
+    String? purchaseContainerName,
+    num? purchaseContainerSize,
+    List<String>? quickQuantityPresets,
   }) {
     return PosProduct(
       id: id ?? this.id,
@@ -240,6 +272,12 @@ class PosProduct {
       variantLabel: variantLabel == _sentinel
           ? this.variantLabel
           : (variantLabel as String?),
+      unit: unit ?? this.unit,
+      purchaseContainerName:
+          purchaseContainerName ?? this.purchaseContainerName,
+      purchaseContainerSize:
+          purchaseContainerSize ?? this.purchaseContainerSize,
+      quickQuantityPresets: quickQuantityPresets ?? this.quickQuantityPresets,
     );
   }
 
@@ -267,6 +305,10 @@ class PosProduct {
     'imageBase64': imageBase64,
     'groupId': groupId,
     'variantLabel': variantLabel,
+    'unit': unit,
+    'purchaseContainerName': purchaseContainerName,
+    'purchaseContainerSize': purchaseContainerSize,
+    'quickQuantityPresets': quickQuantityPresets,
   };
 
   factory PosProduct.fromJson(Map<String, dynamic> json) => PosProduct(
@@ -279,8 +321,8 @@ class PosProduct {
     costPrice: json['costPriceMinor'] != null
         ? Money(json['costPriceMinor'] as int)
         : null,
-    stock: json['stock'] as int? ?? 0,
-    lowStockThreshold: json['lowStockThreshold'] as int? ?? 10,
+    stock: json['stock'] as num? ?? 0,
+    lowStockThreshold: json['lowStockThreshold'] as num? ?? 10,
     description: json['description'] as String?,
     icon: _iconFromCode(json['iconCode'] as int?),
     tint: Color(json['tint'] as int? ?? 0xFFF1F5F9),
@@ -295,6 +337,13 @@ class PosProduct {
     imageBase64: json['imageBase64'] as String?,
     groupId: json['groupId'] as String?,
     variantLabel: json['variantLabel'] as String?,
+    unit: json['unit'] as String? ?? 'pc',
+    purchaseContainerName: json['purchaseContainerName'] as String?,
+    purchaseContainerSize: json['purchaseContainerSize'] as num?,
+    quickQuantityPresets:
+        (json['quickQuantityPresets'] as List<dynamic>? ?? const [])
+            .map((v) => v.toString())
+            .toList(),
   );
 
   static IconData _iconFromCode(int? code) {
@@ -337,12 +386,16 @@ class SaleRecordItem {
     required this.unitPrice,
     required this.quantity,
     required this.lineTotal,
+    this.unit = 'pc',
+    this.baseUnit = 'pc',
   });
 
   final String productId;
   final String productName;
   final Money unitPrice;
-  final int quantity;
+  final num quantity;
+  final String unit;
+  final String baseUnit;
   final Money lineTotal;
 }
 
@@ -368,6 +421,7 @@ class SaleRecord {
     required this.paymentMethod,
     required this.paymentReference,
     this.customer,
+    this.customerName,
     this.status = SaleStatus.completed,
     this.paymentPending = false,
     this.reversalReason,
@@ -385,13 +439,14 @@ class SaleRecord {
   final SalePaymentMethod paymentMethod;
   String paymentReference;
   final PosCustomer? customer;
+  final String? customerName;
   SaleStatus status;
   bool paymentPending;
   String? reversalReason;
   final Money? cashTendered;
   final Money? changeDue;
 
-  int get totalUnits => items.fold(0, (sum, i) => sum + i.quantity);
+  int get totalUnits => items.fold(0, (sum, i) => sum + i.quantity.ceil());
   bool get isReversed => status == SaleStatus.reversed;
 
   static SaleRecord fromApi(
@@ -405,7 +460,10 @@ class SaleRecord {
         productId: item['productId'] as String? ?? '',
         productName: item['productName'] as String? ?? '',
         unitPrice: Money(((item['unitPrice'] as num) * 100).round()),
-        quantity: (item['quantity'] as num).toInt(),
+        quantity: item['soldQuantity'] as num? ?? item['quantity'] as num,
+        unit: item['soldUnit'] as String? ?? 'pc',
+        baseUnit:
+            item['baseUnit'] as String? ?? item['soldUnit'] as String? ?? 'pc',
         lineTotal: Money(((item['lineTotal'] as num) * 100).round()),
       );
     }).toList();
@@ -460,6 +518,7 @@ class SaleRecord {
       paymentMethod: paymentMethod,
       paymentReference: paymentReference,
       customer: customer,
+      customerName: json['customerName'] as String?,
       status: status,
       paymentPending: paymentPending,
       cashTendered: primaryPayment?['cashTendered'] == null
@@ -491,6 +550,7 @@ class CustomerLedgerEntry {
     required this.amount,
     required this.reference,
     required this.runningBalance,
+    this.note,
   });
 
   final String id;
@@ -499,6 +559,7 @@ class CustomerLedgerEntry {
   final Money amount;
   final String reference;
   final Money runningBalance;
+  final String? note;
 }
 
 /// A registered customer with credit account.
@@ -511,16 +572,23 @@ class PosCustomer {
     required this.currentBalance,
     this.status = 'ACTIVE',
     this.creditFrozen = false,
+    this.email,
+    this.address,
+    this.notes,
     List<CustomerLedgerEntry>? history,
   }) : ledger = history ?? [];
 
   final String id;
-  final String name;
-  final String phone;
-  final Money creditLimit;
+  String name;
+  String phone;
+  Money creditLimit;
   Money currentBalance;
-  final String status;
-  final bool creditFrozen;
+  String status;
+  bool creditFrozen;
+  String? email;
+  String? address;
+  String? notes;
+  String get fullName => name;
   final List<CustomerLedgerEntry> ledger;
 
   Money get availableCredit => creditLimit > currentBalance
@@ -544,6 +612,7 @@ class PosCustomer {
             amount: Money(((entry['amount'] as num) * 100).round()),
             reference: entry['reference'] as String? ?? '',
             runningBalance: Money(((entry['balance'] as num) * 100).round()),
+            note: entry['note'] as String?,
           ),
         );
       }
@@ -556,6 +625,9 @@ class PosCustomer {
       currentBalance: Money(((json['balance'] as num) * 100).round()),
       status: json['status'] as String? ?? 'ACTIVE',
       creditFrozen: json['creditFrozen'] as bool? ?? false,
+      email: json['email'] as String?,
+      address: json['address'] as String?,
+      notes: json['notes'] as String?,
       history: history,
     );
   }
@@ -810,6 +882,7 @@ class PosState extends ChangeNotifier {
 
   // ─── Hardware & Peripherals ─────────────────────────────────────────────
   bool autoPrintReceipt = true;
+  bool showCustomerNameOnReceipt = true;
   bool cashDrawerKick = true;
   bool requirePinForReversal = true;
   String printerPaperSize = '80mm';
@@ -970,15 +1043,18 @@ class PosState extends ChangeNotifier {
     notifyListeners();
     await syncCatalogueFromApi();
 
-    // Load customers from API
+    final receiptSetting = await ApiService.instance
+        .getReceiptCustomerNameSetting();
+    if (receiptSetting != null) {
+      showCustomerNameOnReceipt = receiptSetting;
+      await _persistAll();
+    }
+
+    // Replace both active and archived customer caches from the server.
     try {
-      final remoteCustomers = await ApiService.instance.getCustomers();
-      if (remoteCustomers != null) {
-        customers = remoteCustomers.map(PosCustomer.fromApi).toList();
-      }
+      await refreshCustomerAccounts();
     } catch (e) {
       debugPrint('Could not load customers from API: $e');
-      // keep existing list (empty or cached)
     }
 
     // Load recent sales from API
@@ -1022,6 +1098,8 @@ class PosState extends ChangeNotifier {
   String? catalogueSyncMessage;
   bool catalogueSyncing = false;
   late List<PosCustomer> customers;
+  List<PosCustomer> archivedCustomers = [];
+  final Map<String, int> customerLedgerTotals = {};
   late List<SaleRecord> sales;
   List<SaleRecord> get salesLedger => sales;
   late CashShift shift;
@@ -1097,7 +1175,10 @@ class PosState extends ChangeNotifier {
     }
   }
 
-  Future<void> deleteProduct(String productId, {bool discardStock = false}) async {
+  Future<void> deleteProduct(
+    String productId, {
+    bool discardStock = false,
+  }) async {
     final isApiProduct = RegExp(
       r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-8][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$',
     ).hasMatch(productId);
@@ -1115,7 +1196,7 @@ class PosState extends ChangeNotifier {
         }
         if (result.errorCode == 'NON_ZERO_STOCK') {
           throw ProductHasStockException(
-            stock: (result.details?['stock'] as num?)?.toInt() ?? 0,
+            stock: (result.details?['stock'] as num?)?.ceil() ?? 0,
           );
         }
         throw PosException(
@@ -1402,8 +1483,8 @@ class PosState extends ChangeNotifier {
       final changed = await ApiService.instance.adjustStock(
         product.id,
         product.stock - previous.stock,
-        product.stock >= previous.stock ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT',
-        'POS product edit',
+        'CORRECTION',
+        note: 'POS product edit',
       );
       if (changed == null)
         throw PosException(
@@ -1463,7 +1544,10 @@ class PosState extends ChangeNotifier {
     'salePrice': product.unitPrice.minorUnits / 100,
     'costPrice': (product.costPrice ?? const Money(0)).minorUnits / 100,
     'vatRate': product.taxRateBasisPoints / 10000,
-    'unit': 'pc',
+    'unit': product.unit,
+    'purchaseContainerName': product.purchaseContainerName,
+    'purchaseContainerSize': product.purchaseContainerSize,
+    'quickQuantityPresets': product.quickQuantityPresets,
     'initialStock': product.stock,
     'lowStockThreshold': product.lowStockThreshold,
   };
@@ -1495,12 +1579,11 @@ class PosState extends ChangeNotifier {
       costPrice: cost == null || cost == 0
           ? null
           : Money.parse(cost.toString()),
-      stock: (remote['stock'] as num? ?? fallback?.stock ?? 0).toInt(),
+      stock: remote['stock'] as num? ?? fallback?.stock ?? 0,
       lowStockThreshold:
           (remote['lowStockThreshold'] as num? ??
-                  fallback?.lowStockThreshold ??
-                  10)
-              .toInt(),
+          fallback?.lowStockThreshold ??
+          10),
       description: remote.containsKey('description')
           ? remote['description'] as String?
           : fallback?.description,
@@ -1525,6 +1608,19 @@ class PosState extends ChangeNotifier {
           : fallback?.imageBase64,
       groupId: remote['groupId'] as String? ?? fallback?.groupId,
       variantLabel: remote['variantLabel'] as String? ?? fallback?.variantLabel,
+      unit: remote['unit'] as String? ?? fallback?.unit ?? 'pc',
+      purchaseContainerName:
+          remote['purchaseContainerName'] as String? ??
+          fallback?.purchaseContainerName,
+      purchaseContainerSize:
+          remote['purchaseContainerSize'] as num? ??
+          fallback?.purchaseContainerSize,
+      quickQuantityPresets:
+          (remote['quickQuantityPresets'] as List<dynamic>? ??
+                  fallback?.quickQuantityPresets ??
+                  const [])
+              .map((v) => v.toString())
+              .toList(),
     );
   }
 
@@ -1854,9 +1950,293 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> addCustomer(PosCustomer c) async {
+    archivedCustomers.removeWhere((existing) => existing.id == c.id);
     customers.removeWhere((existing) => existing.id == c.id);
     customers.insert(0, c);
+    if (selectedCustomer?.id == c.id) selectedCustomer = c;
     notifyListeners();
+    await _persistAll();
+  }
+
+  bool get canManageCustomerCredit {
+    final role = currentLoggedInUser?.role;
+    return role == PosUserRole.owner ||
+        role == PosUserRole.superAdmin ||
+        role == PosUserRole.manager;
+  }
+
+  bool get canCreateUsers =>
+      currentLoggedInUser?.role == PosUserRole.owner ||
+      currentLoggedInUser?.role == PosUserRole.superAdmin;
+
+  void replaceCustomerAccounts({
+    required List<PosCustomer> active,
+    required List<PosCustomer> archived,
+  }) {
+    final selectedId = selectedCustomer?.id;
+    customers = active;
+    archivedCustomers = archived;
+    selectedCustomer = [
+      ...customers,
+      ...archivedCustomers,
+    ].where((customer) => customer.id == selectedId).firstOrNull;
+    notifyListeners();
+    unawaited(_persistAll());
+  }
+
+  /// Merge a fresh server snapshot into the shared object so view selections
+  /// and the checkout picker observe the same updated account immediately.
+  void updateCustomerSnapshot(PosCustomer updated) {
+    final activeIndex = customers.indexWhere((item) => item.id == updated.id);
+    final archivedIndex = archivedCustomers.indexWhere(
+      (item) => item.id == updated.id,
+    );
+    PosCustomer? current;
+    if (activeIndex >= 0) current = customers[activeIndex];
+    if (archivedIndex >= 0) current = archivedCustomers[archivedIndex];
+
+    if (current == null) {
+      if (updated.status == 'ARCHIVED') {
+        archivedCustomers.insert(0, updated);
+      } else {
+        customers.insert(0, updated);
+      }
+      current = updated;
+    } else {
+      final currentLedger = current.ledger;
+      current
+        ..name = updated.name
+        ..phone = updated.phone
+        ..email = updated.email
+        ..address = updated.address
+        ..notes = updated.notes
+        ..creditLimit = updated.creditLimit
+        ..currentBalance = updated.currentBalance
+        ..status = updated.status
+        ..creditFrozen = updated.creditFrozen;
+      if (updated.ledger.isNotEmpty) {
+        final localEntries = currentLedger.where((entry) {
+          return entry.id.startsWith('led_') || entry.id.startsWith('rev_');
+        }).toList();
+        final localSaleEntries = localEntries
+            .where((entry) => entry.id.startsWith('led_sale_'))
+            .toList();
+        final serverEntries = updated.ledger.toList();
+        for (final localEntry in localSaleEntries) {
+          final matchingServerEntry = serverEntries.indexWhere(
+            (entry) => entry.reference == localEntry.reference,
+          );
+          if (matchingServerEntry >= 0) {
+            serverEntries.removeAt(matchingServerEntry);
+          }
+        }
+        currentLedger
+          ..clear()
+          ..addAll(serverEntries);
+        final serverIds = currentLedger.map((entry) => entry.id).toSet();
+        currentLedger.addAll(
+          localEntries.where((entry) => !serverIds.contains(entry.id)),
+        );
+      }
+      if (updated.status == 'ARCHIVED' && activeIndex >= 0) {
+        customers.removeAt(activeIndex);
+        archivedCustomers.insert(0, current);
+      } else if (updated.status == 'ACTIVE' && archivedIndex >= 0) {
+        archivedCustomers.removeAt(archivedIndex);
+        customers.insert(0, current);
+      }
+    }
+
+    if (selectedCustomer?.id == updated.id) selectedCustomer = current;
+    notifyListeners();
+    unawaited(_persistAll());
+  }
+
+  Future<PosCustomer> refreshCustomerSnapshot(String customerId) async {
+    if (!ApiService.instance.hasToken) {
+      throw PosException(
+        'Reconnect to the shop before refreshing this account.',
+      );
+    }
+    final response = await ApiService.instance.getCustomer(customerId);
+    if (response == null) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not refresh customer account.',
+      );
+    }
+    final customer = PosCustomer.fromApi(response);
+    updateCustomerSnapshot(customer);
+    return customer;
+  }
+
+  Future<bool> refreshCustomerAccounts() async {
+    if (!ApiService.instance.hasToken) return false;
+    final responses = await Future.wait([
+      ApiService.instance.getCustomers(status: 'ACTIVE'),
+      ApiService.instance.getCustomers(status: 'ARCHIVED'),
+    ]);
+    if (responses[0] == null || responses[1] == null) return false;
+    replaceCustomerAccounts(
+      active: responses[0]!.map(PosCustomer.fromApi).toList(),
+      archived: responses[1]!.map(PosCustomer.fromApi).toList(),
+    );
+    return true;
+  }
+
+  void selectCustomerLedgerPage(
+    String customerId,
+    List<CustomerLedgerEntry> entries, {
+    bool replace = false,
+  }) {
+    final customer = [
+      ...customers,
+      ...archivedCustomers,
+    ].where((item) => item.id == customerId).firstOrNull;
+    if (customer == null) return;
+    if (replace) {
+      customer.ledger
+        ..clear()
+        ..addAll(entries);
+    } else {
+      final existing = customer.ledger.map((entry) => entry.id).toSet();
+      customer.ledger.addAll(
+        entries.where((entry) => !existing.contains(entry.id)),
+      );
+    }
+    notifyListeners();
+  }
+
+  void setSelectedCustomer(PosCustomer? customer) {
+    selectedCustomer = customer;
+    notifyListeners();
+  }
+
+  void setCustomerLedgerTotal(String customerId, int total) {
+    customerLedgerTotals[customerId] = total;
+    notifyListeners();
+  }
+
+  Future<void> updateCustomerCredit(
+    String customerId, {
+    Money? creditLimit,
+    bool? creditFrozen,
+  }) async {
+    if (!ApiService.instance.hasToken) {
+      throw PosException('Reconnect to the shop before updating credit terms.');
+    }
+    final response = await ApiService.instance.updateCustomer(customerId, {
+      if (creditLimit != null) 'creditLimit': creditLimit.minorUnits / 100,
+      if (creditFrozen != null) 'creditFrozen': creditFrozen,
+    });
+    if (response == null) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not update customer credit.',
+      );
+    }
+    updateCustomerSnapshot(PosCustomer.fromApi(response));
+  }
+
+  Future<void> updateCustomerAccount(
+    String customerId,
+    Map<String, dynamic> changes,
+  ) async {
+    if (!ApiService.instance.hasToken) {
+      throw PosException('Reconnect to the shop before updating this account.');
+    }
+    final response = await ApiService.instance.updateCustomer(
+      customerId,
+      changes,
+    );
+    if (response == null) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not update customer account.',
+      );
+    }
+    updateCustomerSnapshot(PosCustomer.fromApi(response));
+  }
+
+  Future<void> saveCustomerNotes(PosCustomer customer, String notes) async {
+    if (!ApiService.instance.hasToken) {
+      throw PosException('Reconnect to the shop before saving customer notes.');
+    }
+    final saved = await ApiService.instance.updateCustomerNotes(
+      customer.id,
+      notes,
+    );
+    if (!saved) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not save customer notes.',
+      );
+    }
+    await refreshCustomerSnapshot(customer.id);
+  }
+
+  Future<({List<CustomerLedgerEntry> entries, int total, bool hasMore})?>
+  fetchCustomerLedger(String customerId, {int page = 1, int limit = 50}) async {
+    final response = await ApiService.instance.getCustomerLedger(
+      customerId,
+      page: page,
+      limit: limit,
+    );
+    if (response == null) return null;
+    final entries = (response['data'] as List<dynamic>? ?? const [])
+        .map((raw) => Map<String, dynamic>.from(raw as Map))
+        .map((entry) {
+          final entryType = entry['entryType'] as String? ?? '';
+          final type = entryType == 'DEBIT'
+              ? LedgerEntryType.saleDebit
+              : entryType == 'CREDIT'
+              ? LedgerEntryType.paymentCredit
+              : LedgerEntryType.reversal;
+          final amount = entry['amount'] as num? ?? 0;
+          final balance = entry['balance'] as num? ?? 0;
+          return CustomerLedgerEntry(
+            id: entry['id'] as String? ?? '',
+            timestamp:
+                DateTime.tryParse(entry['createdAt'] as String? ?? '') ??
+                DateTime.now(),
+            type: type,
+            amount: Money((amount * 100).round()),
+            reference: entry['reference'] as String? ?? '',
+            runningBalance: Money((balance * 100).round()),
+            note: entry['note'] as String?,
+          );
+        })
+        .toList();
+    final meta = response['meta'] as Map<String, dynamic>? ?? const {};
+    final total = (meta['total'] as num?)?.toInt() ?? entries.length;
+    final hasMore = meta['hasMore'] as bool? ?? page * limit < total;
+    selectCustomerLedgerPage(customerId, entries, replace: page == 1);
+    setCustomerLedgerTotal(customerId, total);
+    return (entries: entries, total: total, hasMore: hasMore);
+  }
+
+  Future<void> archiveCustomer(String customerId) async {
+    if (!ApiService.instance.hasToken ||
+        !await ApiService.instance.archiveCustomer(customerId)) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not archive customer.',
+      );
+    }
+    final index = customers.indexWhere((item) => item.id == customerId);
+    if (index >= 0) {
+      final customer = customers.removeAt(index)..status = 'ARCHIVED';
+      archivedCustomers.insert(0, customer);
+      if (selectedCustomer?.id == customerId) selectedCustomer = null;
+      notifyListeners();
+      await _persistAll();
+    }
+  }
+
+  Future<void> restoreCustomer(PosCustomer customer) async {
+    if (!ApiService.instance.hasToken ||
+        !await ApiService.instance.restoreCustomer(customer.id)) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'Could not restore customer.',
+      );
+    }
+    customer.status = 'ACTIVE';
+    updateCustomerSnapshot(customer);
     await _persistAll();
   }
 
@@ -1872,6 +2252,27 @@ class PosState extends ChangeNotifier {
     customers.removeWhere((c) => c.id == customerId);
     notifyListeners();
     return null;
+  }
+
+  Future<void> permanentlyDeleteCustomer(PosCustomer customer) async {
+    if (!ApiService.instance.hasToken) {
+      throw PosException('Reconnect to the shop before deleting this account.');
+    }
+    final deleted = await ApiService.instance.permanentlyDeleteCustomer(
+      customer.id,
+    );
+    if (!deleted) {
+      throw PosException(
+        ApiService.instance.lastError ??
+            'Could not permanently delete customer.',
+      );
+    }
+    archivedCustomers.removeWhere((item) => item.id == customer.id);
+    customers.removeWhere((item) => item.id == customer.id);
+    if (selectedCustomer?.id == customer.id) selectedCustomer = null;
+    customerLedgerTotals.remove(customer.id);
+    notifyListeners();
+    await _persistAll();
   }
 
   int savedTabIndex = 0;
@@ -1917,8 +2318,8 @@ class PosState extends ChangeNotifier {
           ? 'Guta Gala'
           : savedShopName;
       final savedBranch = prefs.getString('store_branch');
-      storeBranch = savedBranch == null ||
-              savedBranch == 'Kilimani Market · Counter 01'
+      storeBranch =
+          savedBranch == null || savedBranch == 'Kilimani Market · Counter 01'
           ? 'Counter 01'
           : savedBranch;
       tillId = prefs.getString('till_id') ?? tillId;
@@ -1929,6 +2330,8 @@ class PosState extends ChangeNotifier {
 
       autoPrintReceipt =
           prefs.getBool('auto_print_receipt') ?? autoPrintReceipt;
+      showCustomerNameOnReceipt =
+          prefs.getBool('show_customer_name_on_receipt') ?? true;
       cashDrawerKick = prefs.getBool('cash_drawer_kick') ?? cashDrawerKick;
       requirePinForReversal =
           prefs.getBool('require_pin_reversal') ?? requirePinForReversal;
@@ -2035,6 +2438,10 @@ class PosState extends ChangeNotifier {
       await prefs.setString('brand_tagline', brandTagline);
 
       await prefs.setBool('auto_print_receipt', autoPrintReceipt);
+      await prefs.setBool(
+        'show_customer_name_on_receipt',
+        showCustomerNameOnReceipt,
+      );
       await prefs.setBool('cash_drawer_kick', cashDrawerKick);
       await prefs.setBool('require_pin_reversal', requirePinForReversal);
       await prefs.setString('printer_paper_size', printerPaperSize);
@@ -2107,6 +2514,7 @@ class PosState extends ChangeNotifier {
     String? newHeroImageUrl,
     String? newBrandTagline,
     bool? newAutoPrintReceipt,
+    bool? newShowCustomerNameOnReceipt,
     bool? newCashDrawerKick,
     bool? newRequirePinForReversal,
     String? newPrinterPaperSize,
@@ -2121,6 +2529,9 @@ class PosState extends ChangeNotifier {
     if (newHeroImageUrl != null) heroImageUrl = newHeroImageUrl;
     if (newBrandTagline != null) brandTagline = newBrandTagline;
     if (newAutoPrintReceipt != null) autoPrintReceipt = newAutoPrintReceipt;
+    if (newShowCustomerNameOnReceipt != null) {
+      showCustomerNameOnReceipt = newShowCustomerNameOnReceipt;
+    }
     if (newCashDrawerKick != null) cashDrawerKick = newCashDrawerKick;
     if (newRequirePinForReversal != null)
       requirePinForReversal = newRequirePinForReversal;
@@ -2341,6 +2752,7 @@ class PosState extends ChangeNotifier {
       name: product.displayName,
       unitPrice: product.unitPrice,
       stock: product.stock,
+      unit: product.unit,
     );
     final added = cart.add(line, onRefused: onRefused);
     if (added) notifyListeners();
@@ -2349,11 +2761,34 @@ class PosState extends ChangeNotifier {
 
   void changeQuantity(
     String productId,
-    int delta, {
+    num delta, {
     void Function(String reason)? onRefused,
   }) {
     cart.changeQuantity(productId, delta, onRefused: onRefused);
     notifyListeners();
+  }
+
+  bool addMeasuredToCart(
+    PosProduct product,
+    num quantity,
+    String unit, {
+    void Function(String reason)? onRefused,
+  }) {
+    final added = cart.addMeasured(
+      CartLine(
+        productId: product.id,
+        name: product.displayName,
+        unitPrice: product.unitPrice,
+        stock: product.stock,
+        unit: product.unit,
+        baseUnit: product.unit,
+      ),
+      quantity,
+      unit,
+      onRefused: onRefused,
+    );
+    if (added) notifyListeners();
+    return added;
   }
 
   void clearCart() {
@@ -2376,8 +2811,21 @@ class PosState extends ChangeNotifier {
     PosCustomer? customer,
     Money? cashTendered,
     Money? changeDue,
+    String? customerName,
+    Map<String, String>? stockOverride,
   }) async {
     assert(cart.canCheckout, 'Cart must be non-empty and within stock limits');
+
+    if (method == SalePaymentMethod.credit && !ApiService.instance.hasToken) {
+      throw PosException(
+        'Reconnect to the shop before recording a credit sale. The sale was not saved locally.',
+      );
+    }
+    if (cart.hasStockShortage && !ApiService.instance.hasToken) {
+      throw PosException(
+        'Reconnect to the shop before requesting a stock override. Offline sales cannot reduce stock below zero.',
+      );
+    }
 
     final saleCustomer = customer ?? selectedCustomer;
     if (ApiService.instance.hasToken) {
@@ -2412,6 +2860,8 @@ class PosState extends ChangeNotifier {
             productName: l.name,
             unitPrice: l.unitPrice,
             quantity: l.quantity,
+            unit: l.unit,
+            baseUnit: l.baseUnit,
             lineTotal: l.lineTotal,
           ),
         )
@@ -2427,19 +2877,37 @@ class PosState extends ChangeNotifier {
         'idempotencyKey': idempotencyKey,
         'clientRef': idempotencyKey,
         'method': method.apiValue,
+        if (stockOverride != null)
+          'stockOverride': {
+            'approverId': stockOverride['approverId'],
+            'pin': stockOverride['pin'],
+          },
         'paymentReference': paymentReference,
         if (saleCustomer != null) 'customerId': saleCustomer.id,
+        if (customerName?.trim().isNotEmpty ?? false)
+          'customerName': customerName!.trim(),
         'lines': cart.lines
             .map(
               (line) => {
                 'productId': line.productId,
                 'quantity': line.quantity,
+                'unit': line.unit,
               },
             )
             .toList(),
         if (cashTendered != null) 'cashTendered': cashTendered.minorUnits / 100,
       });
       if (response == null) {
+        if (ApiService.instance.lastSaleErrorCode == 'INSUFFICIENT_STOCK' &&
+            stockOverride == null) {
+          final details = ApiService.instance.lastSaleErrorDetails ?? const {};
+          throw StockOverrideRequiredException(
+            productId: details['productId'] as String? ?? '',
+            productName: details['name'] as String? ?? 'Product',
+            availableMilli: (details['available'] as num?)?.toInt() ?? 0,
+            requestedMilli: (details['requested'] as num?)?.toInt() ?? 0,
+          );
+        }
         throw PosException(
           ApiService.instance.lastError ?? 'Could not record the sale.',
         );
@@ -2454,17 +2922,29 @@ class PosState extends ChangeNotifier {
       if (serverBalance is num) {
         customerBalanceFromServer = Money((serverBalance * 100).round());
       }
+      if (method == SalePaymentMethod.credit &&
+          customerBalanceFromServer == null) {
+        throw PosException(
+          'The shop did not confirm the updated customer balance. Refresh sales before retrying.',
+        );
+      }
     }
 
     // 1. Deduct shelf stock
     for (final line in cart.lines) {
       final product = products.firstWhere((p) => p.id == line.productId);
-      product.stock -= line.quantity;
+      final milli = ProductUnitCatalogue.toBaseMilli(
+        line.quantity,
+        line.unit,
+        product.unit,
+      );
+      if (milli != null) product.stock -= milli / 1000;
     }
 
     // 2. If Credit, append to Customer Credit Ledger
     if (method == SalePaymentMethod.credit && saleCustomer != null) {
-      final newBalance = customerBalanceFromServer ??
+      final newBalance =
+          customerBalanceFromServer ??
           saleCustomer.currentBalance + saleSubtotal;
       saleCustomer.currentBalance = newBalance;
       saleCustomer.ledger.insert(
@@ -2478,6 +2958,10 @@ class PosState extends ChangeNotifier {
           runningBalance: newBalance,
         ),
       );
+      updateCustomerSnapshot(saleCustomer);
+      if (ApiService.instance.hasToken && _isRemoteProductId(saleCustomer.id)) {
+        await refreshCustomerAccounts();
+      }
     }
 
     // 3. If Cash, append to Shift Cash movements
@@ -2509,6 +2993,9 @@ class PosState extends ChangeNotifier {
       paymentReference: paymentReference,
       paymentPending: method == SalePaymentMethod.mpesa,
       customer: saleCustomer,
+      customerName: customerName?.trim().isNotEmpty == true
+          ? customerName!.trim()
+          : saleCustomer?.name,
       cashTendered: cashTendered,
       changeDue: changeDue,
     );
@@ -2565,7 +3052,12 @@ class PosState extends ChangeNotifier {
         (prod) => prod.id == item.productId,
         orElse: () => products.first,
       );
-      p.stock += item.quantity;
+      final baseMilli = ProductUnitCatalogue.toBaseMilli(
+        item.quantity,
+        item.unit,
+        p.unit,
+      );
+      if (baseMilli != null) p.stock += baseMilli / 1000;
     }
 
     // 2. Reverse customer debit if credit
@@ -2614,9 +3106,11 @@ class PosState extends ChangeNotifier {
 
   Future<void> adjustStock(
     String productId,
-    int delta,
+    num delta,
     String reason, {
     String? type,
+    String reasonCode = 'CORRECTION',
+    String? unit,
   }) async {
     final prod = products.firstWhere((p) => p.id == productId);
     if (delta == 0) return;
@@ -2636,8 +3130,9 @@ class PosState extends ChangeNotifier {
       final changed = await ApiService.instance.adjustStock(
         productId,
         delta,
-        type ?? (delta > 0 ? 'ADJUSTMENT_IN' : 'ADJUSTMENT_OUT'),
-        reason.trim(),
+        reasonCode,
+        unit: unit ?? prod.unit,
+        note: reason.trim(),
       );
       if (changed == null) {
         throw PosException(
@@ -2653,35 +3148,99 @@ class PosState extends ChangeNotifier {
     await _persistAll();
   }
 
+  Future<num> receiveStock({
+    required String productId,
+    required num quantity,
+    required String unit,
+    required num unitCost,
+    String? reference,
+  }) async {
+    final product = products.firstWhere((item) => item.id == productId);
+    final result = await ApiService.instance.receiveStock(
+      productId: productId,
+      quantity: quantity,
+      unit: unit,
+      unitCost: unitCost,
+      reference: reference,
+    );
+    final movements = result?['movements'] as List?;
+    final movement = movements == null || movements.isEmpty
+        ? null
+        : movements.first as Map?;
+    final updatedStock = movement?['balanceAfter'] as num?;
+    if (updatedStock == null) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'The stock delivery was not recorded.',
+      );
+    }
+    product.stock = updatedStock;
+    product.costPrice = Money.fromDouble(unitCost.toDouble());
+    notifyListeners();
+    await _persistAll();
+    return updatedStock;
+  }
+
+  Future<num> countStock({
+    required String productId,
+    required num countedQuantity,
+    String? note,
+  }) async {
+    final product = products.firstWhere((item) => item.id == productId);
+    final result = await ApiService.instance.countStock(
+      productId: productId,
+      countedQuantity: countedQuantity,
+      note: note,
+    );
+    final updatedStock = result?['countedQuantity'] as num?;
+    if (updatedStock == null) {
+      throw PosException(
+        ApiService.instance.lastError ?? 'The physical count was not recorded.',
+      );
+    }
+    product.stock = updatedStock;
+    notifyListeners();
+    await _persistAll();
+    return updatedStock;
+  }
+
   // --- Customer Credit Payment ---
 
   Future<void> recordCustomerPayment(
     String customerId,
-    Money amount,
-    String reference,
-    {
+    Money amount, {
+    String reference = '',
     String method = 'CASH',
     String? note,
   }) async {
-    final cust = customers.firstWhere((c) => c.id == customerId);
+    final cust = [
+      ...customers,
+      ...archivedCustomers,
+    ].where((c) => c.id == customerId).firstOrNull;
+    if (cust == null) {
+      throw PosException(
+        'Customer account is no longer available. Refresh the account and retry.',
+      );
+    }
     if (amount.minorUnits <= 0) {
       throw PosException('Payment must be greater than zero.');
     }
-    if (amount.minorUnits > cust.currentBalance.minorUnits) {
+    final isRemoteCustomer = _isRemoteProductId(customerId);
+    if (!ApiService.instance.hasToken && isRemoteCustomer) {
+      throw PosException('Reconnect to the shop before recording payment.');
+    }
+    if ((!ApiService.instance.hasToken || !isRemoteCustomer) &&
+        amount.minorUnits > cust.currentBalance.minorUnits) {
       throw PosException('Payment cannot exceed the outstanding balance.');
     }
 
     var newBal = Money(cust.currentBalance.minorUnits - amount.minorUnits);
     CustomerLedgerEntry? remoteEntry;
-    if (_isRemoteProductId(customerId)) {
-      if (!ApiService.instance.hasToken) {
-        throw PosException('Reconnect to the shop before recording payment.');
-      }
+    if (ApiService.instance.hasToken && isRemoteCustomer) {
       final response = await ApiService.instance.recordCustomerPayment(
         customerId,
         amount.minorUnits / 100,
         method,
-        reference,
+        reference: reference,
         note: note,
       );
       if (response == null) {
@@ -2693,31 +3252,52 @@ class PosState extends ChangeNotifier {
       final entry = response['payment'];
       if (serverBalance is num) {
         newBal = Money((serverBalance * 100).round());
+      } else {
+        throw PosException(
+          'The shop did not confirm the updated customer balance. Refresh the account before retrying.',
+        );
       }
       if (entry is Map<String, dynamic>) {
         remoteEntry = CustomerLedgerEntry(
-          id: entry['id'] as String? ?? 'pmt_${DateTime.now().microsecondsSinceEpoch}',
-          timestamp: DateTime.tryParse(entry['createdAt'] as String? ?? '') ?? DateTime.now(),
+          id:
+              entry['id'] as String? ??
+              'pmt_${DateTime.now().microsecondsSinceEpoch}',
+          timestamp:
+              DateTime.tryParse(entry['createdAt'] as String? ?? '') ??
+              DateTime.now(),
           type: LedgerEntryType.paymentCredit,
-          amount: Money(((entry['amount'] as num? ?? amount.minorUnits / 100) * 100).round()),
+          amount: Money(
+            ((entry['amount'] as num? ?? amount.minorUnits / 100) * 100)
+                .round(),
+          ),
           reference: entry['reference'] as String? ?? reference,
-          runningBalance: Money(((entry['balance'] as num? ?? newBal.minorUnits / 100) * 100).round()),
+          runningBalance: Money(
+            ((entry['balance'] as num? ?? newBal.minorUnits / 100) * 100)
+                .round(),
+          ),
         );
       }
     }
 
     cust.currentBalance = newBal;
-    cust.ledger.insert(
-      0,
-      remoteEntry ?? CustomerLedgerEntry(
+    final paymentEntry =
+        remoteEntry ??
+        CustomerLedgerEntry(
           id: 'pmt_${DateTime.now().millisecondsSinceEpoch}',
           timestamp: DateTime.now(),
           type: LedgerEntryType.paymentCredit,
           amount: amount,
           reference: reference,
           runningBalance: newBal,
-        ),
-    );
+        );
+    final remoteEntryId = remoteEntry?.id;
+    if (remoteEntryId != null) {
+      // The server page is already authoritative. Avoid inserting this row
+      // twice when the ledger was refreshed while the payment was in flight.
+      cust.ledger.removeWhere((entry) => entry.id == remoteEntryId);
+    }
+    cust.ledger.insert(0, paymentEntry);
+    updateCustomerSnapshot(cust);
 
     // Cash debt payments are part of drawer inflow as well as the customer ledger.
     if (method.toUpperCase() == 'CASH') {
@@ -2733,6 +3313,11 @@ class PosState extends ChangeNotifier {
           cashier: activeCashier,
         ),
       );
+    }
+
+    if (ApiService.instance.hasToken && isRemoteCustomer) {
+      await refreshCustomerAccounts();
+      await refreshCustomerSnapshot(customerId);
     }
 
     notifyListeners();

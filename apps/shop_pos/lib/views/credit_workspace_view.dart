@@ -28,6 +28,10 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
   bool _showArchived = false;
   bool _loadingAccounts = false;
   bool _loadingDocuments = false;
+  bool _loadingLedger = false;
+  bool _ledgerHasMore = false;
+  int _ledgerPage = 1;
+  static const int _ledgerPageSize = 50;
   bool _savingNotes = false;
   bool _uploadingDocument = false;
   List<Map<String, dynamic>> _documents = [];
@@ -99,6 +103,7 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
         amount: _moneyFromApi(entry['amount']),
         reference: entry['reference'] as String? ?? '',
         runningBalance: _moneyFromApi(entry['balance']),
+        note: entry['note'] as String?,
       );
     }).toList();
 
@@ -144,6 +149,7 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
     _selectedCustomer = selection.isNotEmpty
         ? selection.first
         : (available.isEmpty ? null : available.first);
+    widget.state.setSelectedCustomer(_selectedCustomer);
     _notesController.text = _selectedCustomer?.notes ?? '';
     setState(() {
       _loadingAccounts = false;
@@ -160,17 +166,15 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
       if (_selectedTab == _CreditTab.documents) await _loadDocuments(customer);
       return;
     }
-    final response = await ApiService.instance.getCustomer(customer.id);
-    if (!mounted) return;
-    if (response == null) {
-      _showMessage(
-        ApiService.instance.lastError ?? 'Could not load customer details.',
-        error: true,
-      );
+    PosCustomer updated;
+    try {
+      updated = await widget.state.refreshCustomerSnapshot(customer.id);
+    } on PosException catch (error) {
+      if (!mounted) return;
+      _showMessage(error.message, error: true);
       return;
     }
-    final updated = _customerFromApi(response);
-    widget.state.updateCustomerSnapshot(updated);
+    if (!mounted) return;
     if (_selectedCustomer?.id == updated.id) {
       setState(() {
         _selectedCustomer = updated;
@@ -189,7 +193,49 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
       _mobileShowDetails = true;
       _notesController.text = customer.notes ?? '';
     });
-    if (fetchDetails) _loadSelectedDetails(customer);
+    widget.state.setSelectedCustomer(customer);
+    _ledgerPage = 1;
+    _ledgerHasMore = false;
+    if (fetchDetails) {
+      _loadSelectedDetails(customer);
+      _loadLedgerPage(customer, replace: true);
+    }
+  }
+
+  Future<void> _loadLedgerPage(
+    PosCustomer customer, {
+    bool replace = false,
+  }) async {
+    if (!ApiService.instance.hasToken ||
+        !_isRemoteId(customer.id) ||
+        _loadingLedger ||
+        (!replace && !_ledgerHasMore && _ledgerPage > 1)) {
+      return;
+    }
+    setState(() => _loadingLedger = true);
+    final page = replace ? 1 : _ledgerPage;
+    final response = await widget.state.fetchCustomerLedger(
+      customer.id,
+      page: page,
+      limit: _ledgerPageSize,
+    );
+    if (!mounted) return;
+    if (response == null) {
+      setState(() => _loadingLedger = false);
+      _showMessage(
+        ApiService.instance.lastError ?? 'Could not load the statement.',
+        error: true,
+      );
+      return;
+    }
+    final hasMore = response.hasMore;
+    if (_selectedCustomer?.id == customer.id) {
+      setState(() {
+        _ledgerPage = page + 1;
+        _ledgerHasMore = hasMore;
+        _loadingLedger = false;
+      });
+    }
   }
 
   void _showMessage(String message, {bool error = false}) {
@@ -273,35 +319,28 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
                       try {
                         final email = emailController.text.trim();
                         final address = addressController.text.trim();
-                        PosCustomer customer;
-                        if (ApiService.instance.hasToken) {
-                          final created = await ApiService.instance
-                              .createCustomer({
-                                'fullName': name,
-                                if (phone.isNotEmpty) 'phone': phone,
-                                if (email.isNotEmpty) 'email': email,
-                                if (address.isNotEmpty) 'address': address,
-                                'creditLimit': limit.minorUnits / 100,
-                              });
-                          if (created == null) {
-                            throw PosException(
-                              ApiService.instance.lastError ??
-                                  'Could not create the customer account.',
-                            );
-                          }
-                          customer = _customerFromApi(created);
-                        } else {
-                          customer = PosCustomer(
-                            id: 'cust_${DateTime.now().microsecondsSinceEpoch}',
-                            name: name,
-                            phone: phone,
-                            email: email.isEmpty ? null : email,
-                            address: address.isEmpty ? null : address,
-                            creditLimit: limit,
-                            currentBalance: const Money(0),
+                        if (!ApiService.instance.hasToken) {
+                          throw PosException(
+                            'Reconnect to the shop before creating a customer account.',
                           );
                         }
-                        widget.state.addCustomer(customer);
+                        final created = await ApiService.instance
+                            .createCustomer({
+                              'fullName': name,
+                              if (phone.isNotEmpty) 'phone': phone,
+                              if (email.isNotEmpty) 'email': email,
+                              if (address.isNotEmpty) 'address': address,
+                              'creditLimit': limit.minorUnits / 100,
+                            });
+                        if (created == null) {
+                          throw PosException(
+                            ApiService.instance.lastError ??
+                                'Could not create the customer account.',
+                          );
+                        }
+                        final customer = _customerFromApi(created);
+                        await widget.state.addCustomer(customer);
+                        await widget.state.refreshCustomerAccounts();
                         if (!mounted || !dialogContext.mounted) return;
                         setState(() {
                           _showArchived = false;
@@ -314,7 +353,16 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
                         );
                       } on PosException catch (error) {
                         setDialogState(() => saving = false);
-                        _showMessage(error.message, error: true);
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text(error.message),
+                            backgroundColor: AppColors.status_danger,
+                            action: SnackBarAction(
+                              label: 'Retry',
+                              onPressed: _showNewCustomerDialog,
+                            ),
+                          ),
+                        );
                       }
                     },
               child: saving
@@ -383,11 +431,25 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
+                    onChanged: (_) => setDialogState(() {}),
                     decoration: const InputDecoration(
                       labelText: 'Payment amount (KES)',
                       border: OutlineInputBorder(),
                     ),
                   ),
+                  const SizedBox(height: 12),
+                  if (amountController.text.isNotEmpty &&
+                      !_isValidPaymentAmount(
+                        amountController.text,
+                        customer.currentBalance,
+                      ))
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 10),
+                      child: Text(
+                        'Enter an amount greater than zero and no more than the outstanding balance.',
+                        style: TextStyle(color: Colors.red),
+                      ),
+                    ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
                     initialValue: method,
@@ -415,7 +477,7 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
                   TextField(
                     controller: referenceController,
                     decoration: const InputDecoration(
-                      labelText: 'Receipt / transaction reference *',
+                      labelText: 'Receipt / transaction reference (optional)',
                       border: OutlineInputBorder(),
                     ),
                   ),
@@ -438,7 +500,12 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
               child: const Text('Cancel'),
             ),
             FilledButton.icon(
-              onPressed: saving
+              onPressed:
+                  saving ||
+                      !_isValidPaymentAmount(
+                        amountController.text,
+                        customer.currentBalance,
+                      )
                   ? null
                   : () async {
                       Money amount;
@@ -460,27 +527,30 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
                         );
                         return;
                       }
-                      final reference = referenceController.text.trim();
-                      if (reference.isEmpty) {
+                      if (!ApiService.instance.hasToken) {
                         _showMessage(
-                          'Enter the payment reference before recording it.',
+                          'Reconnect to the shop before recording a customer payment.',
                           error: true,
                         );
                         return;
                       }
+                      final reference = referenceController.text.trim();
                       setDialogState(() => saving = true);
                       try {
                         await widget.state.recordCustomerPayment(
                           customer.id,
                           amount,
-                          reference,
-                          method,
+                          reference: reference,
+                          method: method,
                           note: noteController.text.trim(),
                         );
                         if (!mounted || !dialogContext.mounted) return;
                         Navigator.pop(dialogContext);
+                        _ledgerPage = 1;
+                        _ledgerHasMore = false;
+                        _loadLedgerPage(customer, replace: true);
                         _showMessage(
-                          'Payment of KES ${amount.formatted} recorded.',
+                          'Payment recorded. New balance: KES ${customer.currentBalance.formatted}',
                         );
                         await _loadSelectedDetails(customer);
                       } on PosException catch (error) {
@@ -504,6 +574,15 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
     amountController.dispose();
     referenceController.dispose();
     noteController.dispose();
+  }
+
+  bool _isValidPaymentAmount(String value, Money balance) {
+    try {
+      final amount = Money.parse(value);
+      return amount.minorUnits > 0 && amount.minorUnits <= balance.minorUnits;
+    } on FormatException {
+      return false;
+    }
   }
 
   Future<void> _adjustLimit(PosCustomer customer) async {
@@ -567,7 +646,7 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
                       setDialogState(() => saving = true);
                       try {
                         await widget.state.updateCustomerCredit(
-                          customer,
+                          customer.id,
                           creditLimit: amount,
                         );
                         if (!mounted || !dialogContext.mounted) return;
@@ -620,7 +699,7 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
     if (confirmed != true) return;
     try {
       await widget.state.updateCustomerCredit(
-        customer,
+        customer.id,
         creditFrozen: shouldFreeze,
       );
       if (!mounted) return;
@@ -911,12 +990,13 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
   }
 
   List<CustomerLedgerEntry> _visibleLedger(PosCustomer customer) {
-    return switch (_ledgerFilter) {
-      'Debits' => customer.ledger.where((entry) => entry.type.isDebit).toList(),
-      'Credits' =>
-        customer.ledger.where((entry) => !entry.type.isDebit).toList(),
-      _ => customer.ledger,
+    final source = customer.ledger;
+    final entries = switch (_ledgerFilter) {
+      'Debits' => source.where((entry) => entry.type.isDebit).toList(),
+      'Credits' => source.where((entry) => !entry.type.isDebit).toList(),
+      _ => source,
     };
+    return entries;
   }
 
   @override
@@ -1465,6 +1545,11 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
               child: TextButton.icon(
                 onPressed: () {
                   setState(() => _selectedTab = tab.tab);
+                  if (tab.tab == _CreditTab.transactions &&
+                      _selectedCustomer != null) {
+                    _ledgerPage = 1;
+                    _loadLedgerPage(_selectedCustomer!, replace: true);
+                  }
                   if (tab.tab == _CreditTab.documents &&
                       _selectedCustomer != null) {
                     _loadDocuments(_selectedCustomer!);
@@ -1526,7 +1611,9 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
           ],
         ),
         const SizedBox(height: 8),
-        if (entries.isEmpty)
+        if (entries.isEmpty && _loadingLedger)
+          const Expanded(child: Center(child: CircularProgressIndicator()))
+        else if (entries.isEmpty)
           Expanded(
             child: _emptyState(
               'No transactions yet',
@@ -1542,6 +1629,22 @@ class _CreditWorkspaceViewState extends State<CreditWorkspaceView> {
               itemBuilder: (context, index) =>
                   _LedgerRow(entry: entries[index]),
             ),
+          ),
+          if (_loadingLedger)
+            const Padding(
+              padding: EdgeInsets.all(8),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_ledgerHasMore)
+            TextButton.icon(
+              onPressed: () => _loadLedgerPage(customer),
+              icon: const Icon(Icons.expand_more),
+              label: const Text('Load more transactions'),
+            ),
+          Text(
+            'Showing ${entries.length} of ${widget.state.customerLedgerTotals[customer.id] ?? entries.length}',
+            textAlign: TextAlign.center,
+            style: AppText.xs,
           ),
         ],
       ],

@@ -53,8 +53,9 @@ void main() {
         expect(request.url.path, '/api/products/$productId/adjust-stock');
         expect(jsonDecode(request.body), {
           'delta': 5,
-          'type': 'ADJUSTMENT_IN',
-          'reason': 'Stock delivery',
+          'unit': 'pc',
+          'reason': 'CORRECTION',
+          'note': 'Stock delivery',
         });
         return http.Response(
           jsonEncode({'productId': productId, 'newStock': 8, 'delta': 5}),

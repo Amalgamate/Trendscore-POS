@@ -50,6 +50,9 @@ const UpdateBusinessSchema = z.object({
 const UpsertSettingSchema = z.object({
   value: z.unknown(),
 });
+const ReceiptCustomerNameSettingSchema = z.object({
+  value: z.boolean(),
+});
 
 export function businessRouter(businessId: string): Router {
   const router = ExpressRouter();
@@ -170,6 +173,62 @@ export function businessRouter(businessId: string): Router {
   });
 
   // PUT /business/settings/:key
+  router.get(
+    '/settings/receipt.showCustomerName',
+    requireAuth,
+    async (_req, res) => {
+      try {
+        const setting = await prisma.businessSetting.findUnique({
+          where: {
+            businessId_key: {
+              businessId,
+              key: 'receipt.showCustomerName',
+            },
+          },
+          select: { value: true },
+        });
+        const value = setting?.value;
+        return send200(res, {
+          key: 'receipt.showCustomerName',
+          value: typeof value === 'boolean' ? value : true,
+        });
+      } catch (err) {
+        console.error('business/receipt setting get error:', err);
+        return sendError(res, 500, 'SERVER_ERROR', 'Failed to fetch receipt settings.');
+      }
+    },
+  );
+
+  router.put(
+    '/settings/receipt.showCustomerName',
+    requireAuth,
+    requireRole('OWNER'),
+    async (req, res) => {
+      const body = parseBody(ReceiptCustomerNameSettingSchema, req, res);
+      if (!body) return;
+      try {
+        const setting = await prisma.businessSetting.upsert({
+          where: {
+            businessId_key: {
+              businessId,
+              key: 'receipt.showCustomerName',
+            },
+          },
+          update: { value: body.value },
+          create: {
+            businessId,
+            key: 'receipt.showCustomerName',
+            value: body.value,
+          },
+        });
+        return send200(res, setting);
+      } catch (err) {
+        console.error('business/receipt setting update error:', err);
+        return sendError(res, 500, 'SERVER_ERROR', 'Failed to update receipt settings.');
+      }
+    },
+  );
+
   router.put('/settings/:key', requireAuth, requireRole('OWNER'), async (req, res) => {
     const key = req.params.key;
     if (!key) return sendError(res, 400, 'BAD_REQUEST', 'Missing setting key.');

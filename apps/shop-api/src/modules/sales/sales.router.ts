@@ -28,11 +28,17 @@ const CreateSaleBodySchema = z.object({
   method: z.enum(['CASH', 'MPESA', 'CREDIT', 'BANK']),
   paymentReference: z.string().trim().max(200).optional(),
   customerId: z.string().uuid().optional(),
+  customerName: z.string().trim().max(120).optional(),
+  stockOverride: z.object({
+    approverId: z.string().uuid(),
+    pin: z.string().regex(/^\d{4,6}$/),
+  }).optional(),
   offline: z.boolean().optional().default(false),
   lines: z.array(
     z.object({
       productId: z.string().uuid(),
       quantity: z.number().positive(),
+      unit: z.string().trim().min(1).max(24).optional(),
     }),
   ).min(1, 'A sale must have at least one line.'),
   cashTendered: z.number().nonnegative().optional(),
@@ -46,6 +52,39 @@ const ReconcilePaymentBodySchema = z.object({
   mpesaReceipt: z.string().trim().min(3).max(64),
   note: z.string().trim().max(240).optional(),
 });
+
+const SalesSummaryQuerySchema = z.object({
+  date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
+});
+
+export function businessDateRange(date: string, timeZone: string): { start: Date; end: Date } {
+  const [year, month, day] = date.split('-').map(Number) as [number, number, number];
+  const calendarDate = new Date(Date.UTC(year, month - 1, day));
+  if (Number.isNaN(calendarDate.getTime()) || calendarDate.toISOString().slice(0, 10) !== date) {
+    throw new Error('INVALID_BUSINESS_DATE');
+  }
+
+  const utcForLocalMidnight = (value: Date) => {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23',
+    }).formatToParts(value);
+    const values = Object.fromEntries(parts.map((part) => [part.type, Number(part.value)]));
+    const representedAsUtc = Date.UTC(
+      values.year!, values.month! - 1, values.day!,
+      values.hour!, values.minute!, values.second!,
+    );
+    return new Date(value.getTime() - (representedAsUtc - Date.UTC(
+      value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate(),
+      value.getUTCHours(), value.getUTCMinutes(), value.getUTCSeconds(),
+    )));
+  };
+
+  const localMidnight = new Date(Date.UTC(year, month - 1, day));
+  const nextMidnight = new Date(Date.UTC(year, month - 1, day + 1));
+  return { start: utcForLocalMidnight(localMidnight), end: utcForLocalMidnight(nextMidnight) };
+}
 
 export function salesRouter(businessId: string): Router {
   const router = ExpressRouter();
@@ -100,48 +139,110 @@ export function salesRouter(businessId: string): Router {
     }
   });
 
-  // GET /sales/summary
-  router.get('/summary', requireAuth, requireRole('OWNER', 'MANAGER'), async (req, res) => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const tomorrow = new Date(today);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-
+  // GET /sales/summary — business day is midnight to midnight Africa/Nairobi.
+  router.get('/summary', requireAuth, requireRole('OWNER', 'MANAGER', 'CASHIER'), async (req, res) => {
+    const query = parseQuery(SalesSummaryQuerySchema, req, res);
+    if (!query) return;
+    const auth = res.locals.auth as { userId: string; role: string };
+    const date = query.date ?? new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Africa/Nairobi', year: 'numeric', month: '2-digit', day: '2-digit',
+    }).format(new Date());
     try {
-      const [dayResult, dayCount] = await Promise.all([
+      const timezoneSetting = await prisma.businessSetting.findUnique({
+        where: { businessId_key: { businessId, key: 'timezone' } },
+        select: { value: true },
+      });
+      const timezoneValue = timezoneSetting?.value;
+      const timezone = typeof timezoneValue === 'string' ? timezoneValue : 'Africa/Nairobi';
+      let range: { start: Date; end: Date };
+      try {
+        range = businessDateRange(date, timezone);
+      } catch {
+        return sendError(res, 422, 'VALIDATION_ERROR', 'Date must be a valid YYYY-MM-DD business date or configured timezone.');
+      }
+      const { start, end } = range;
+      const dayWhere: Prisma.SaleWhereInput = {
+        businessId,
+        status: { in: ['COMPLETED', 'PARTIALLY_REFUNDED'] },
+        createdAt: { gte: start, lt: end },
+        ...(auth.role === 'CASHIER' ? { cashierId: auth.userId } : {}),
+      };
+      const [dayResult, dayCount, dayPayments, refunds, creditGiven, debtPayments, voidedCount, vatResult] = await Promise.all([
         prisma.sale.aggregate({
-          where: { businessId, status: 'COMPLETED', createdAt: { gte: today, lt: tomorrow } },
+          where: dayWhere,
           _sum: { total: true },
           _count: true,
         }),
-        prisma.sale.count({ where: { businessId, status: 'COMPLETED', createdAt: { gte: today, lt: tomorrow } } }),
+        prisma.sale.count({ where: dayWhere }),
+        prisma.salePayment.findMany({
+          where: { sale: dayWhere, status: 'SUCCESS' },
+          select: { method: true, amount: true },
+        }),
+        prisma.refund.findMany({
+          where: {
+            businessId,
+            createdAt: { gte: start, lt: end },
+            ...(auth.role === 'CASHIER' ? { sale: { cashierId: auth.userId } } : {}),
+          },
+          select: { amount: true },
+        }),
+        prisma.sale.aggregate({
+          where: { ...dayWhere, payments: { some: { method: 'CREDIT', status: 'SUCCESS' } } },
+          _sum: { total: true },
+        }),
+        prisma.customerPayment.groupBy({
+          by: ['method'],
+          where: {
+            businessId,
+            createdAt: { gte: start, lt: end },
+            ...(auth.role === 'CASHIER' ? { receivedById: auth.userId } : {}),
+          },
+          _sum: { amount: true },
+          _count: { _all: true },
+        }),
+        prisma.sale.count({
+          where: {
+            businessId,
+            status: 'VOIDED',
+            createdAt: { gte: start, lt: end },
+            ...(auth.role === 'CASHIER' ? { cashierId: auth.userId } : {}),
+          },
+        }),
+        prisma.sale.aggregate({
+          where: dayWhere,
+          _sum: { vatAmount: true },
+        }),
       ]);
 
-      const sevenDaysAgo = new Date(today);
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-
-      const recentSales = await prisma.sale.findMany({
-        where: { businessId, status: 'COMPLETED', createdAt: { gte: sevenDaysAgo } },
-        select: { total: true, createdAt: true, payments: { select: { method: true, status: true, amount: true } } },
-      });
-
-      const byMethod: Record<string, number> = {};
-      for (const s of recentSales) {
-        for (const p of s.payments) {
-          if (p.status !== 'SUCCESS') continue;
-          byMethod[p.method] = (byMethod[p.method] ?? 0) + Number(p.amount);
-        }
+      const todayByMethod: Record<string, number> = {};
+      for (const payment of dayPayments) {
+        todayByMethod[payment.method] = (todayByMethod[payment.method] ?? 0) + Number(payment.amount);
       }
+
+      const grossSales = Number(dayResult._sum.total ?? 0);
+      const refundTotal = refunds.reduce((sum, refund) => sum + Number(refund.amount), 0);
+      const vatTotal = Number(vatResult._sum.vatAmount ?? 0);
+      const paymentTotal = Object.values(todayByMethod).reduce((sum, value) => sum + value, 0);
+      const debtPaymentTotals = Object.fromEntries(debtPayments.map((payment) => [
+        payment.method,
+        { amount: Number(payment._sum.amount ?? 0), count: payment._count._all },
+      ]));
 
       return send200(res, {
         today: {
-          total: Number(dayResult._sum.total ?? 0),
+          date,
+          timezone,
+          total: grossSales,
           count: dayCount,
-        },
-        last7Days: {
-          total: recentSales.reduce((sum, s) => sum + Number(s.total), 0),
-          count: recentSales.length,
-          byMethod,
+          average: dayCount === 0 ? 0 : grossSales / dayCount,
+          byMethod: todayByMethod,
+          paymentTotal,
+          vatTotal,
+          netSales: grossSales - refundTotal,
+          refunds: { total: refundTotal, count: refunds.length },
+          voidedCount,
+          creditGiven: Number(creditGiven._sum.total ?? 0),
+          debtPayments: debtPaymentTotals,
         },
       });
     } catch (err) {
@@ -183,6 +284,8 @@ export function salesRouter(businessId: string): Router {
         idempotencyKey: body.idempotencyKey,
         clientRef: body.clientRef,
         customerId: body.customerId,
+        customerName: body.customerName,
+        stockOverride: body.stockOverride,
         method: body.method as PaymentMethod,
         paymentReference: body.paymentReference,
         cashTendered: body.cashTendered,
@@ -193,7 +296,7 @@ export function salesRouter(businessId: string): Router {
       return send201(res, result);
     } catch (err) {
       if (err instanceof SaleValidationError) {
-        return sendError(res, 422, 'VALIDATION_ERROR', err.message);
+        return sendError(res, 422, err.rejection.kind, err.message, err.rejection);
       }
       if (err instanceof DuplicateSaleError) {
         return sendError(res, 409, 'DUPLICATE_SALE', err.message, {
@@ -338,6 +441,11 @@ export function salesRouter(businessId: string): Router {
 
     try {
       const result = await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "sales"
+            WHERE "id" = ${req.params.id}::uuid AND "businessId" = ${businessId}::uuid
+            FOR UPDATE`,
+        );
         const sale = await tx.sale.findFirstOrThrow({
           where: { id: req.params.id, businessId },
           include: {
@@ -355,17 +463,24 @@ export function salesRouter(businessId: string): Router {
           throw new Error('ALREADY_REVERSED');
         }
 
-        // 1. Mark as refunded
-        await tx.sale.update({
-          where: { id: req.params.id },
+        const claimed = await tx.sale.updateMany({
+          where: { id: req.params.id, businessId, status: { notIn: ['REFUNDED', 'VOIDED'] } },
           data: { status: 'REFUNDED' },
         });
+        if (claimed.count !== 1) throw new Error('ALREADY_REVERSED');
 
         // 2. Restore stock — append only
+        const productIds = [...new Set(sale.items.map((item) => item.productId))].sort();
+        await tx.$queryRaw(
+          Prisma.sql`SELECT "id" FROM "products"
+            WHERE "businessId" = ${businessId}::uuid
+              AND "id" IN (${Prisma.join(productIds.map((id) => Prisma.sql`${id}::uuid`))})
+            ORDER BY "id" FOR UPDATE`,
+        );
         for (const item of sale.items) {
           const product = await tx.product.update({
             where: { id: item.productId },
-            data: { stock: { increment: Number(item.quantity) } },
+            data: { stock: { increment: item.quantity } },
           });
           await tx.stockMovement.create({
             data: {
@@ -373,17 +488,38 @@ export function salesRouter(businessId: string): Router {
               productId: item.productId,
               createdById: auth.userId,
               type: 'RETURN_FROM_CUSTOMER',
-              quantity: Number(item.quantity),
-              balanceAfter: Number(product.stock),
+              quantity: item.quantity,
+              balanceAfter: product.stock,
               note: `Reversal: ${sale.receiptNumber} — ${body.reason}`,
               saleId: sale.id,
             },
           });
         }
 
+        await tx.auditLog.create({
+          data: {
+            businessId,
+            userId: auth.userId,
+            action: 'SALE_REVERSED',
+            entityType: 'SALE',
+            entityId: sale.id,
+            beforeJson: { status: sale.status },
+            afterJson: { status: 'REFUNDED', reason: body.reason, receiptNumber: sale.receiptNumber },
+          },
+        });
+
         // 3. If credit sale, reduce customer balance via ledger append
         if (sale.customerId && sale.customer) {
-          const newBalance = Math.max(0, Number(sale.customer.balance) - Number(sale.total));
+          await tx.$queryRaw(
+            Prisma.sql`SELECT "id" FROM "customers"
+              WHERE "id" = ${sale.customerId}::uuid AND "businessId" = ${businessId}::uuid
+              FOR UPDATE`,
+          );
+          const currentCustomer = await tx.customer.findFirst({
+            where: { id: sale.customerId, businessId },
+            select: { balance: true },
+          });
+          const newBalance = Math.max(0, Number(currentCustomer?.balance ?? 0) - Number(sale.total));
           await tx.customer.update({ where: { id: sale.customerId }, data: { balance: newBalance } });
           await tx.customerLedger.create({
             data: {
@@ -436,11 +572,15 @@ function mapSale(s: any) {
     total: Number(s.total),
     cashier: s.cashier,
     customer: s.customer,
+    customerName: s.customerName,
     items: s.items?.map((i: any) => ({
       productId: i.productId,
       productName: i.product?.name ?? i.productId,
       sku: i.product?.sku,
       quantity: Number(i.quantity),
+      soldQuantity: Number(i.soldQuantity ?? i.quantity),
+      soldUnit: i.soldUnit ?? i.product?.unit ?? 'pc',
+      baseUnit: i.product?.unit ?? i.soldUnit ?? 'pc',
       unitPrice: Number(i.unitPrice),
       lineTotal: Number(i.lineTotal),
     })),

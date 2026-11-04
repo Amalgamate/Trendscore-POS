@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "families": {
+    "volume": {
+      "base": "ml",
+      "units": {
+        "ml": { "symbol": "ml", "factorToBase": 1 },
+        "l": { "symbol": "L", "factorToBase": 1000 }
+      }
+    },
+    "mass": {
+      "base": "g",
+      "units": {
+        "g": { "symbol": "g", "factorToBase": 1 },
+        "kg": { "symbol": "kg", "factorToBase": 1000 }
+      }
+    },
+    "count": {
+      "base": "pc",
+      "units": {
+        "pc": { "symbol": "pc", "factorToBase": 1 },
+        "dozen": { "symbol": "dozen", "factorToBase": 12 }
+      }
+    }
+  }
+}

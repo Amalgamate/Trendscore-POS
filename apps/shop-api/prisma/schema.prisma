@@ -297,6 +297,9 @@ model Product {
   salePrice         Decimal   @db.Decimal(14, 2)
   vatRate           Decimal   @default(0.16) @db.Decimal(5, 4)
   unit              String    @default("pc")
+  purchaseContainerName String?
+  purchaseContainerSize Decimal? @db.Decimal(14, 3)
+  quickQuantityPresets Json @default("[]")
   stock             Decimal   @default(0) @db.Decimal(14, 3)
   lowStockThreshold Decimal   @default(5) @db.Decimal(14, 3)
   active            Boolean   @default(true)
@@ -459,6 +462,7 @@ model Sale {
   receiptNumber String  @unique
   cashierId     String? @db.Uuid
   customerId    String? @db.Uuid
+  customerName  String? @db.VarChar(120)
   cashSessionId String? @db.Uuid
 
   /// Client-generated ULID for offline sales. Unique, so a retried sync can
@@ -507,6 +511,8 @@ model SaleItem {
   saleId    String  @db.Uuid
   productId String  @db.Uuid
   quantity  Decimal @db.Decimal(14, 3)
+  soldQuantity Decimal  @db.Decimal(14, 3)
+  soldUnit     String
   unitPrice Decimal @db.Decimal(14, 2)
   /// Cost captured at sale time, so historic profit stays accurate even
   /// after the product's cost price changes.

@@ -193,6 +193,7 @@ async function createSaleForPaidOrder(
       unitCost: Prisma.Decimal;
       vatRate: Prisma.Decimal;
       lineTotal: Prisma.Decimal;
+      product: { unit: string };
     }>;
   },
   payment: StorefrontPayment,
@@ -251,6 +252,8 @@ async function createSaleForPaidOrder(
         create: order.items.map((item) => ({
           productId: item.productId,
           quantity: item.quantity,
+          soldQuantity: item.quantity,
+          soldUnit: item.product.unit,
           unitPrice: item.unitPrice,
           unitCost: item.unitCost,
           vatRate: item.vatRate,
@@ -361,7 +364,7 @@ export async function verifyStorefrontMpesaPayment(
       if (!activePaymentStatuses.includes(current.status)) return current;
       const order = await tx.storefrontOrder.findFirstOrThrow({
         where: { id: payment.orderId, businessId },
-        include: { items: true },
+        include: { items: { include: { product: { select: { unit: true } } } } },
       });
       if (order.status !== 'AWAITING_PAYMENT') {
         return tx.storefrontPayment.update({
