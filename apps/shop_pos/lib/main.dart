@@ -1733,7 +1733,7 @@ class _TopBar extends StatelessWidget {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    '$itemCount units',
+                    '$itemCount ${itemCount == 1 ? "item" : "items"}',
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.bold,

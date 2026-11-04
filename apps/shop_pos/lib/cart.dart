@@ -204,9 +204,12 @@ class Cart {
   bool get isEmpty => _lines.isEmpty;
   bool get isNotEmpty => _lines.isNotEmpty;
 
-  /// Units the customer walks away with — not the number of distinct lines.
-  int get itemCount =>
-      _lines.values.fold(0, (sum, line) => sum + line.quantity.ceil());
+  /// Count physical pieces for count-based stock and one sale item for a
+  /// measured line (for example, 500 ml of milk is one item, not 500 items).
+  int get itemCount => _lines.values.fold(0, (sum, line) {
+    final isMeasured = const {'ml', 'l', 'g', 'kg'}.contains(line.baseUnit);
+    return sum + (isMeasured ? 1 : line.quantity.ceil());
+  });
 
   /// VAT-exclusive value of the basket.
   Money get subtotal =>

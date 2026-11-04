@@ -2972,7 +2972,13 @@ class PosState extends ChangeNotifier {
           ApiService.instance.lastError ?? 'Could not record the sale.',
         );
       }
-      final data = response['data'] as Map<String, dynamic>?;
+      final rawData = response['data'];
+      final data = rawData is Map
+          ? Map<String, dynamic>.from(rawData)
+          : response.containsKey('saleId') &&
+                response.containsKey('receiptNumber')
+          ? response
+          : null;
       if (data == null) {
         throw PosException('The shop API returned an invalid sale response.');
       }
