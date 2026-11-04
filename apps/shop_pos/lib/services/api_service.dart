@@ -11,13 +11,26 @@ class ApiService {
   String baseUrl = 'http://localhost:4000';
   String? _authToken;
   DateTime? _authTokenExpiresAt;
+  bool _cookieSessionAuthenticated = false;
   bool isConnected = false;
   String? lastError;
   String? lastSaleErrorCode;
   Map<String, dynamic>? lastSaleErrorDetails;
-  bool get hasToken => _authToken != null && _authToken!.isNotEmpty;
+  bool get hasToken =>
+      (_authToken != null && _authToken!.isNotEmpty) ||
+      _cookieSessionAuthenticated;
   String? get authToken => _authToken;
   DateTime? get authTokenExpiresAt => _authTokenExpiresAt;
+
+  bool get _canUseBrowserCookieSession {
+    if (!kIsWeb) return false;
+    final api = Uri.tryParse(baseUrl);
+    final app = Uri.base;
+    return api != null &&
+        api.scheme == app.scheme &&
+        api.host == app.host &&
+        api.port == app.port;
+  }
 
   void configure(String url) {
     baseUrl = url.trim().replaceFirst(RegExp(r'/+$'), '');
@@ -25,6 +38,7 @@ class ApiService {
 
   void setToken(String? token, {DateTime? expiresAt}) {
     _authToken = token;
+    _cookieSessionAuthenticated = false;
     _authTokenExpiresAt = token == null
         ? null
         : expiresAt ?? _readTokenExpiry(token);
@@ -81,25 +95,39 @@ class ApiService {
     lastError = null;
     _authToken = null;
     _authTokenExpiresAt = null;
+    _cookieSessionAuthenticated = false;
     try {
       final res = await http
           .post(
             Uri.parse('$baseUrl/auth/login'),
-            headers: {'Content-Type': 'application/json'},
+            headers: {
+              'Content-Type': 'application/json',
+              if (_canUseBrowserCookieSession) 'X-Use-HttpOnly-Cookie': 'true',
+            },
             body: jsonEncode(credentials),
           )
           .timeout(const Duration(seconds: 5));
 
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
-        if (decoded is! Map<String, dynamic> ||
-            decoded['token'] is! String ||
-            _readTokenExpiry(decoded['token'] as String) == null) {
+        if (decoded is! Map<String, dynamic> || decoded['user'] is! Map) {
+          lastError = 'The shop API returned an invalid login session.';
+          return null;
+        }
+        final token = decoded['token'];
+        if (token is String && _readTokenExpiry(token) != null) {
+          setToken(token);
+        } else if (_canUseBrowserCookieSession) {
+          // The browser holds the credential in an HttpOnly cookie. JavaScript
+          // receives only the authenticated user profile.
+          _authToken = null;
+          _authTokenExpiresAt = null;
+          _cookieSessionAuthenticated = true;
+        } else {
           lastError = 'The shop API returned an invalid login session.';
           return null;
         }
         final data = decoded;
-        setToken(data['token'] as String);
         isConnected = true;
         return data;
       }
@@ -113,6 +141,52 @@ class ApiService {
       lastError = 'Could not reach the shop API at $baseUrl.';
       debugPrint('API login failed: $e');
       return null;
+    }
+  }
+
+  /// Restores a web login from the API's Secure, HttpOnly session cookie.
+  /// Returns the user profile only after the server validates that cookie.
+  Future<Map<String, dynamic>?> restoreWebSession() async {
+    if (!_canUseBrowserCookieSession) return null;
+    lastError = null;
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/auth/session'))
+          .timeout(const Duration(seconds: 5));
+      if (res.statusCode != 200) {
+        _cookieSessionAuthenticated = false;
+        return null;
+      }
+      final decoded = jsonDecode(res.body);
+      if (decoded is! Map<String, dynamic> || decoded['user'] is! Map) {
+        lastError = 'The shop API returned an invalid browser session.';
+        return null;
+      }
+      _authToken = null;
+      _authTokenExpiresAt = null;
+      _cookieSessionAuthenticated = true;
+      isConnected = true;
+      return Map<String, dynamic>.from(decoded['user'] as Map);
+    } catch (e) {
+      _cookieSessionAuthenticated = false;
+      isConnected = false;
+      lastError = 'Could not restore the browser session from the shop API.';
+      debugPrint('API session restore failed: $e');
+      return null;
+    }
+  }
+
+  Future<void> logout() async {
+    try {
+      await http
+          .post(Uri.parse('$baseUrl/auth/logout'), headers: _headers)
+          .timeout(const Duration(seconds: 3));
+    } catch (e) {
+      debugPrint('API logout request failed: $e');
+    } finally {
+      _authToken = null;
+      _authTokenExpiresAt = null;
+      _cookieSessionAuthenticated = false;
     }
   }
 

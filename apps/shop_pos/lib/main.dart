@@ -43,10 +43,7 @@ void main() async {
   final state = PosState();
   await state.loadInitialState();
   ApiService.instance.configure(state.serverUrl);
-  if (state.currentLoggedInUser != null) {
-    state.catalogueSyncMessage =
-        'Local-only mode: lock the till and re-enter your PIN to sync the shop catalogue.';
-  }
+  await state.restoreWebSession();
   final themeController = ThemeController();
   await themeController.load();
   runApp(RetailPosApp(state: state, themeController: themeController));

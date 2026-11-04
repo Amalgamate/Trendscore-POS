@@ -1034,6 +1034,13 @@ class PosState extends ChangeNotifier {
   Future<void> _finishAuthenticatedLogin(PosUser user) async {
     catalogueSyncMessage =
         'Signed in as ${user.roleDisplay}. Refreshing shop data…';
+    // Load credit accounts first so a refreshed Credit screen replaces its
+    // empty-state placeholder as soon as the session cookie is validated.
+    try {
+      await refreshCustomerAccounts();
+    } catch (e) {
+      debugPrint('Could not load customers from API: $e');
+    }
     if (user.role == PosUserRole.owner || user.role == PosUserRole.superAdmin) {
       final remoteUsers = await ApiService.instance.getStaffUsers();
       if (remoteUsers != null) {
@@ -1048,13 +1055,6 @@ class PosState extends ChangeNotifier {
     if (receiptSetting != null) {
       showCustomerNameOnReceipt = receiptSetting;
       await _persistAll();
-    }
-
-    // Replace both active and archived customer caches from the server.
-    try {
-      await refreshCustomerAccounts();
-    } catch (e) {
-      debugPrint('Could not load customers from API: $e');
     }
 
     // Load recent sales from API
@@ -1073,6 +1073,9 @@ class PosState extends ChangeNotifier {
       // keep existing list (empty or cached)
     }
 
+    // Session hydration may finish after the cashier signs out. Never let an
+    // older background refresh restore that user into local session storage.
+    if (currentLoggedInUser?.id != user.id) return;
     notifyListeners();
     await persistSession(user);
   }
@@ -1099,6 +1102,7 @@ class PosState extends ChangeNotifier {
   bool catalogueSyncing = false;
   late List<PosCustomer> customers;
   List<PosCustomer> archivedCustomers = [];
+  bool customerAccountsLoading = false;
   final Map<String, int> customerLedgerTotals = {};
   late List<SaleRecord> sales;
   List<SaleRecord> get salesLedger => sales;
@@ -2071,16 +2075,24 @@ class PosState extends ChangeNotifier {
 
   Future<bool> refreshCustomerAccounts() async {
     if (!ApiService.instance.hasToken) return false;
-    final responses = await Future.wait([
-      ApiService.instance.getCustomers(status: 'ACTIVE'),
-      ApiService.instance.getCustomers(status: 'ARCHIVED'),
-    ]);
-    if (responses[0] == null || responses[1] == null) return false;
-    replaceCustomerAccounts(
-      active: responses[0]!.map(PosCustomer.fromApi).toList(),
-      archived: responses[1]!.map(PosCustomer.fromApi).toList(),
-    );
-    return true;
+    if (customerAccountsLoading) return false;
+    customerAccountsLoading = true;
+    notifyListeners();
+    try {
+      final responses = await Future.wait([
+        ApiService.instance.getCustomers(status: 'ACTIVE'),
+        ApiService.instance.getCustomers(status: 'ARCHIVED'),
+      ]);
+      if (responses[0] == null || responses[1] == null) return false;
+      replaceCustomerAccounts(
+        active: responses[0]!.map(PosCustomer.fromApi).toList(),
+        archived: responses[1]!.map(PosCustomer.fromApi).toList(),
+      );
+      return true;
+    } finally {
+      customerAccountsLoading = false;
+      notifyListeners();
+    }
   }
 
   void selectCustomerLedgerPage(
@@ -2305,7 +2317,42 @@ class PosState extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    await ApiService.instance.logout();
     await persistSession(null);
+  }
+
+  /// Reconnects a browser refresh to the server-validated HttpOnly cookie.
+  /// Native clients keep using their platform sign-in flow.
+  Future<bool> restoreWebSession() async {
+    if (!kIsWeb) return false;
+    final prefs = await SharedPreferences.getInstance();
+    final lastActive = prefs.getInt('session_last_active');
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final maxIdle = Duration(minutes: sessionTimeoutMinutes).inMilliseconds;
+    if (lastActive == null || now - lastActive > maxIdle || lastActive > now) {
+      await ApiService.instance.logout();
+      await prefs.remove('session_user_id');
+      await prefs.remove('session_user_json');
+      await prefs.remove('session_last_active');
+      return false;
+    }
+
+    final userJson = await ApiService.instance.restoreWebSession();
+    if (userJson == null) return false;
+    final user = PosUser.fromApi(userJson);
+    if (user.mustChangePin) {
+      await ApiService.instance.logout();
+      await prefs.remove('session_user_id');
+      await prefs.remove('session_user_json');
+      await prefs.remove('session_last_active');
+      return false;
+    }
+
+    currentLoggedInUser = user;
+    activeCashier = user.fullName;
+    notifyListeners();
+    unawaited(_finishAuthenticatedLogin(user));
+    return true;
   }
 
   // ─── Persistence Methods ───────────────────────────────────────────────
@@ -2402,13 +2449,14 @@ class PosState extends ChangeNotifier {
         );
       }
 
-      // The JWT is intentionally memory-only. A cached user object is not an
-      // authentication credential, so every browser restart requires a PIN.
+      // User JSON is display cache only, never an authentication credential.
+      // The browser restores auth only when the API validates its HttpOnly
+      // cookie and the saved activity timestamp is still inside the idle limit.
       currentLoggedInUser = null;
       savedTabIndex = prefs.getInt('session_active_tab') ?? 0;
       await prefs.remove('session_user_id');
       await prefs.remove('session_user_json');
-      await prefs.remove('session_last_active');
+      if (!kIsWeb) await prefs.remove('session_last_active');
 
       sessionLoaded = true;
       notifyListeners();

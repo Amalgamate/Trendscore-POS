@@ -5,14 +5,14 @@
  * Rate limiting must be applied at the reverse-proxy layer; this
  * handler trusts that the caller has already been rate-limited.
  */
-import type { Router } from 'express';
+import type { Router, Response } from 'express';
 import { Router as ExpressRouter } from 'express';
 import { z } from 'zod';
 import jwt from 'jsonwebtoken';
 import argon2 from 'argon2';
 import { prisma } from '../../lib/prisma';
 import { parseBody, send200, send201, sendError } from '../../lib/http';
-import { requireAuth, requireRole } from '../../lib/auth.middleware';
+import { requireAuth, requireRole, SESSION_COOKIE_NAME } from '../../lib/auth.middleware';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-production';
 const JWT_EXPIRY = process.env.JWT_EXPIRY ?? '8h'; // one shift
@@ -54,6 +54,25 @@ function normalizePhone(input: string): string {
 
 function safeUser(user: { id: string; fullName: string; phone: string; role: string; active: boolean }) {
   return { id: user.id, fullName: user.fullName, phone: user.phone, role: user.role, active: user.active };
+}
+
+function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict' as const,
+    path: '/',
+  };
+}
+
+function sessionCookieMaxAge(token: string): number {
+  const payload = jwt.decode(token);
+  const exp = typeof payload === 'object' && payload !== null ? payload.exp : undefined;
+  return typeof exp === 'number' ? Math.max(0, exp * 1000 - Date.now()) : 8 * 60 * 60 * 1000;
+}
+
+function clearSessionCookie(res: Response) {
+  res.clearCookie(SESSION_COOKIE_NAME, sessionCookieOptions());
 }
 
 export function authRouter(): Router {
@@ -98,8 +117,16 @@ export function authRouter(): Router {
         { expiresIn: JWT_EXPIRY } as jwt.SignOptions,
       );
 
+      const useHttpOnlyCookie = req.get('x-use-httponly-cookie') === 'true';
+      if (useHttpOnlyCookie) {
+        res.cookie(SESSION_COOKIE_NAME, token, {
+          ...sessionCookieOptions(),
+          maxAge: sessionCookieMaxAge(token),
+        });
+      }
+
       return send200(res, {
-        token,
+        ...(!useHttpOnlyCookie ? { token } : {}),
         user: {
           id: user.id,
           fullName: user.fullName,
@@ -115,6 +142,38 @@ export function authRouter(): Router {
       console.error('auth/login error:', err);
       return sendError(res, 500, 'SERVER_ERROR', 'An unexpected error occurred.');
     }
+  });
+
+  // The browser can re-establish its in-memory session after a refresh using
+  // the HttpOnly cookie. The account identity always comes from the database.
+  router.get('/session', requireAuth, async (_req, res) => {
+    const auth = res.locals.auth as { userId: string };
+    try {
+      const user = await prisma.user.findUnique({
+        where: { id: auth.userId },
+        select: {
+          id: true,
+          fullName: true,
+          phone: true,
+          role: true,
+          active: true,
+          mustChangePin: true,
+        },
+      });
+      if (!user || !user.active) {
+        clearSessionCookie(res);
+        return sendError(res, 401, 'INVALID_TOKEN', 'This staff account is inactive or no longer exists.');
+      }
+      return send200(res, { user });
+    } catch (err) {
+      console.error('auth/session error:', err);
+      return sendError(res, 500, 'SERVER_ERROR', 'Could not restore the browser session.');
+    }
+  });
+
+  router.post('/logout', (_req, res) => {
+    clearSessionCookie(res);
+    return send200(res, { ok: true });
   });
 
   router.post('/change-pin', requireAuth, async (req, res) => {

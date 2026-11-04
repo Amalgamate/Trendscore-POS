@@ -8,6 +8,22 @@ import { sendError } from './http';
 import { prisma } from './prisma';
 
 const JWT_SECRET = process.env.JWT_SECRET ?? 'dev-secret-change-in-production';
+export const SESSION_COOKIE_NAME = 'retailpos_session';
+
+function cookieValue(req: Request, name: string): string | null {
+  const prefix = `${name}=`;
+  const value = req.headers.cookie
+    ?.split(';')
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix))
+    ?.slice(prefix.length);
+  if (!value) return null;
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return null;
+  }
+}
 
 export interface AuthLocals {
   userId: string;
@@ -17,11 +33,25 @@ export interface AuthLocals {
 
 export async function requireAuth(req: Request, res: Response, next: NextFunction) {
   const header = req.headers.authorization;
-  if (!header?.startsWith('Bearer ')) {
+  const bearerToken = header?.startsWith('Bearer ') ? header.slice(7) : null;
+  const sessionToken = cookieValue(req, SESSION_COOKIE_NAME);
+  const token = bearerToken ?? sessionToken;
+  if (!token) {
     return sendError(res, 401, 'NO_TOKEN', 'Authorization header missing or malformed.');
   }
 
-  const token = header.slice(7);
+  // Cookie-authenticated writes must originate from a known POS origin. Native
+  // clients use bearer tokens and are not subject to browser cookie CSRF rules.
+  if (sessionToken && !bearerToken && !['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    const allowedOrigins = (process.env.CORS_ORIGIN ?? 'http://localhost:8080,http://localhost:3000')
+      .split(',')
+      .map((origin) => origin.trim());
+    const origin = req.get('origin');
+    if (!origin || !allowedOrigins.includes(origin)) {
+      return sendError(res, 403, 'INVALID_ORIGIN', 'This request did not come from an approved POS origin.');
+    }
+  }
+
   let payload: jwt.JwtPayload;
   try {
     payload = jwt.verify(token, JWT_SECRET) as jwt.JwtPayload;

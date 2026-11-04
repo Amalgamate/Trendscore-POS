@@ -1224,11 +1224,26 @@ class _CustomersViewState extends State<CustomersView> {
           const Divider(height: 1),
           Expanded(
             child: _filteredCustomers.isEmpty
-                ? const Center(
-                    child: Text(
-                      'No customers found',
-                      style: TextStyle(color: AppColors.text_tertiary),
-                    ),
+                ? Center(
+                    child: widget.state.customerAccountsLoading
+                        ? const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
+                              ),
+                              SizedBox(width: 10),
+                              Text('Loading customer accounts…'),
+                            ],
+                          )
+                        : const Text(
+                            'No customers found',
+                            style: TextStyle(color: AppColors.text_tertiary),
+                          ),
                   )
                 : ListView.separated(
                     itemCount: _filteredCustomers.length,

@@ -32,8 +32,79 @@
 
   <title>ShopSmart POS</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    #app-update-pill {
+      position: fixed;
+      z-index: 10000;
+      top: 12px;
+      right: 286px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 7px 8px 7px 14px;
+      border: 1px solid #a7f3d0;
+      border-radius: 999px;
+      background: #ecfdf5;
+      box-shadow: 0 4px 16px rgb(15 23 42 / 18%);
+      color: #14532d;
+      font: 600 13px/1.2 Inter, system-ui, sans-serif;
+    }
+    #app-update-pill[hidden] { display: none; }
+    #app-update-pill button {
+      border: 0;
+      border-radius: 999px;
+      padding: 8px 12px;
+      background: #0f766e;
+      color: white;
+      cursor: pointer;
+      font: inherit;
+    }
+    #app-update-pill button:focus-visible {
+      outline: 3px solid #14b8a6;
+      outline-offset: 2px;
+    }
+    @media (max-width: 767px) {
+      #app-update-pill {
+        top: 62px;
+        right: 8px;
+        max-width: calc(100vw - 16px);
+        gap: 8px;
+        padding: 6px;
+        font-size: 12px;
+      }
+      #app-update-pill button { padding: 7px 9px; }
+    }
+  </style>
 </head>
 <body>
+  <div id="app-update-pill" role="status" aria-live="polite" hidden>
+    <span>New update ready</span>
+    <button type="button" id="app-update-restart">Restart to apply</button>
+  </div>
+  <script>
+    (() => {
+      if (!('serviceWorker' in navigator)) return;
+      const pill = document.getElementById('app-update-pill');
+      const restart = document.getElementById('app-update-restart');
+      let activeController = navigator.serviceWorker.controller;
+
+      // Flutter activates an updated worker as soon as its new app shell is
+      // cached. The existing tab keeps running its old Dart bundle until reload.
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        const nextController = navigator.serviceWorker.controller;
+        if (activeController && nextController !== activeController) {
+          pill.hidden = false;
+        }
+        activeController = nextController;
+      });
+
+      restart.addEventListener('click', () => window.location.reload());
+      navigator.serviceWorker.ready.then((registration) => {
+        registration.update().catch(() => {});
+        window.setInterval(() => registration.update().catch(() => {}), 5 * 60 * 1000);
+      }).catch(() => {});
+    })();
+  </script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
