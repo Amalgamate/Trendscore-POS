@@ -327,21 +327,38 @@ class ApiService {
 
   /// Fetch products catalog
   Future<List<Map<String, dynamic>>?> getProducts() async {
+    final products = <Map<String, dynamic>>[];
+    var page = 1;
+    var pages = 1;
     try {
-      final res = await http
-          .get(
-            Uri.parse('$baseUrl/products?limit=200&active=all'),
-            headers: _headers,
-          )
-          .timeout(const Duration(seconds: 5));
-      if (res.statusCode == 200) {
-        final json = jsonDecode(res.body);
-        lastError = null;
-        return List<Map<String, dynamic>>.from(json['data'] ?? []);
-      }
-      lastError =
-          _messageFromResponse(res.body) ??
-          'Could not fetch products (${res.statusCode}).';
+      do {
+        final uri = Uri.parse('$baseUrl/products').replace(
+          queryParameters: {'limit': '200', 'active': 'all', 'page': '$page'},
+        );
+        final res = await http
+            .get(uri, headers: _headers)
+            .timeout(const Duration(seconds: 10));
+        if (res.statusCode != 200) {
+          lastError =
+              _messageFromResponse(res.body) ??
+              'Could not fetch products (${res.statusCode}).';
+          return null;
+        }
+
+        final decoded = jsonDecode(res.body) as Map<String, dynamic>;
+        final data = decoded['data'] as List? ?? const [];
+        products.addAll(
+          data.map((item) => Map<String, dynamic>.from(item as Map)),
+        );
+        final meta = decoded['meta'] as Map<String, dynamic>?;
+        pages =
+            (meta?['pages'] as num?)?.toInt() ??
+            (data.length == 200 ? page + 1 : page);
+        page++;
+      } while (page <= pages);
+
+      lastError = null;
+      return products;
     } catch (e) {
       lastError = 'Could not fetch products from the shop API.';
       debugPrint('API getProducts error: $e');
